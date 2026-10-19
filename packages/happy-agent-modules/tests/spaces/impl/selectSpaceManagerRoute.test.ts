@@ -15,32 +15,23 @@ const MODELS = [
 
 describe("selectSpaceManagerRoute", () => {
     it("runs on the cheapest model of Happy's own account at the least effort", () => {
-        expect(selectSpaceManagerRoute(MODELS, undefined, "codex")).toEqual({
+        expect(selectSpaceManagerRoute(MODELS, "codex")).toEqual({
             providerId: "codex",
             model: "openai/gpt-6-luna",
             effort: "low",
         });
-        expect(selectSpaceManagerRoute(MODELS, undefined, "claude")).toEqual({
+        expect(selectSpaceManagerRoute(MODELS, "claude")).toEqual({
             providerId: "claude",
             model: "anthropic/haiku-5-5",
             effort: "off",
         });
     });
 
-    it("uses the configured model while it is offered, and falls back when it is not", () => {
-        expect(
-            selectSpaceManagerRoute(
-                MODELS,
-                { providerId: "claude", modelId: "anthropic/opus-5-5", effort: "high" },
-                "codex",
-            ),
-        ).toEqual({ providerId: "claude", model: "anthropic/opus-5-5", effort: "high" });
-        expect(
-            selectSpaceManagerRoute(
-                MODELS,
-                { providerId: "claude", modelId: "anthropic/retired" },
-                undefined,
-            ),
-        ).toEqual({ providerId: "codex", model: "openai/gpt-6-luna", effort: "low" });
+    it("falls back to the installation's default account when Happy's is unknown", () => {
+        expect(selectSpaceManagerRoute(MODELS, undefined)).toEqual({
+            providerId: "codex",
+            model: "openai/gpt-6-luna",
+            effort: "low",
+        });
     });
 });

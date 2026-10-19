@@ -9,7 +9,7 @@ afterEach(async () => {
 
 interface Space {
     readonly id: string;
-    readonly target: { readonly kind: string; readonly id: string } | null;
+    readonly target: { readonly kind: string; readonly id: string };
 }
 interface StemCell {
     readonly space: Space;
@@ -37,7 +37,7 @@ describe("archived work", () => {
         // A chat is archived through its task; the agent API refuses task agents.
         const viaTask = await gym.http.ok<StemCell>("POST", "/v0/spaces/stem-cells", {});
         await gym.send("Plan movie night.", { sessionId: viaTask.agent.id });
-        const taskId = viaTask.space.target!.id;
+        const taskId = viaTask.space.target.id;
         const task = (await gym.client.getTask(taskId)).task;
         await gym.client.archiveTask(taskId, { ifMatch: task.version });
         await gym.waitUntil(
@@ -51,7 +51,7 @@ describe("archived work", () => {
         const archived = (await gym.client.getTask(taskId)).task;
         await gym.client.unarchiveTask(taskId, { ifMatch: archived.version });
         const back = await gym.waitUntil(async () => {
-            const row = (await rows()).find((candidate) => candidate.target?.id === taskId);
+            const row = (await rows()).find((candidate) => candidate.target.id === taskId);
             return row;
         }, "the unarchived task's row");
         expect(back).toMatchObject({ placement: "pending", visibility: "shown" });

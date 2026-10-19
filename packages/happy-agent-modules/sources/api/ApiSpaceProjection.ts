@@ -37,11 +37,6 @@ export const sectionDisclosureRequestSchema = Type.Object(
     { additionalProperties: false },
 );
 
-export const spaceFocusRequestSchema = Type.Object(
-    { spaceId: Type.Union([cuid2Schema, Type.Null()]) },
-    { additionalProperties: false },
-);
-
 /** The person is mid-interaction (hold batches), or calm (a gesture finished, or idle). */
 export const spaceAttentionRequestSchema = Type.Object(
     { state: Type.Union([Type.Literal("interacting"), Type.Literal("calm")]) },
@@ -51,37 +46,21 @@ export const spaceAttentionRequestSchema = Type.Object(
 /** A body carrying nothing but an optional mutation ID: tidy, discard. */
 export const spaceTidyRequestSchema = Type.Object({ mutationId }, { additionalProperties: false });
 
-export const spaceManagerRequestSchema = Type.Object(
-    {
-        model: Type.Union([
-            Type.Object(
-                {
-                    providerId: Type.String({ minLength: 1, maxLength: 128 }),
-                    modelId: Type.String({ minLength: 1, maxLength: 256 }),
-                    effort: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-                },
-                { additionalProperties: false },
-            ),
-            Type.Null(),
-        ]),
-    },
-    { additionalProperties: false },
-);
-
-/** One sidebar row as clients see it: stored placement plus its content resolved live. */
+/**
+ * One sidebar row as clients see it: stored placement plus its content resolved live. A row whose
+ * content cannot be opened is not shown at all.
+ */
 export function spaceResource(
     space: SpaceRecord,
     description: SpaceDescription,
-): Record<string, unknown> {
+): Record<string, unknown> | undefined {
     const target = description.target;
+    if (target === undefined) return undefined;
     return {
         id: space.id,
-        ownerUserId: space.ownerUserId,
         role: space.role,
         // Work that has not named itself yet has no title; clients label it themselves.
-        title: description.named ? description.title : "",
-        named: description.named,
-        name: space.name ?? null,
+        title: description.named ? description.title : null,
         icon:
             space.icon === undefined
                 ? null
@@ -90,26 +69,17 @@ export function spaceResource(
                       ? null
                       : { type: "image", url: description.imageUrl }
                   : space.icon,
-        contents: space.contents,
-        target:
-            target === undefined
-                ? null
-                : {
-                      kind: target.kind,
-                      id: target.id,
-                      agentId: target.agentId ?? null,
-                      workspaceId: target.workspaceId ?? null,
-                      ...(target.path === undefined ? {} : { path: target.path }),
-                  },
-        agentId: target?.agentId ?? null,
+        target: {
+            kind: target.kind,
+            id: target.id,
+            agentId: target.agentId ?? null,
+            workspaceId: target.workspaceId ?? null,
+        },
         sectionId: space.sectionId ?? null,
         orderKey: space.orderKey,
         placement: space.placement,
         visibility: space.visibility,
         working: description.working,
-        archived: description.archived,
-        lastActivityAt: description.lastActivityAt ?? null,
-        manualAt: space.manualAt ?? null,
         version: space.version,
         createdAt: space.createdAt,
         updatedAt: space.updatedAt,
@@ -119,9 +89,7 @@ export function spaceResource(
 export function spaceSectionResource(section: SpaceSectionRecord): Record<string, unknown> {
     return {
         id: section.id,
-        ownerUserId: section.ownerUserId,
         name: section.name,
-        context: section.context ?? null,
         visibleCount: section.visibleCount ?? null,
         collapsed: section.collapsed,
         tailExpanded: section.tailExpanded,
@@ -133,15 +101,22 @@ export function spaceSectionResource(section: SpaceSectionRecord): Record<string
 }
 
 export function spaceBatchResource(batch: SpaceBatch): Record<string, unknown> {
+    const position = (at: SpaceBatch["changes"][number]["from"]) => ({
+        sectionId: at.sectionId,
+        sectionName: at.sectionName,
+        index: at.index,
+        visibility: at.visibility,
+    });
     return {
         id: batch.id,
-        ownerUserId: batch.ownerUserId,
-        reason: batch.reason,
         note: batch.note,
-        noteAgentId: batch.noteAgentId ?? null,
         noteMessageId: batch.noteMessageId ?? null,
-        changes: batch.changes,
-        sections: batch.sections,
+        changes: batch.changes.map((change) => ({
+            spaceId: change.spaceId,
+            title: change.title,
+            from: position(change.from),
+            to: position(change.to),
+        })),
         appliedAt: batch.appliedAt,
     };
 }

@@ -1,8 +1,6 @@
 import type { AgentModel } from "@slopus/happy-agent-base";
 import type { SessionReasoningEffort } from "@slopus/happy-providers";
 
-import type { SpaceManagerModel } from "../Space.js";
-
 /** The model, account, and effort a manager turn runs on. */
 export interface SpaceManagerRoute {
     readonly providerId: string;
@@ -23,30 +21,14 @@ const ECONOMICAL_MODEL_IDS = [
 const CHEAPEST_EFFORTS: readonly SessionReasoningEffort[] = ["off", "minimal", "low", "medium"];
 
 /**
- * Picks what the manager runs on. A configured model wins while the installation still offers
- * it. Otherwise the cheapest model of the account Happy runs on, because only that account is
- * known to be signed in and paid for, and then of the installation's default account.
+ * Picks what the manager runs on: the cheapest model of the account Happy runs on, because only
+ * that account is known to be signed in and paid for, and then of the installation's default
+ * account.
  */
 export function selectSpaceManagerRoute(
     models: readonly AgentModel[],
-    configured: SpaceManagerModel | undefined,
     preferredProviderId: string | undefined,
 ): SpaceManagerRoute | undefined {
-    if (configured !== undefined) {
-        const model = models.find(
-            (candidate) =>
-                candidate.providerId === configured.providerId &&
-                candidate.id === configured.modelId,
-        );
-        if (model !== undefined) {
-            const effort = model.effortLevels.find((level) => level === configured.effort);
-            return {
-                providerId: model.providerId,
-                model: model.id,
-                effort: effort ?? cheapestEffort(model),
-            };
-        }
-    }
     const served =
         servedBy(models, preferredProviderId) ?? servedBy(models, models[0]?.providerId) ?? models;
     const model =

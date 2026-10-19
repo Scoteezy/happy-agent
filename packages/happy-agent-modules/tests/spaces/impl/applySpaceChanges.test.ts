@@ -11,7 +11,7 @@ function row(id: string, orderKey: string, extra: Partial<SpaceRecord> = {}): Sp
         id,
         ownerUserId: OWNER,
         role: "item",
-        contents: [{ kind: "agent", agentId: `${id}agent` }],
+        contents: [{ kind: "task", taskId: `${id}task`, agentId: `${id}agent` }],
         orderKey,
         placement: "settled",
         visibility: "shown",
@@ -50,7 +50,7 @@ describe("applySpaceChanges", () => {
             [],
             [
                 { type: "section", sectionId: "secnew", create: true, name: "Releases" },
-                { type: "place", spaceId: "rowa", sectionId: "secnew", reason: "to group it" },
+                { type: "place", spaceId: "rowa", sectionId: "secnew" },
             ],
             titles,
             NOW,
@@ -65,7 +65,6 @@ describe("applySpaceChanges", () => {
             {
                 spaceId: "rowa",
                 title: "Release notes",
-                reason: "to group it",
                 from: {
                     sectionId: null,
                     sectionName: null,

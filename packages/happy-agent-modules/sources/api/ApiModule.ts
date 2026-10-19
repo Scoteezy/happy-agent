@@ -367,8 +367,6 @@ import {
     sectionDisclosureRequestSchema,
     spaceBatchResource,
     spaceAttentionRequestSchema,
-    spaceFocusRequestSchema,
-    spaceManagerRequestSchema,
     spaceResource,
     spaceSectionResource,
     spaceTidyRequestSchema,
@@ -6792,7 +6790,11 @@ export class ApiModule implements AgentModule {
         return owner;
     }
 
-    async #spaceResource(ctx: Context, space: SpaceRecord): Promise<Record<string, unknown>> {
+    /** A row as clients see it, or `undefined` for a row with nothing to open. */
+    async #spaceResource(
+        ctx: Context,
+        space: SpaceRecord,
+    ): Promise<Record<string, unknown> | undefined> {
         const spaces = this.#spaces;
         if (spaces === undefined) throw new Error("Spaces are not available.");
         return spaceResource(space, await spaces.describe(ctx, space));
@@ -6802,85 +6804,33 @@ export class ApiModule implements AgentModule {
         // A person's sidebar is private: in team mode only its owner sees its changes.
         const owner = event.ownerUserId === "standalone" ? undefined : event.ownerUserId;
         const echo = event.mutationId === undefined ? {} : { mutationId: event.mutationId };
-        const revision = { revision: event.revision };
+        const append = (type: string, payload: Record<string, unknown>): void => {
+            this.#journal.append(type, { ...payload, ...echo }, event.at, owner);
+        };
         switch (event.type) {
             case "space_created":
-                this.#journal.append(
-                    "space.created",
-                    { space: await this.#spaceResource(ctx, event.space), ...revision, ...echo },
-                    event.at,
-                    owner,
-                );
+            case "space_updated": {
+                const space = await this.#spaceResource(ctx, event.space);
+                if (space === undefined) return;
+                append(event.type === "space_created" ? "space.created" : "space.updated", {
+                    space,
+                });
                 return;
-            case "space_updated":
-                this.#journal.append(
-                    "space.updated",
-                    {
-                        space: await this.#spaceResource(ctx, event.space),
-                        previousVersion: event.previousVersion,
-                        ...revision,
-                        ...echo,
-                    },
-                    event.at,
-                    owner,
-                );
-                return;
+            }
             case "space_removed":
-                this.#journal.append(
-                    "space.removed",
-                    { spaceId: event.spaceId, ...revision, ...echo },
-                    event.at,
-                    owner,
-                );
+                append("space.removed", { spaceId: event.spaceId });
                 return;
             case "section_created":
-                this.#journal.append(
-                    "space.section.created",
-                    { section: spaceSectionResource(event.section), ...revision, ...echo },
-                    event.at,
-                    owner,
-                );
+                append("space.section.created", { section: spaceSectionResource(event.section) });
                 return;
             case "section_updated":
-                this.#journal.append(
-                    "space.section.updated",
-                    {
-                        section: spaceSectionResource(event.section),
-                        previousVersion: event.previousVersion,
-                        ...revision,
-                        ...echo,
-                    },
-                    event.at,
-                    owner,
-                );
+                append("space.section.updated", { section: spaceSectionResource(event.section) });
                 return;
             case "section_removed":
-                this.#journal.append(
-                    "space.section.removed",
-                    { sectionId: event.sectionId, ...revision },
-                    event.at,
-                    owner,
-                );
+                append("space.section.removed", { sectionId: event.sectionId });
                 return;
             case "batch_applied":
-                this.#journal.append(
-                    "space.batch.applied",
-                    { batch: spaceBatchResource(event.batch), ...revision },
-                    event.at,
-                    owner,
-                );
-                return;
-            case "batch_queued":
-                this.#journal.append(
-                    "space.batch.queued",
-                    {
-                        pendingBatch:
-                            event.pendingChanges === 0 ? null : { changes: event.pendingChanges },
-                        ...revision,
-                    },
-                    event.at,
-                    owner,
-                );
+                append("space.batch.applied", { batch: spaceBatchResource(event.batch) });
                 return;
         }
     }
@@ -6898,14 +6848,14 @@ export class ApiModule implements AgentModule {
             if (request.method === "GET" && url.pathname === "/v0/spaces") {
                 const cursor = this.#journal.cursor();
                 const snapshot = await spaces.snapshot(ctx, owner);
+                const rows: Record<string, unknown>[] = [];
+                for (const space of snapshot.spaces) {
+                    const resource = await this.#spaceResource(ctx, space);
+                    if (resource !== undefined) rows.push(resource);
+                }
                 sendJson(response, 200, {
-                    spaces: await Promise.all(
-                        snapshot.spaces.map(async (space) => await this.#spaceResource(ctx, space)),
-                    ),
+                    spaces: rows,
                     sections: snapshot.sections.map(spaceSectionResource),
-                    pendingBatch:
-                        snapshot.pendingChanges === 0 ? null : { changes: snapshot.pendingChanges },
-                    revision: snapshot.revision,
                     cursor,
                 });
                 return true;
@@ -6924,12 +6874,6 @@ export class ApiModule implements AgentModule {
                 const body = await bodyAs(request, createStemCellRequestSchema, "stem cell");
                 return await this.#createStemCell(ctx, response, owner, body);
             }
-            if (request.method === "POST" && url.pathname === "/v0/spaces/focus") {
-                const body = await bodyAs(request, spaceFocusRequestSchema, "focus report");
-                spaces.focus(owner, body.spaceId);
-                response.writeHead(204).end();
-                return true;
-            }
             if (request.method === "POST" && url.pathname === "/v0/spaces/attention") {
                 const body = await bodyAs(request, spaceAttentionRequestSchema, "attention report");
                 const batch = await spaces.reportAttention(ctx, owner, body.state);
@@ -6944,13 +6888,7 @@ export class ApiModule implements AgentModule {
                     body.mutationId,
                     async () => await spaces.requestTidy(ctx, owner),
                 );
-                sendJson(response, 202, { requested: true });
-                return true;
-            }
-            if (request.method === "PUT" && url.pathname === "/v0/spaces/manager") {
-                const body = await bodyAs(request, spaceManagerRequestSchema, "manager settings");
-                await spaces.setManagerModel(ctx, owner, body.model ?? undefined);
-                sendJson(response, 200, { model: body.model });
+                response.writeHead(202).end();
                 return true;
             }
             const disclosure = /^\/v0\/spaces\/sections\/([a-z][a-z0-9]*)\/collapse$/.exec(
@@ -6995,15 +6933,6 @@ export class ApiModule implements AgentModule {
                 const body = await bodyAs(request, spaceTidyRequestSchema, "discard");
                 await spaces.discard(ctx, owner, discard[1] as string, body.mutationId);
                 response.writeHead(204).end();
-                return true;
-            }
-            const direct = /^\/v0\/spaces\/([a-z][a-z0-9]*)$/.exec(url.pathname);
-            if (direct !== null && request.method === "GET") {
-                const space = await spaces.get(ctx, direct[1] as string);
-                if (space === undefined || space.ownerUserId !== owner) {
-                    throw notFound("The space was not found.");
-                }
-                sendJson(response, 200, { space: await this.#spaceResource(ctx, space) });
                 return true;
             }
         } catch (error: unknown) {

@@ -33,15 +33,12 @@ import { AGENT_MESSAGE_ORIGIN_METADATA, isUserOriginMetadata } from "../impl/mes
 
 import {
     SPACE_STANDALONE_OWNER,
-    spaceManagerModelSchema,
     spaceOwnerIdSchema,
     SpaceConflictError,
-    SpaceInputError,
     SpaceNotFoundError,
     type SpaceBatch,
     type SpaceDescription,
     type SpaceIconSlug,
-    type SpaceManagerModel,
     type SpaceOwnerId,
     type SpaceOwnerState,
     type SpacePendingChange,
@@ -134,7 +131,6 @@ export class SpacesModule implements AgentModule {
     readonly #listeners = new Set<SpaceEventListener>();
     /** When each person last showed they were at work. Calm is judged from this; it need not survive a restart. */
     readonly #activeAt = new Map<SpaceOwnerId, number>();
-    readonly #focus = new Map<SpaceOwnerId, string | null>();
     /** When a client last said the person is mid-interaction (dragging, typing, navigating). */
     readonly #interactingSince = new Map<SpaceOwnerId, number>();
     /** People whose client signalled calm while their manager was still deciding. */
@@ -287,18 +283,15 @@ export class SpacesModule implements AgentModule {
     }
 
     /**
-     * A person's whole sidebar. The first read makes it: Happy, the hidden manager row, and a
-     * row for everything the person already has, folded until the manager's first tidy.
+     * A person's whole sidebar. The first read makes it: Happy, and a row for everything the
+     * person already has, folded until the manager's first tidy.
      */
     async snapshot(ctx: Context, ownerUserId: SpaceOwnerId): Promise<SpaceSnapshot> {
         return await ctx.inTx(async (txCtx) => {
             await this.#ensureOwner(txCtx, ownerUserId);
-            const state = await this.#ownerState(txCtx, ownerUserId);
             return {
                 spaces: sortForDisplay(await querySpaces(txCtx, ownerUserId)),
                 sections: await querySections(txCtx, ownerUserId),
-                pendingChanges: (await queryPendingChanges(txCtx, ownerUserId)).length,
-                revision: state.revision,
             };
         });
     }
@@ -318,10 +311,7 @@ export class SpacesModule implements AgentModule {
     /** Resolve a row's content for display: its live title, what a click opens, and its activity. */
     async describe(ctx: Context, space: SpaceRecord): Promise<SpaceDescription> {
         const primary = space.contents[0];
-        if (space.role === "manager") {
-            return blankDescription("Sidebar manager", undefined);
-        }
-        if (primary === undefined) return blankDescription(space.name ?? "Untitled", undefined);
+        if (primary === undefined) return blankDescription("Untitled", undefined);
         switch (primary.kind) {
             case "task": {
                 const task = await this.#tasks.get(ctx, primary.taskId);
@@ -353,22 +343,12 @@ export class SpacesModule implements AgentModule {
                     imageUrl: bot?.avatar === undefined ? undefined : `/v0/bots/${bot.id}/avatar`,
                 });
             }
-            case "agent": {
-                const config = await this.#requireAgents().config(ctx, primary.agentId);
-                return await this.#agentDescription(ctx, space, {
-                    title: config?.metadata?.title ?? "Conversation",
-                    named: true,
-                    target: { kind: "agent", id: primary.agentId, agentId: primary.agentId },
-                    archived: config === undefined,
-                    imageUrl: undefined,
-                });
-            }
             case "surface": {
                 const surface = (await this.#surfaces.list(ctx)).find(
                     (candidate) => candidate.id === primary.surfaceId,
                 );
                 return {
-                    title: space.name ?? surface?.name ?? "List",
+                    title: surface?.name ?? "List",
                     named: true,
                     target: { kind: "surface", id: primary.surfaceId },
                     archived: surface === undefined,
@@ -380,18 +360,6 @@ export class SpacesModule implements AgentModule {
                             : `/v0/surfaces/${surface.id}/image`,
                 };
             }
-            case "artifact":
-                return blankDescription(space.name ?? "Artifact", {
-                    kind: "artifact",
-                    id: primary.artifactId,
-                });
-            case "file":
-                return blankDescription(space.name ?? primary.path.split("/").at(-1) ?? "File", {
-                    kind: "file",
-                    id: `${primary.workspaceId}:${primary.path}`,
-                    workspaceId: primary.workspaceId,
-                    path: primary.path,
-                });
         }
     }
 
@@ -449,22 +417,16 @@ export class SpacesModule implements AgentModule {
                 createdAt: now,
                 updatedAt: now,
             };
+            // The seed may have made a row for this task already; the stem cell replaces it.
             if (previous !== undefined) {
-                // Hand the content over; the earlier row stays as an empty hidden record.
-                await updateSpace(
-                    txCtx,
-                    {
-                        ...previous,
-                        contents: [],
-                        visibility: "hidden",
-                        version: previous.version + 1,
-                        updatedAt: now,
-                    },
-                    previous.version,
-                );
+                await deleteSpace(txCtx, previous.id);
+                await deletePendingChanges(txCtx, ownerUserId, [`space:${previous.id}`]);
             }
             await insertSpace(txCtx, space);
             await this.#commitEvents(txCtx, ownerUserId, input.mutationId, [
+                ...(previous === undefined
+                    ? []
+                    : [{ type: "space_removed" as const, spaceId: previous.id }]),
                 { type: "space_created", space },
             ]);
             return space;
@@ -523,11 +485,7 @@ export class SpacesModule implements AgentModule {
             // A queued move of this row would undo the person's choice.
             await deletePendingChanges(txCtx, ownerUserId, [`space:${spaceId}`]);
             await this.#commitEvents(txCtx, ownerUserId, mutationId, [
-                { type: "space_updated", space: next, previousVersion: space.version },
-                {
-                    type: "batch_queued",
-                    pendingChanges: (await queryPendingChanges(txCtx, ownerUserId)).length,
-                },
+                { type: "space_updated", space: next },
             ]);
             return next;
         });
@@ -569,10 +527,6 @@ export class SpacesModule implements AgentModule {
             }
             await this.#commitEvents(txCtx, ownerUserId, mutationId, [
                 { type: "space_removed", spaceId: space.id },
-                {
-                    type: "batch_queued",
-                    pendingChanges: (await queryPendingChanges(txCtx, ownerUserId)).length,
-                },
             ]);
         });
     }
@@ -605,19 +559,10 @@ export class SpacesModule implements AgentModule {
             next.updatedAt = Date.now();
             await updateSection(txCtx, next, section.version);
             await this.#commitEvents(txCtx, ownerUserId, mutationId, [
-                { type: "section_updated", section: next, previousVersion: section.version },
+                { type: "section_updated", section: next },
             ]);
             return next;
         });
-    }
-
-    /**
-     * What the person is looking at. A report is a sign they are at work, so it defers the
-     * idle rule; it never applies a batch by itself and never changes anything in the sidebar.
-     */
-    focus(ownerUserId: SpaceOwnerId, spaceId: string | null): void {
-        this.#focus.set(ownerUserId, spaceId);
-        this.#activeAt.set(ownerUserId, Date.now());
     }
 
     /**
@@ -653,25 +598,6 @@ export class SpacesModule implements AgentModule {
                 ownerUserId,
                 "The person asked you to tidy the sidebar now. Read it with list_sidebar and apply the rules. Your changes apply as soon as you finish.",
             );
-        });
-    }
-
-    /** Choose the manager's model, or `undefined` for the cheapest model of Happy's account. */
-    async setManagerModel(
-        ctx: Context,
-        ownerUserId: SpaceOwnerId,
-        model: SpaceManagerModel | undefined,
-    ): Promise<void> {
-        if (model !== undefined && !Value.Check(spaceManagerModelSchema, model)) {
-            throw new SpaceInputError("The manager model is invalid.");
-        }
-        await ctx.inTx(async (txCtx) => {
-            await this.#ensureOwner(txCtx, ownerUserId);
-            const state = await this.#ownerState(txCtx, ownerUserId);
-            const next: SpaceOwnerState = { ...state };
-            if (model === undefined) delete next.managerModel;
-            else next.managerModel = model;
-            await writeOwnerState(txCtx, next);
         });
     }
 
@@ -711,7 +637,6 @@ export class SpacesModule implements AgentModule {
         }
         for (const section of snapshot.sections) {
             const extra = [
-                section.context,
                 section.visibleCount === undefined
                     ? undefined
                     : `shows first ${String(section.visibleCount)}`,
@@ -799,9 +724,6 @@ export class SpacesModule implements AgentModule {
             }
             await upsertPendingChange(txCtx, ownerUserId, target, stored, Date.now());
             const count = (await queryPendingChanges(txCtx, ownerUserId)).length;
-            await this.#commitEvents(txCtx, ownerUserId, undefined, [
-                { type: "batch_queued", pendingChanges: count },
-            ]);
             const what =
                 change.type === "section" && change.create
                     ? `Section ${change.sectionId} queued for creation`
@@ -862,7 +784,7 @@ export class SpacesModule implements AgentModule {
             };
             await updateSpace(txCtx, next, space.version);
             await this.#commitEvents(txCtx, ownerUserId, undefined, [
-                { type: "space_updated", space: next, previousVersion: space.version },
+                { type: "space_updated", space: next },
             ]);
             return `Icon set to ${slug}.`;
         });
@@ -883,14 +805,10 @@ export class SpacesModule implements AgentModule {
         },
     ): Promise<string> {
         return await ctx.inTx(async (txCtx) => {
-            let rows = (await querySpacesByAgent(txCtx, input.agentId)).filter(
-                (row) => row.role !== "manager",
-            );
+            let rows = await querySpacesByAgent(txCtx, input.agentId);
             if (rows.length === 0 && !this.#config.configuration.values.feature.team.enabled) {
                 await this.#ensureOwner(txCtx, SPACE_STANDALONE_OWNER);
-                rows = (await querySpacesByAgent(txCtx, input.agentId)).filter(
-                    (row) => row.role !== "manager",
-                );
+                rows = await querySpacesByAgent(txCtx, input.agentId);
             }
             if (rows.length === 0) {
                 return "That conversation is not in anyone's sidebar, so there is nothing to move.";
@@ -925,11 +843,7 @@ export class SpacesModule implements AgentModule {
      * Apply every queued change for one person as one batch: one transaction, one note in
      * Happy's chat, one recorded diff. Returns `undefined` when nothing was queued.
      */
-    async applyBatch(
-        ctx: Context,
-        ownerUserId: SpaceOwnerId,
-        reason: SpaceBatch["reason"],
-    ): Promise<SpaceBatch | undefined> {
+    async applyBatch(ctx: Context, ownerUserId: SpaceOwnerId): Promise<SpaceBatch | undefined> {
         return await ctx.inTx(async (txCtx) => {
             const state = await this.#ownerState(txCtx, ownerUserId);
             const pending = await queryPendingChanges(txCtx, ownerUserId);
@@ -969,28 +883,17 @@ export class SpacesModule implements AgentModule {
                     (section): SpaceEventDraft => ({ type: "section_created", section }),
                 ),
                 ...outcome.updatedSections.map(
-                    ({ section, previousVersion }): SpaceEventDraft => ({
-                        type: "section_updated",
-                        section,
-                        previousVersion,
-                    }),
+                    ({ section }): SpaceEventDraft => ({ type: "section_updated", section }),
                 ),
                 ...outcome.spaces.map(
-                    ({ space, previousVersion }): SpaceEventDraft => ({
-                        type: "space_updated",
-                        space,
-                        previousVersion,
-                    }),
+                    ({ space }): SpaceEventDraft => ({ type: "space_updated", space }),
                 ),
                 ...outcome.removedSectionIds.map(
                     (sectionId): SpaceEventDraft => ({ type: "section_removed", sectionId }),
                 ),
             ];
             if (outcome.changes.length === 0 && outcome.sectionChanges.length === 0) {
-                await this.#commitEvents(txCtx, ownerUserId, undefined, [
-                    ...events,
-                    { type: "batch_queued", pendingChanges: 0 },
-                ]);
+                await this.#commitEvents(txCtx, ownerUserId, undefined, events);
                 return undefined;
             }
             const note = composeSpaceBatchNote(outcome.changes, outcome.sectionChanges);
@@ -1020,9 +923,8 @@ export class SpacesModule implements AgentModule {
             const batch: SpaceBatch = {
                 id: createId(),
                 ownerUserId,
-                reason,
                 note,
-                ...(happyAgentId === undefined ? {} : { noteAgentId: happyAgentId, noteMessageId }),
+                ...(happyAgentId === undefined ? {} : { noteMessageId }),
                 changes: [...outcome.changes],
                 sections: [...outcome.sectionChanges],
                 appliedAt: now,
@@ -1031,7 +933,6 @@ export class SpacesModule implements AgentModule {
             await this.#commitEvents(txCtx, ownerUserId, undefined, [
                 ...events,
                 { type: "batch_applied", batch },
-                { type: "batch_queued", pendingChanges: 0 },
             ]);
             return batch;
         });
@@ -1082,7 +983,7 @@ export class SpacesModule implements AgentModule {
             return undefined;
         }
         this.#calmSignalled.delete(ownerUserId);
-        return await this.applyBatch(ctx, ownerUserId, requested ? "tidy" : "calm");
+        return await this.applyBatch(ctx, ownerUserId);
     }
 
     async #applyCalmBatches(ctx: Context): Promise<void> {
@@ -1118,11 +1019,9 @@ export class SpacesModule implements AgentModule {
     ): Promise<void> {
         const agents = this.#requireAgents();
         const { managerAgentId, happyAgentId } = await this.#ensureManager(ctx, ownerUserId);
-        const state = await this.#ownerState(ctx, ownerUserId);
         const happyMode = (await agents.config(ctx, happyAgentId))?.metadata?.["lastMode"];
         const route = selectSpaceManagerRoute(
             this.#config.models,
-            state.managerModel,
             Value.Check(messageModeSchema, happyMode) ? happyMode.providerId : undefined,
         );
         if (route === undefined) throw new Error("No model is available for the sidebar manager.");
@@ -1175,25 +1074,12 @@ export class SpacesModule implements AgentModule {
                 parent: happyRef.agentId,
             });
             await writeOwnerState(txCtx, { ...state, managerAgentId: created.id });
-            const row = await querySpaceByRef(txCtx, ownerUserId, "manager");
-            if (row !== undefined) {
-                await updateSpace(
-                    txCtx,
-                    {
-                        ...row,
-                        contents: [{ kind: "agent", agentId: created.id }],
-                        version: row.version + 1,
-                        updatedAt: Date.now(),
-                    },
-                    row.version,
-                );
-            }
             return { managerAgentId: created.id, happyAgentId: happyRef.agentId };
         });
     }
 
     async #ownerState(ctx: Context, ownerUserId: SpaceOwnerId): Promise<SpaceOwnerState> {
-        return (await queryOwnerState(ctx, ownerUserId)) ?? { ownerUserId, revision: 0 };
+        return (await queryOwnerState(ctx, ownerUserId)) ?? { ownerUserId };
     }
 
     async #ownedSpace(ctx: Context, ownerUserId: SpaceOwnerId, spaceId: string) {
@@ -1237,18 +1123,6 @@ export class SpacesModule implements AgentModule {
             if (drafts.length > 0) await this.#commitEvents(ctx, ownerUserId, undefined, drafts);
             return;
         }
-        await add({
-            id: createId(),
-            ownerUserId,
-            role: "manager",
-            contents: [],
-            orderKey: "1",
-            placement: "settled",
-            visibility: "hidden",
-            version: 1,
-            createdAt: now,
-            updatedAt: now,
-        });
         const seed = async (content: SpaceRef, icon?: SpaceRecord["icon"]): Promise<void> => {
             seeded += 1;
             await add({
@@ -1281,7 +1155,6 @@ export class SpacesModule implements AgentModule {
         }
         await writeOwnerState(ctx, {
             ownerUserId,
-            revision: 0,
             ...(seeded > 0 ? { applyRequestedAt: now } : {}),
         });
         if (seeded > 0) {
@@ -1419,10 +1292,6 @@ export class SpacesModule implements AgentModule {
                 await deletePendingChanges(txCtx, row.ownerUserId, [`space:${row.id}`]);
                 await this.#commitEvents(txCtx, row.ownerUserId, undefined, [
                     { type: "space_removed", spaceId: row.id },
-                    {
-                        type: "batch_queued",
-                        pendingChanges: (await queryPendingChanges(txCtx, row.ownerUserId)).length,
-                    },
                 ]);
             }
         });
@@ -1439,7 +1308,7 @@ export class SpacesModule implements AgentModule {
                 };
                 await updateSpace(txCtx, next, row.version);
                 await this.#commitEvents(txCtx, row.ownerUserId, undefined, [
-                    { type: "space_updated", space: next, previousVersion: row.version },
+                    { type: "space_updated", space: next },
                 ]);
             }
         });
@@ -1453,8 +1322,6 @@ export class SpacesModule implements AgentModule {
         const agentId = base.target?.agentId;
         return {
             ...base,
-            title: space.name ?? base.title,
-            named: space.name !== undefined || base.named,
             working: agentId !== undefined && this.#events.activeRunId(agentId) !== undefined,
             lastActivityAt:
                 agentId === undefined
@@ -1463,7 +1330,7 @@ export class SpacesModule implements AgentModule {
         };
     }
 
-    /** Advance the person's revision and publish these changes after the transaction commits. */
+    /** Publish these changes after the transaction commits. */
     async #commitEvents(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
@@ -1471,16 +1338,12 @@ export class SpacesModule implements AgentModule {
         drafts: readonly SpaceEventDraft[],
     ): Promise<void> {
         if (drafts.length === 0) return;
-        const state = await this.#ownerState(ctx, ownerUserId);
-        const revision = state.revision + 1;
-        await writeOwnerState(ctx, { ...state, revision });
         const at = Date.now();
         const events = drafts.map((draft) => {
             const event = {
                 ...draft,
                 at,
                 ownerUserId,
-                revision,
                 ...(mutationId === undefined ? {} : { mutationId }),
             } as SpaceEvent;
             if (!Value.Check(spaceEventSchema, event))
@@ -1508,7 +1371,7 @@ export class SpacesModule implements AgentModule {
 
 type SpaceEventDraft = SpaceEvent extends infer Event
     ? Event extends SpaceEvent
-        ? Omit<Event, "at" | "ownerUserId" | "revision" | "mutationId">
+        ? Omit<Event, "at" | "ownerUserId" | "mutationId">
         : never
     : never;
 
@@ -1560,8 +1423,7 @@ function surfaceTypeOf(type: string): "todo" | "document" | "calendar" | "refere
 
 /** Happy first, then sections' rows by key, then everything else by key. */
 function sortForDisplay(spaces: readonly SpaceRecord[]): SpaceRecord[] {
-    const rank = (space: SpaceRecord): number =>
-        space.role === "happy" ? 0 : space.role === "manager" ? 2 : 1;
+    const rank = (space: SpaceRecord): number => (space.role === "happy" ? 0 : 1);
     return [...spaces].sort((left, right) => rank(left) - rank(right) || compareRows(left, right));
 }
 

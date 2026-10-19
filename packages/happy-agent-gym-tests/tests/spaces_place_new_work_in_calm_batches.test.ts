@@ -15,42 +15,31 @@ afterEach(async () => {
 interface Space {
     readonly id: string;
     readonly role: string;
-    readonly title: string;
+    readonly title: string | null;
     readonly icon: { readonly type: string; readonly slug?: string } | null;
-    readonly target: { readonly kind: string; readonly agentId: string | null } | null;
-    readonly agentId: string | null;
+    readonly target: { readonly kind: string; readonly agentId: string | null };
     readonly sectionId: string | null;
     readonly orderKey: string;
     readonly placement: string;
     readonly visibility: string;
-    readonly manualAt: number | null;
 }
 interface Section {
     readonly id: string;
     readonly name: string;
-    readonly context: string | null;
     readonly tailExpanded: boolean;
 }
 interface Snapshot {
     readonly spaces: readonly Space[];
     readonly sections: readonly Section[];
-    readonly pendingBatch: { readonly changes: number } | null;
-    readonly revision: number;
     readonly cursor: string;
 }
 interface Batch {
-    readonly reason: string;
     readonly note: string;
-    readonly noteAgentId: string | null;
     readonly noteMessageId: string | null;
     readonly changes: readonly {
         readonly spaceId: string;
-        readonly from: { readonly sectionName: string | null; readonly placement: string };
-        readonly to: {
-            readonly sectionName: string | null;
-            readonly visibility: string;
-            readonly placement: string;
-        };
+        readonly from: { readonly sectionName: string | null; readonly visibility: string };
+        readonly to: { readonly sectionName: string | null; readonly visibility: string };
     }[];
 }
 
@@ -90,7 +79,7 @@ function scriptedManager(state: { hideOnTidy?: string }) {
                 return {
                     content: [
                         tool("set_space_icon", { spaceId: row, slug: "android" }),
-                        tool("update_section", { name: "Releases", context: "Yours · mobile" }),
+                        tool("update_section", { name: "Releases", visibleCount: 3 }),
                     ],
                 };
             }
@@ -100,7 +89,6 @@ function scriptedManager(state: { hideOnTidy?: string }) {
                         tool("set_space_visibility", {
                             spaceId: state.hideOnTidy,
                             visibility: "hidden",
-                            reason: "after the check finished",
                         }),
                     ],
                 };
@@ -112,13 +100,7 @@ function scriptedManager(state: { hideOnTidy?: string }) {
             const rows = [...all.matchAll(/New work started in row ([a-z0-9]+)/g)];
             const row = rows.at(-1)?.[1];
             return {
-                content: [
-                    tool("place_space", {
-                        spaceId: row,
-                        sectionId: section,
-                        reason: "with your other release work",
-                    }),
-                ],
+                content: [tool("place_space", { spaceId: row, sectionId: section })],
             };
         }
         return { content: [{ type: "text", text: "Sidebar updated." }] };
@@ -131,16 +113,27 @@ describe("spaces over the API", () => {
         const gym = await createAgentGym({ timeoutMs: 30_000, inference: scriptedManager(state) });
         running.add(gym);
         const snapshot = async () => await gym.http.ok<Snapshot>("GET", "/v0/spaces");
-        const space = async (id: string) =>
-            (await gym.http.ok<{ space: Space }>("GET", `/v0/spaces/${id}`)).space;
+        const space = async (id: string) => (await snapshot()).spaces.find((row) => row.id === id)!;
+        const batches = async () =>
+            (await gym.http.ok<{ batches: Batch[] }>("GET", "/v0/spaces/batches")).batches;
+        const isManager = (request: GymInferenceRequest) =>
+            request.instructions.includes("You are the sidebar manager");
+        // The manager is idle once every run it started has finished.
+        const managerIdle = async () => {
+            const managerId = gym.inference.requests.find(isManager)?.sessionId;
+            if (managerId === undefined) return undefined;
+            const events = await gym.sessionEvents(managerId);
+            const started = events.filter((event) => event["type"] === "run.started").length;
+            const finished = events.filter((event) => event["type"] === "run.finished").length;
+            return started > 0 && started === finished ? true : undefined;
+        };
 
         // Happy is row one before anything else exists.
         const initial = await snapshot();
         const happy = initial.spaces[0]!;
         expect(happy).toMatchObject({ role: "happy", title: "Happy", visibility: "shown" });
-        expect(
-            initial.spaces.some((row) => row.role === "manager" && row.visibility === "hidden"),
-        ).toBe(true);
+        // The manager is a helper of Happy, not a row.
+        expect(initial.spaces.map(({ role }) => role)).toEqual(["happy"]);
 
         // ⌘N: a fresh conversation with no project, waiting under Happy.
         const created = await gym.http.ok<{
@@ -159,17 +152,28 @@ describe("spaces over the API", () => {
         expect(retried.status).toBe(200);
 
         // The first message is an ordinary send; the manager names an icon at once and queues
-        // the placement, which waits while the person works.
+        // the placement, which waits while the person is interacting.
+        await gym.http.ok("POST", "/v0/spaces/attention", { state: "interacting" });
         await gym.send("Plan the Android 2.4 release.", { sessionId: created.agent.id });
         await gym.waitUntil(
             async () =>
                 (await space(created.space.id)).icon?.slug === "android" ? true : undefined,
             "the manager's icon",
         );
-        const queued = await gym.waitUntil(async () => {
-            const current = await snapshot();
-            return current.pendingBatch?.changes === 2 ? current : undefined;
-        }, "the queued placement");
+        await gym.waitUntil(
+            () =>
+                gym.inference.requests.some(
+                    (request) =>
+                        isManager(request) &&
+                        JSON.stringify(request.messages.at(-1)).includes("Change queued"),
+                )
+                    ? true
+                    : undefined,
+            "the queued placement",
+        );
+        await gym.waitUntil(managerIdle, "the manager to finish");
+        const queued = await snapshot();
+        expect(await batches()).toEqual([]);
         expect(queued.spaces.find((row) => row.id === created.space.id)).toMatchObject({
             placement: "pending",
             sectionId: null,
@@ -187,41 +191,33 @@ describe("spaces over the API", () => {
         )!;
         expect(taskRequest.tools.map(({ name }) => name)).not.toContain("place_space");
 
-        // Focus reports and a person mid-interaction never apply it.
-        await gym.http.ok("POST", "/v0/spaces/attention", { state: "interacting" });
-        await gym.http.post("/v0/spaces/focus", { spaceId: created.space.id });
-        expect((await snapshot()).pendingBatch).toEqual({ changes: 2 });
-
         // The client's calm signal applies it: one batch, one note in Happy's chat, one diff.
         const calm = await gym.http.ok<{ batch: Batch | null }>("POST", "/v0/spaces/attention", {
             state: "calm",
         });
-        expect(calm.batch?.reason).toBe("calm");
+        expect(calm.batch).not.toBeNull();
         const placed = await snapshot();
         const releases = placed.sections[0]!;
-        expect(releases).toMatchObject({ name: "Releases", context: "Yours · mobile" });
+        expect(releases).toMatchObject({ name: "Releases", visibleCount: 3 });
         expect(placed.spaces.find((row) => row.id === created.space.id)).toMatchObject({
             placement: "settled",
             sectionId: releases.id,
         });
-        expect(placed.pendingBatch).toBeNull();
-        const [batch] = (await gym.http.ok<{ batches: Batch[] }>("GET", "/v0/spaces/batches"))
-            .batches;
+        const [batch] = await batches();
+        const title = placed.spaces.find((row) => row.id === created.space.id)!.title;
         expect(batch).toMatchObject({
-            reason: "calm",
-            note: `Put ${placed.spaces.find((row) => row.id === created.space.id)!.title} in Releases.`,
-            noteAgentId: happy.agentId,
+            note: `Put ${title ?? "a new chat"} in Releases.`,
             changes: [
                 {
                     spaceId: created.space.id,
-                    from: { sectionName: null, placement: "pending" },
-                    to: { sectionName: "Releases", visibility: "shown", placement: "settled" },
+                    from: { sectionName: null, visibility: "shown" },
+                    to: { sectionName: "Releases", visibility: "shown" },
                 },
             ],
         });
         const notes = await gym.http.ok<{
             runs: { messages: { id: string; content: unknown }[] }[];
-        }>("GET", `/v0/agents/${happy.agentId!}/messages`);
+        }>("GET", `/v0/agents/${happy.target.agentId!}/messages`);
         const note = notes.runs
             .flatMap((run) => run.messages)
             .find((message) => message.id === batch!.noteMessageId);
@@ -243,7 +239,8 @@ describe("spaces over the API", () => {
             async () => ((await space(second.space.id)).icon?.slug === "build" ? true : undefined),
             "the second icon",
         );
-        expect((await snapshot()).pendingBatch).toBeNull();
+        await gym.waitUntil(managerIdle, "the manager to finish");
+        expect(await batches()).toHaveLength(1);
 
         // The person's own drag and disclosure apply at once.
         const moved = await gym.http.ok<{ space: Space }>(
@@ -255,7 +252,7 @@ describe("spaces over the API", () => {
             moved.space.orderKey >
                 placed.spaces.find((row) => row.id === created.space.id)!.orderKey,
         ).toBe(true);
-        expect(moved.space.manualAt).toEqual(expect.any(Number));
+        expect(moved.space).toMatchObject({ placement: "settled", visibility: "shown" });
         const opened = await gym.http.ok<{ section: Section }>(
             "POST",
             `/v0/spaces/sections/${releases.id}/collapse`,
@@ -270,20 +267,15 @@ describe("spaces over the API", () => {
 
         // "Tidy now" applies the manager's batch as soon as it finishes, without a calm moment.
         state.hideOnTidy = second.space.id;
-        await gym.http.ok("POST", "/v0/spaces/tidy", {});
+        expect((await gym.http.post("/v0/spaces/tidy", {})).status).toBe(202);
         const tidy = await gym.waitUntil(async () => {
-            const { batches } = await gym.http.ok<{ batches: Batch[] }>(
-                "GET",
-                "/v0/spaces/batches",
-            );
-            return batches.length === 2 ? batches[0] : undefined;
+            const applied = await batches();
+            return applied.length === 2 ? applied[0] : undefined;
         }, "the tidy batch");
         expect(tidy).toMatchObject({
-            reason: "tidy",
             changes: [{ spaceId: second.space.id, to: { visibility: "hidden" } }],
         });
         expect(tidy.note).toMatch(/^Hid [^.]+\.$/);
-        expect(tidy.changes[0]).toMatchObject({ reason: "after the check finished" });
 
         // Every step reached the event journal for live clients.
         const types = new Set<string>();
@@ -295,7 +287,6 @@ describe("spaces over the API", () => {
         }
         expect([...types].filter((type) => type.startsWith("space.")).sort()).toEqual([
             "space.batch.applied",
-            "space.batch.queued",
             "space.created",
             "space.section.created",
             "space.section.updated",

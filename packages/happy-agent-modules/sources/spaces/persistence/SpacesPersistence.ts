@@ -29,7 +29,6 @@ interface SpaceRow {
     readonly id: string;
     readonly owner_user_id: string;
     readonly role: string;
-    readonly name: string | null;
     readonly icon_json: string | null;
     readonly contents_json: string;
     readonly section_id: string | null;
@@ -102,12 +101,12 @@ export async function insertSpace(ctx: Context, space: SpaceRecord): Promise<voi
     await agentDatabaseRun(
         ctx.db,
         sql`INSERT INTO ${sql.raw(SPACES_TABLE)} (
-            id, owner_user_id, role, ref_key, name, icon_json, contents_json, section_id,
+            id, owner_user_id, role, ref_key, icon_json, contents_json, section_id,
             order_key, placement, visibility, manual_at, briefed_at, version, created_at,
             updated_at
         ) VALUES (
             ${space.id}, ${space.ownerUserId}, ${space.role}, ${spaceRefKey(space)},
-            ${space.name ?? null}, ${space.icon === undefined ? null : JSON.stringify(space.icon)},
+            ${space.icon === undefined ? null : JSON.stringify(space.icon)},
             ${JSON.stringify(space.contents)}, ${space.sectionId ?? null}, ${space.orderKey},
             ${space.placement}, ${space.visibility}, ${space.manualAt ?? null},
             ${space.briefedAt ?? null}, ${space.version}, ${space.createdAt}, ${space.updatedAt}
@@ -124,12 +123,12 @@ export async function insertSpaceIfAbsent(ctx: Context, space: SpaceRecord): Pro
     const inserted = await agentDatabaseRows<{ readonly id: string }>(
         ctx.db,
         sql`INSERT INTO ${sql.raw(SPACES_TABLE)} (
-            id, owner_user_id, role, ref_key, name, icon_json, contents_json, section_id,
+            id, owner_user_id, role, ref_key, icon_json, contents_json, section_id,
             order_key, placement, visibility, manual_at, briefed_at, version, created_at,
             updated_at
         ) VALUES (
             ${space.id}, ${space.ownerUserId}, ${space.role}, ${spaceRefKey(space)},
-            ${space.name ?? null}, ${space.icon === undefined ? null : JSON.stringify(space.icon)},
+            ${space.icon === undefined ? null : JSON.stringify(space.icon)},
             ${JSON.stringify(space.contents)}, ${space.sectionId ?? null}, ${space.orderKey},
             ${space.placement}, ${space.visibility}, ${space.manualAt ?? null},
             ${space.briefedAt ?? null}, ${space.version}, ${space.createdAt}, ${space.updatedAt}
@@ -148,7 +147,7 @@ export async function updateSpace(
     const changed = await agentDatabaseRows<{ readonly id: string }>(
         ctx.db,
         sql`UPDATE ${sql.raw(SPACES_TABLE)} SET
-            ref_key = ${spaceRefKey(space)}, name = ${space.name ?? null},
+            ref_key = ${spaceRefKey(space)},
             icon_json = ${space.icon === undefined ? null : JSON.stringify(space.icon)},
             contents_json = ${JSON.stringify(space.contents)},
             section_id = ${space.sectionId ?? null}, order_key = ${space.orderKey},
@@ -182,7 +181,6 @@ interface SectionRow {
     readonly id: string;
     readonly owner_user_id: string;
     readonly name: string;
-    readonly context: string | null;
     readonly visible_count: number | string | null;
     readonly collapsed: number | string | boolean;
     readonly tail_expanded: number | string | boolean;
@@ -220,10 +218,10 @@ export async function insertSection(ctx: Context, section: SpaceSectionRecord): 
     await agentDatabaseRun(
         ctx.db,
         sql`INSERT INTO ${sql.raw(SPACE_SECTIONS_TABLE)} (
-            id, owner_user_id, name, context, visible_count, collapsed, tail_expanded,
+            id, owner_user_id, name, visible_count, collapsed, tail_expanded,
             order_key, version, created_at, updated_at
         ) VALUES (
-            ${section.id}, ${section.ownerUserId}, ${section.name}, ${section.context ?? null},
+            ${section.id}, ${section.ownerUserId}, ${section.name},
             ${section.visibleCount ?? null}, ${section.collapsed ? 1 : 0},
             ${section.tailExpanded ? 1 : 0}, ${section.orderKey}, ${section.version},
             ${section.createdAt}, ${section.updatedAt}
@@ -240,7 +238,7 @@ export async function updateSection(
     const changed = await agentDatabaseRows<{ readonly id: string }>(
         ctx.db,
         sql`UPDATE ${sql.raw(SPACE_SECTIONS_TABLE)} SET
-            name = ${section.name}, context = ${section.context ?? null},
+            name = ${section.name},
             visible_count = ${section.visibleCount ?? null},
             collapsed = ${section.collapsed ? 1 : 0},
             tail_expanded = ${section.tailExpanded ? 1 : 0}, order_key = ${section.orderKey},
@@ -404,7 +402,6 @@ function spaceFromRow(row: SpaceRow): SpaceRecord {
         id: row.id,
         ownerUserId: row.owner_user_id,
         role: row.role,
-        ...(row.name === null ? {} : { name: row.name }),
         ...(row.icon_json === null ? {} : { icon: JSON.parse(row.icon_json) as unknown }),
         contents: JSON.parse(row.contents_json) as unknown,
         ...(row.section_id === null ? {} : { sectionId: row.section_id }),
@@ -426,7 +423,6 @@ function sectionFromRow(row: SectionRow): SpaceSectionRecord {
         id: row.id,
         ownerUserId: row.owner_user_id,
         name: row.name,
-        ...(row.context === null ? {} : { context: row.context }),
         ...(row.visible_count === null ? {} : { visibleCount: Number(row.visible_count) }),
         collapsed: Number(row.collapsed) === 1 || row.collapsed === true,
         tailExpanded: Number(row.tail_expanded) === 1 || row.tail_expanded === true,

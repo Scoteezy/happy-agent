@@ -20,23 +20,10 @@ export const spaceTextSchema = Type.String({
     maxLength: 256,
     pattern: "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$",
 });
-/** A short lower-case phrase completing a sentence, without its own full stop. */
-export const spaceReasonSchema = Type.String({
-    minLength: 1,
-    maxLength: 60,
-    pattern: "^[^\\x00-\\x1f\\x7f.!?]+$",
-});
 export const spaceIconSlugSchema = Type.Union(SPACE_ICON_SLUGS.map((slug) => Type.Literal(slug)));
 
-/**
- * Happy is row one, the manager is never shown, and every other row is an item. Exactly one Happy
- * and at most one manager exist per person.
- */
-export const spaceRoleSchema = Type.Union([
-    Type.Literal("happy"),
-    Type.Literal("manager"),
-    Type.Literal("item"),
-]);
+/** Happy is row one, exactly once per person; every other row is an item. */
+export const spaceRoleSchema = Type.Union([Type.Literal("happy"), Type.Literal("item")]);
 
 /** Pending means the manager has not placed the row yet; its position is still its section. */
 export const spacePlacementSchema = Type.Union([Type.Literal("pending"), Type.Literal("settled")]);
@@ -79,26 +66,10 @@ export const spaceRefSchema = Type.Union([
         { additionalProperties: false },
     ),
     Type.Object(
-        { kind: Type.Literal("agent"), agentId: cuid2Schema },
-        { additionalProperties: false },
-    ),
-    Type.Object(
-        { kind: Type.Literal("artifact"), artifactId: cuid2Schema },
-        { additionalProperties: false },
-    ),
-    Type.Object(
         {
             kind: Type.Literal("surface"),
             surfaceId: cuid2Schema,
             surfaceType: spaceSurfaceTypeSchema,
-        },
-        { additionalProperties: false },
-    ),
-    Type.Object(
-        {
-            kind: Type.Literal("file"),
-            workspaceId: cuid2Schema,
-            path: Type.String({ minLength: 1, maxLength: 4_096 }),
         },
         { additionalProperties: false },
     ),
@@ -109,8 +80,6 @@ export const spaceRecordSchema = Type.Object(
         id: cuid2Schema,
         ownerUserId: spaceOwnerIdSchema,
         role: spaceRoleSchema,
-        /** A name chosen for the row; without one the title follows the content. */
-        name: Type.Optional(spaceTextSchema),
         /** Absent until the manager chooses one. */
         icon: Type.Optional(spaceIconSchema),
         contents: Type.Array(spaceRefSchema, { maxItems: 32 }),
@@ -135,8 +104,6 @@ export const spaceSectionRecordSchema = Type.Object(
         id: cuid2Schema,
         ownerUserId: spaceOwnerIdSchema,
         name: spaceTextSchema,
-        /** One muted line under the title. */
-        context: Type.Optional(spaceTextSchema),
         /** Partial collapse: only the first rows show, the rest wait behind "+k more". */
         visibleCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
         collapsed: Type.Boolean(),
@@ -162,8 +129,6 @@ export const spacePendingChangeSchema = Type.Union([
             sectionId: Type.Union([cuid2Schema, Type.Null()]),
             /** After this row; `null` or absent puts it first. */
             afterId: Type.Optional(Type.Union([cuid2Schema, Type.Null()])),
-            /** A few words saying why, for Happy's note, such as "after you finished it". */
-            reason: Type.Optional(spaceReasonSchema),
         },
         { additionalProperties: false },
     ),
@@ -172,8 +137,6 @@ export const spacePendingChangeSchema = Type.Union([
             type: Type.Literal("visibility"),
             spaceId: cuid2Schema,
             visibility: spaceVisibilitySchema,
-            /** A few words saying why, for Happy's note, such as "after you finished it". */
-            reason: Type.Optional(spaceReasonSchema),
         },
         { additionalProperties: false },
     ),
@@ -183,7 +146,6 @@ export const spacePendingChangeSchema = Type.Union([
             sectionId: cuid2Schema,
             create: Type.Boolean(),
             name: Type.Optional(spaceTextSchema),
-            context: Type.Optional(Type.Union([spaceTextSchema, Type.Null()])),
             visibleCount: Type.Optional(
                 Type.Union([Type.Integer({ minimum: 1, maximum: 100 }), Type.Null()]),
             ),
@@ -214,7 +176,6 @@ export const spaceBatchChangeSchema = Type.Object(
     {
         spaceId: cuid2Schema,
         title: Type.String(),
-        reason: Type.Optional(spaceReasonSchema),
         from: spacePositionSchema,
         to: spacePositionSchema,
     },
@@ -239,9 +200,7 @@ export const spaceBatchSchema = Type.Object(
     {
         id: cuid2Schema,
         ownerUserId: spaceOwnerIdSchema,
-        reason: Type.Union([Type.Literal("calm"), Type.Literal("tidy")]),
         note: Type.String({ minLength: 1, maxLength: 1_000 }),
-        noteAgentId: Type.Optional(cuid2Schema),
         noteMessageId: Type.Optional(cuid2Schema),
         changes: Type.Array(spaceBatchChangeSchema),
         sections: Type.Array(spaceBatchSectionChangeSchema),
@@ -250,29 +209,16 @@ export const spaceBatchSchema = Type.Object(
     { additionalProperties: false },
 );
 
-/** A model the manager runs on. Without one it runs on the cheapest model of Happy's account. */
-export const spaceManagerModelSchema = Type.Object(
-    {
-        providerId: Type.String({ minLength: 1, maxLength: 128 }),
-        modelId: Type.String({ minLength: 1, maxLength: 256 }),
-        effort: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-    },
-    { additionalProperties: false },
-);
-
 /** Each person's sidebar bookkeeping. */
 export const spaceOwnerStateSchema = Type.Object(
     {
         ownerUserId: spaceOwnerIdSchema,
-        /** Advances with every change to this person's sidebar. */
-        revision: Type.Integer({ minimum: 0 }),
         managerAgentId: Type.Optional(cuid2Schema),
         /**
          * The person asked for something to happen now — a tidy, or a move in their own words —
          * so the queued changes apply as soon as the manager finishes, without waiting for calm.
          */
         applyRequestedAt: Type.Optional(spaceTimestampSchema),
-        managerModel: Type.Optional(spaceManagerModelSchema),
     },
     { additionalProperties: false },
 );
@@ -290,24 +236,20 @@ export type SpacePendingChange = Static<typeof spacePendingChangeSchema>;
 export type SpaceBatch = Static<typeof spaceBatchSchema>;
 export type SpaceBatchChange = Static<typeof spaceBatchChangeSchema>;
 export type SpaceBatchSectionChange = Static<typeof spaceBatchSectionChangeSchema>;
-export type SpaceManagerModel = Static<typeof spaceManagerModelSchema>;
 export type SpaceOwnerState = Static<typeof spaceOwnerStateSchema>;
 
 /** What a person's sidebar holds right now. */
 export interface SpaceSnapshot {
     readonly spaces: readonly SpaceRecord[];
     readonly sections: readonly SpaceSectionRecord[];
-    readonly pendingChanges: number;
-    readonly revision: number;
 }
 
 /** What a click on a row opens. */
 export interface SpaceTarget {
-    readonly kind: "task" | "bot" | "agent" | "artifact" | "surface" | "file";
+    readonly kind: "task" | "bot" | "surface";
     readonly id: string;
     readonly agentId?: string;
     readonly workspaceId?: string;
-    readonly path?: string;
 }
 
 /** A row's content resolved for display and for the manager's judgement. */

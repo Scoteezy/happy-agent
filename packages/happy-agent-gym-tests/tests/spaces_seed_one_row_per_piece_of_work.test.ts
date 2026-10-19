@@ -11,7 +11,7 @@ interface Space {
     readonly id: string;
     readonly role: string;
     readonly visibility: string;
-    readonly target: { readonly kind: string; readonly id: string } | null;
+    readonly target: { readonly kind: string; readonly id: string };
 }
 
 describe("the sidebar seed", () => {
@@ -34,9 +34,9 @@ describe("the sidebar seed", () => {
         await gym.restart();
         const after = await visibleRows();
         expect(after.map(({ id }) => id).sort()).toEqual(before.map(({ id }) => id).sort());
-        const targets = after.flatMap((row) => (row.target === null ? [] : [row.target.id]));
+        const targets = after.map((row) => row.target.id);
         expect(new Set(targets).size).toBe(targets.length);
-        expect(after.filter((row) => row.target?.id === created.target!.id)).toEqual([
+        expect(after.filter((row) => row.target.id === created.target.id)).toEqual([
             expect.objectContaining({ id: created.id }),
         ]);
     });

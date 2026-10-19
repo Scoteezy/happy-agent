@@ -2,12 +2,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { cuid2Schema, defineAgentTool, type AnyAgentTool } from "@slopus/happy-agent-base";
 import { Type, type Static } from "@sinclair/typebox";
 
-import {
-    spaceIconSlugSchema,
-    spaceReasonSchema,
-    spaceTextSchema,
-    spaceVisibilitySchema,
-} from "../Space.js";
+import { spaceIconSlugSchema, spaceTextSchema, spaceVisibilitySchema } from "../Space.js";
 import type { SpacesModule } from "../SpacesModule.js";
 
 const textResultSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
@@ -27,12 +22,6 @@ const placeSpaceSchema = Type.Object(
                 description: "Put the row after this row of the same section. Omit for the top.",
             }),
         ),
-        reason: Type.Optional(
-            Type.Union([spaceReasonSchema], {
-                description:
-                    'A few lower-case words on why, such as "finished". Kept with the change; not shown in the note.',
-            }),
-        ),
     },
     { additionalProperties: false },
 );
@@ -41,12 +30,6 @@ const setVisibilitySchema = Type.Object(
     {
         spaceId: cuid2Schema,
         visibility: spaceVisibilitySchema,
-        reason: Type.Optional(
-            Type.Union([spaceReasonSchema], {
-                description:
-                    'A few lower-case words on why, such as "finished". Kept with the change; not shown in the note.',
-            }),
-        ),
     },
     { additionalProperties: false },
 );
@@ -62,11 +45,6 @@ const updateSectionSchema = Type.Object(
             Type.Union([cuid2Schema], { description: "Omit to create a new section." }),
         ),
         name: Type.Optional(spaceTextSchema),
-        context: Type.Optional(
-            Type.Union([spaceTextSchema, Type.Null()], {
-                description: "One muted line under the title; null removes it.",
-            }),
-        ),
         visibleCount: Type.Optional(
             Type.Union([Type.Integer({ minimum: 1, maximum: 100 }), Type.Null()], {
                 description: "Show only the first rows; null shows them all.",
@@ -118,7 +96,6 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
                     spaceId: input.spaceId,
                     sectionId: input.sectionId,
                     ...(input.afterId === undefined ? {} : { afterId: input.afterId }),
-                    ...(input.reason === undefined ? {} : { reason: input.reason }),
                 }),
             }),
             toLLM,
@@ -136,7 +113,6 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
                     type: "visibility",
                     spaceId: input.spaceId,
                     visibility: input.visibility,
-                    ...(input.reason === undefined ? {} : { reason: input.reason }),
                 }),
             }),
             toLLM,
@@ -157,7 +133,7 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
         defineAgentTool({
             name: "update_section",
             description:
-                "Create a section (omit sectionId and give a name) or change one: its name, one-line context, visible count, or position. Returns the section ID, which place_space can use right away. Names are unique: creating a name that exists returns the existing section. Applies at the next calm moment.",
+                "Create a section (omit sectionId and give a name) or change one: its name, visible count, or position. Returns the section ID, which place_space can use right away. Names are unique: creating a name that exists returns the existing section. Applies at the next calm moment.",
             parameters: updateSectionSchema,
             returnType: textResultSchema,
             durable: true,
@@ -177,7 +153,6 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
                         sectionId,
                         create,
                         ...(input.name === undefined ? {} : { name: input.name }),
-                        ...(input.context === undefined ? {} : { context: input.context }),
                         ...(input.visibleCount === undefined
                             ? {}
                             : { visibleCount: input.visibleCount }),

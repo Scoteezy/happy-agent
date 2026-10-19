@@ -42,7 +42,6 @@ export function applySpaceChanges(
     const shelves = new Map(sections.map((section) => [section.id, structuredClone(section)]));
     const created = new Set<string>();
     const removed = new Set<string>();
-    const reasons = new Map<string, string>();
 
     for (const change of changes) {
         switch (change.type) {
@@ -66,8 +65,6 @@ export function applySpaceChanges(
                     removed.delete(section.id);
                 }
                 if (change.name !== undefined) section.name = change.name;
-                if (change.context === null) delete section.context;
-                else if (change.context !== undefined) section.context = change.context;
                 if (change.visibleCount === null) delete section.visibleCount;
                 else if (change.visibleCount !== undefined)
                     section.visibleCount = change.visibleCount;
@@ -99,8 +96,6 @@ export function applySpaceChanges(
                 else row.sectionId = sectionId;
                 row.visibility = "shown";
                 row.placement = "settled";
-                if (change.reason === undefined) reasons.delete(row.id);
-                else reasons.set(row.id, change.reason);
                 break;
             }
             case "visibility": {
@@ -108,8 +103,6 @@ export function applySpaceChanges(
                 if (row === undefined || row.role !== "item") break;
                 row.visibility = change.visibility;
                 row.placement = "settled";
-                if (change.reason === undefined) reasons.delete(row.id);
-                else reasons.set(row.id, change.reason);
                 break;
             }
         }
@@ -160,11 +153,9 @@ export function applySpaceChanges(
         ) {
             continue;
         }
-        const reason = reasons.get(original.id);
         batchChanges.push({
             spaceId: original.id,
             title: titles.get(original.id) ?? "Untitled",
-            ...(reason === undefined ? {} : { reason }),
             from,
             to,
         });
@@ -255,7 +246,6 @@ function betweenOrEnd(lower: string | null, upper: string | null): string {
 function sameSection(left: SpaceSectionRecord, right: SpaceSectionRecord): boolean {
     return (
         left.name === right.name &&
-        left.context === right.context &&
         left.visibleCount === right.visibleCount &&
         left.orderKey === right.orderKey
     );

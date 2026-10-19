@@ -5,13 +5,13 @@
 Kirill and the UX review asked for terse notes such as "Moved Preview viewer release to Older."
 with no narration. The manager no longer writes free text: the note is composed from the batch's
 own diff, so it can only describe what moved; a batch of several moves names two and counts the
-rest. Reasons the manager gives stay on each change in the diff and never reach the note: a
-cheap model's clause ("Hid Quick Sanity Check finished one-off check.") broke the line.
+rest. The manager gives no reasons: a cheap model's clause ("Hid Quick Sanity Check finished
+one-off check.") broke the line, and nothing else read them.
 
 ## The client decides when the person is calm
 
-Applying a batch on every focus change moved rows while the person was still navigating. Focus
-reports now only defer the idle rule. The client signals `interacting` (hold everything) and
+Applying a batch on every focus change moved rows while the person was still navigating, so
+there is no focus report. The client signals `interacting` (hold everything) and
 `calm` (a gesture finished, or idle); only `calm`, idle, or a tidy the person asked for apply a
 batch, and never while `interacting` or mid-manager-turn. Applying a batch never changes what
 the person has selected.
@@ -28,7 +28,7 @@ never merged.
 ## Unnamed work has no title, and untouched work can be discarded
 
 The desktop labels a row "New" itself, so a task still carrying its placeholder name is served
-with `named: false` and an empty title instead of "New Task"; notes call it "a new chat". Rows
+with `title: null` instead of "New Task"; notes call it "a new chat". Rows
 are otherwise never deleted, but a stem cell the person left without writing anything is not
 work: discard removes the row and archives its task, and refuses (409) as soon as the
 conversation holds any message.
@@ -38,8 +38,8 @@ conversation holds any message.
 On clean data a cheap manager created a "Movies" section for each of two new rows in one turn,
 and the batch put them in two sections with the same name. The daemon now owns the rule rather
 than the prompt: creating a section whose name (ignoring case and surrounding spaces) matches an
-existing or queued section returns that section's ID instead, carrying over any context or count
-it was given, and renaming a section onto another's name is refused.
+existing or queued section returns that section's ID instead, carrying over any count it was
+given, and renaming a section onto another's name is refused.
 
 ## Archived work leaves the sidebar
 
@@ -47,3 +47,11 @@ Archiving a task only hid its row, which still came back from `GET /v0/spaces` a
 leftover to clients. Archiving (or leaving) work now removes its rows and anything queued for
 them, with `space.removed`; unarchiving adds a fresh pending row for each member. `hidden`
 remains the manager's choice for live work it tucks away.
+
+## The API is only what the desktop uses
+
+Kirill reviewed the contract before it was specified. Everything the desktop did not read was
+removed rather than kept "in case": the manager's row, a row's own name, section context lines,
+batch reasons and section diffs, revisions, the pending-batch count, focus reports, single-row
+reads, and the manager-model setting. Space events carry whole objects, so they need no
+`previousVersion`.

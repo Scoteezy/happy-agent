@@ -13,16 +13,10 @@ function change(title: string, to: Change["to"], extra: Partial<Change> = {}): C
 }
 
 describe("composeSpaceBatchNote", () => {
-    it("writes one line for a lone move and leaves its reason in the diff", () => {
+    it("writes one line for a lone move", () => {
         expect(
             composeSpaceBatchNote(
-                [
-                    change(
-                        "Preview viewer release",
-                        { ...shown(null, null), visibility: "folded" },
-                        { reason: "after you finished it" },
-                    ),
-                ],
+                [change("Preview viewer release", { ...shown(null, null), visibility: "folded" })],
                 [],
             ),
         ).toBe("Moved Preview viewer release to Older.");
@@ -46,11 +40,7 @@ describe("composeSpaceBatchNote", () => {
         const hidden = { ...shown(null, null), visibility: "hidden" } as Change["to"];
         expect(
             composeSpaceBatchNote(
-                [
-                    change("A", folded, { reason: "after you finished it" }),
-                    change("B", hidden),
-                    change("C", hidden),
-                ],
+                [change("A", folded), change("B", hidden), change("C", hidden)],
                 [],
             ),
         ).toBe("Moved A to Older, hid B, and 1 more.");

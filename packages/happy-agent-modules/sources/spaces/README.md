@@ -14,12 +14,12 @@ manager (hidden child of Happy) ────────┘  place / visibility 
 other agents ── request_space_placement ─► briefed to the manager
 ```
 
-A **space** is one row: Happy (row one, always), the manager (never shown), or an item wrapping
-content — a task, bot, Surface, artifact, conversation, or file. A row has a section or none
-(directly under Happy, where unplaced work waits), an order key inside that place, a
-placement (`pending` until the manager places it) and a visibility (`shown`, `folded` into
-Older, or `hidden`; hidden is never deletion). Sections are flat labels with an optional
-one-line context and an optional visible count.
+A **space** is one row: Happy (row one, always) or an item wrapping a task, bot, or Surface. The
+manager is not a row. A row has a section or none (directly under Happy, where unplaced work
+waits), an order key inside that place, a placement (`pending` until the manager places it) and a
+visibility (`shown`, `folded` into the Older part at the end, or `hidden`). Sections are flat
+labels with a unique name and an optional visible count. The HTTP contract is the Spaces chapter
+of `packages/happy-agent/API.md`.
 
 Rows carry the owner's ID (`standalone` on a standalone installation), so the model already
 fits several people even though only the owner's own sidebar is exposed.
@@ -34,7 +34,7 @@ names an icon at once and queues the placement.
 ## The manager
 
 One long-running hidden agent per person, a child of Happy, made on first use. It runs on the
-cheapest model of Happy's account (or a configured one) and its whole tool array and system
+cheapest model of Happy's account and its whole tool array and system
 prompt come from this module, so it can do nothing else. Briefs reach it through the
 `spaces.briefManager` durable function, committed with whatever caused them.
 

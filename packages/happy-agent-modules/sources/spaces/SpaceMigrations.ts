@@ -102,4 +102,28 @@ export const spaceMigrations = [
             );
         },
     ],
+    [
+        "002-trim-to-the-api",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            // The sidebar manager no longer has a row, rows no longer carry their own name, and
+            // sections no longer carry a context line. Queued changes, applied batches, and
+            // bookkeeping were stored in the earlier shape; they are dropped, and each person's
+            // sidebar settles again on its next read.
+            await agentDatabaseRun(
+                database,
+                sql`DELETE FROM ${sql.raw(SPACES_TABLE)} WHERE role = 'manager'`,
+            );
+            await agentDatabaseRun(
+                database,
+                sql`ALTER TABLE ${sql.raw(SPACES_TABLE)} DROP COLUMN name`,
+            );
+            await agentDatabaseRun(
+                database,
+                sql`ALTER TABLE ${sql.raw(SPACE_SECTIONS_TABLE)} DROP COLUMN context`,
+            );
+            for (const table of [SPACE_PENDING_TABLE, SPACE_BATCHES_TABLE, SPACE_OWNERS_TABLE]) {
+                await agentDatabaseRun(database, sql`DELETE FROM ${sql.raw(table)}`);
+            }
+        },
+    ],
 ] as const;

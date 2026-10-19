@@ -9,9 +9,8 @@ afterEach(async () => {
 
 interface Space {
     readonly id: string;
-    readonly title: string;
-    readonly named: boolean;
-    readonly target: { readonly kind: string; readonly id: string } | null;
+    readonly title: string | null;
+    readonly target: { readonly kind: string; readonly id: string };
 }
 interface StemCell {
     readonly space: Space;
@@ -19,7 +18,7 @@ interface StemCell {
 }
 
 describe("a stem cell", () => {
-    it("is untitled until named, and can be discarded only while nobody wrote in it", async () => {
+    it("has no title until named, and can be discarded only while nobody wrote in it", async () => {
         const gym = await createAgentGym({ timeoutMs: 30_000 });
         running.add(gym);
         const rows = async () =>
@@ -28,7 +27,7 @@ describe("a stem cell", () => {
 
         // New work has no title of its own yet; the client labels it.
         const untouched = await gym.http.ok<StemCell>("POST", "/v0/spaces/stem-cells", {});
-        expect(untouched.space).toMatchObject({ title: "", named: false });
+        expect(untouched.space.title).toBeNull();
 
         // Leaving it untouched discards it: the row goes and its task is archived.
         const discarded = await gym.http.post(`/v0/spaces/${untouched.space.id}/discard`, {
@@ -39,7 +38,7 @@ describe("a stem cell", () => {
         expect((await gym.http.post(`/v0/spaces/${untouched.space.id}/discard`, {})).status).toBe(
             204,
         );
-        expect((await gym.client.getTask(untouched.space.target!.id)).task.status).toBe("archived");
+        expect((await gym.client.getTask(untouched.space.target.id)).task.status).toBe("archived");
         // Space events are not in the published client's event union yet.
         const events = (await gym.client.getEvents({ after: cursor, limit: 1_000 }))
             .events as readonly { readonly type: string; readonly payload: unknown }[];
@@ -56,7 +55,7 @@ describe("a stem cell", () => {
         expect((await rows()).some((row) => row.id === used.space.id)).toBe(true);
 
         // A name brings its title back.
-        const { task } = await gym.client.getTask(used.space.target!.id);
+        const { task } = await gym.client.getTask(used.space.target.id);
         await gym.client.renameTask(
             task.id,
             { name: "Android 2.4 release" },
@@ -64,7 +63,7 @@ describe("a stem cell", () => {
         );
         const renamed = await gym.waitUntil(async () => {
             const row = (await rows()).find((candidate) => candidate.id === used.space.id);
-            return row?.named === true ? row : undefined;
+            return row?.title === null ? undefined : row;
         }, "the named row");
         expect(renamed.title).toBe("Android 2.4 release");
     });

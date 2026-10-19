@@ -20,7 +20,6 @@ interface Space {
 interface Snapshot {
     readonly spaces: readonly Space[];
     readonly sections: readonly { readonly id: string; readonly name: string }[];
-    readonly pendingBatch: { readonly changes: number } | null;
 }
 
 /** A manager that makes a "Movies" section for every piece of new work, as a cheap model did. */
@@ -68,6 +67,14 @@ describe("sidebar sections", () => {
         running.add(gym);
         const snapshot = async () => await gym.http.ok<Snapshot>("GET", "/v0/spaces");
 
+        // Both placements wait for one batch while the person is interacting.
+        await gym.http.ok("POST", "/v0/spaces/attention", { state: "interacting" });
+        const placements = () =>
+            gym.inference.requests.filter(
+                (request) =>
+                    request.instructions.includes("You are the sidebar manager") &&
+                    JSON.stringify(request.messages.at(-1)).includes("Change queued"),
+            ).length;
         const rows: string[] = [];
         for (const text of ["Plan movie night.", "Track the movies I downloaded."]) {
             const created = await gym.http.ok<{ space: Space; agent: { id: string } }>(
@@ -77,10 +84,10 @@ describe("sidebar sections", () => {
             );
             rows.push(created.space.id);
             await gym.send(text, { sessionId: created.agent.id });
-            await gym.waitUntil(async () => {
-                const queued = (await snapshot()).pendingBatch?.changes ?? 0;
-                return queued >= rows.length + 1 ? true : undefined;
-            }, "the queued placement");
+            await gym.waitUntil(
+                () => (placements() >= rows.length ? true : undefined),
+                "the queued placement",
+            );
         }
 
         await gym.http.ok("POST", "/v0/spaces/attention", { state: "calm" });
