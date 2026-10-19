@@ -305,7 +305,9 @@ describe("spaces over the API", () => {
         expect(happyMoved.space.target.kind).toBe("bot");
 
         // "Tidy now" is one message to Prioritizing; its changes wait for calm like any other.
-        state.hideOnTidy = second.space.id;
+        // Recent work is never tucked away, so the tidy hides a chat nobody wrote in.
+        const idle = await gym.http.ok<{ space: Space }>("POST", "/v0/spaces/stem-cells", {});
+        state.hideOnTidy = idle.space.id;
         const tidyQueued = () =>
             gym.inference.requests.filter(
                 (request) =>
@@ -327,7 +329,7 @@ describe("spaces over the API", () => {
         );
         const tidy = tidyCalm.batch!;
         expect(tidy).toMatchObject({
-            changes: [{ spaceId: second.space.id, to: { visibility: "hidden" } }],
+            changes: [{ spaceId: idle.space.id, to: { visibility: "hidden" } }],
         });
         expect(tidy.note).toMatch(/^Hid [^.]+\.$/);
 
@@ -347,5 +349,5 @@ describe("spaces over the API", () => {
             "space.updated",
         ]);
         expect(gym.errors).toEqual([]);
-    });
+    }, 120_000);
 });

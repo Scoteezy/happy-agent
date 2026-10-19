@@ -77,3 +77,11 @@ The organiser was a hidden child agent called "Sidebar manager", invisible in Ha
 now Prioritizing, a conversation subtask of Happy made through `SubtasksModule`, listed in Happy's
 subtasks and shown while working or waiting like any other; an archived one is replaced on next
 use.
+
+## Recent work is never tucked away
+
+Six tidy requests in a row led a cheap model to hide every row but Happy, including a task that
+was running. The prompt already said working rows stay shown; the daemon now enforces it. A fold
+or hide of a row whose work is running, or was active in the last two hours, is answered with
+"…so it stays shown. Nothing was queued.", and a queued one is dropped at apply time if the work
+came back to life meanwhile. Untouched new work has no activity, so it may still be hidden.

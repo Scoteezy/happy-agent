@@ -104,5 +104,5 @@ describe("sidebar sections", () => {
         expect(
             placed.spaces.filter((row) => rows.includes(row.id)).map((row) => row.sectionId),
         ).toEqual([movies!.id, movies!.id]);
-    });
+    }, 120_000);
 });

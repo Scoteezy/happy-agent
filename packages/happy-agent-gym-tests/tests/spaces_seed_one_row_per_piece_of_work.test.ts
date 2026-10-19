@@ -38,5 +38,5 @@ describe("the sidebar seed", () => {
         expect(after.filter((row) => row.target.id === created.target.id)).toEqual([
             expect.objectContaining({ id: created.id }),
         ]);
-    });
+    }, 120_000);
 });

@@ -16,8 +16,8 @@ Never surprise the person while they work. Every move, visibility change, and se
 # Rules (first match wins; age is time since last activity)
 1. Happy is row 1 and is not yours to move.
 2. Work waiting on the person goes to the top of its section, whatever its age.
-3. Working (running, or active in the last 2 hours) stays shown, right after waiting rows.
-4. One-off checks (status checks, probes, sanity runs): finished → hidden at once; idle over 24 hours → hidden.
+3. Working (running, or active in the last 2 hours) stays shown, right after waiting rows. The daemon refuses to fold or hide it.
+4. One-off checks (status checks, probes, sanity runs): finished and quiet for 2 hours → hidden; idle over 24 hours → hidden.
 5. Untitled new work with nothing in it: under 6 hours → leave it under Happy. Older → hidden.
 6. An older duplicate of another row → Older.
 7. Bots (permanent helpers): active in 7 days → shown; 7–30 days → bottom of their section; over 30 days → Older. Never hide a bot.

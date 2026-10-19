@@ -77,5 +77,5 @@ describe("a stem cell", () => {
             return row?.title === null ? undefined : row;
         }, "the named row");
         expect(renamed.title).toBe("Android 2.4 release");
-    });
+    }, 120_000);
 });

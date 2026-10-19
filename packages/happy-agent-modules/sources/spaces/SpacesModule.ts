@@ -101,6 +101,8 @@ const CALM_CHECK_INTERVAL_MS = 15_000;
 const BRIEF_FUNCTION = "spaces.briefPrioritizing";
 const PRIORITIZING_METADATA_KEY = "spacesPrioritizingFor";
 const MAX_BRIEF_TEXT = 2_000;
+/** Work active this recently is never folded or hidden by Prioritizing. */
+export const SPACE_RECENT_WORK_MS = 2 * 60 * 60_000;
 
 const briefArgumentsSchema = Type.Object(
     {
@@ -690,6 +692,11 @@ export class SpacesModule implements AgentModule {
                 if (space.role !== "item") {
                     throw new SpaceConflictError("Happy cannot be moved.");
                 }
+                if (change.type === "visibility" && change.visibility !== "shown") {
+                    const busy = await this.#recentWork(txCtx, space);
+                    if (busy !== undefined)
+                        return `${busy}, so it stays shown. Nothing was queued.`;
+                }
             }
             if (change.type === "remove_section" || (change.type === "section" && !change.create)) {
                 const section = await querySection(txCtx, change.sectionId);
@@ -868,6 +875,17 @@ export class SpacesModule implements AgentModule {
             }
             const spaces = await querySpaces(txCtx, ownerUserId);
             const sections = await querySections(txCtx, ownerUserId);
+            // Work that came back to life since the change was queued is not tucked away.
+            const tuckable: SpacePendingChange[] = [];
+            for (const change of pending) {
+                const space =
+                    change.type === "visibility" && change.visibility !== "shown"
+                        ? spaces.find((row) => row.id === change.spaceId)
+                        : undefined;
+                if (space === undefined || (await this.#recentWork(txCtx, space)) === undefined) {
+                    tuckable.push(change);
+                }
+            }
             const titles = new Map<string, string>();
             for (const space of spaces) {
                 if (space.role === "item") {
@@ -877,7 +895,7 @@ export class SpacesModule implements AgentModule {
                 }
             }
             const now = Date.now();
-            const outcome = applySpaceChanges(ownerUserId, spaces, sections, pending, titles, now);
+            const outcome = applySpaceChanges(ownerUserId, spaces, sections, tuckable, titles, now);
             for (const section of outcome.createdSections) await insertSection(txCtx, section);
             for (const { section, previousVersion } of outcome.updatedSections) {
                 await updateSection(txCtx, section, previousVersion);
@@ -1091,6 +1109,17 @@ export class SpacesModule implements AgentModule {
             await writeOwnerState(txCtx, { ...state, prioritizingAgentId });
             return { prioritizingAgentId, happyAgentId: happyRef.agentId };
         });
+    }
+
+    /** Why this row's work counts as live — running now, or active in the last two hours. */
+    async #recentWork(ctx: Context, space: SpaceRecord): Promise<string | undefined> {
+        const description = await this.describe(ctx, space);
+        if (description.working) return "This row's work is running now";
+        const at = description.lastActivityAt;
+        if (at !== undefined && Date.now() - at < SPACE_RECENT_WORK_MS) {
+            return `This row was active ${formatAge(Date.now() - at)} ago`;
+        }
+        return undefined;
     }
 
     async #ownerState(ctx: Context, ownerUserId: SpaceOwnerId): Promise<SpaceOwnerState> {
