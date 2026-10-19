@@ -56,12 +56,13 @@ import { applySpaceChanges, compareRows, rowKeyAfter } from "./impl/applySpaceCh
 import { composeSpaceBatchNote } from "./impl/composeSpaceBatchNote.js";
 import { formatSpaceManagerInstructions } from "./impl/formatSpaceManagerInstructions.js";
 import { selectSpaceManagerRoute } from "./impl/selectSpaceManagerRoute.js";
-import { spaceContentKey, spaceRefKey } from "./impl/spaceRefKey.js";
+import { spaceContentKey } from "./impl/spaceRefKey.js";
 import {
     deletePendingChanges,
     insertBatch,
     insertSection,
     insertSpace,
+    insertSpaceIfAbsent,
     queryBatches,
     queryOwnerState,
     queryOwnerStates,
@@ -1107,9 +1108,8 @@ export class SpacesModule implements AgentModule {
         const drafts: SpaceEventDraft[] = [];
         let seeded = 0;
         const add = async (space: SpaceRecord): Promise<void> => {
-            if ((await querySpaceByRef(ctx, ownerUserId, spaceRefKey(space))) !== undefined) return;
-            await insertSpace(ctx, space);
-            drafts.push({ type: "space_created", space });
+            if (await insertSpaceIfAbsent(ctx, space))
+                drafts.push({ type: "space_created", space });
         };
         const happyBot = await this.#bots.chiefOfStaff(ctx);
         if (happyBot !== undefined) {
@@ -1258,9 +1258,6 @@ export class SpacesModule implements AgentModule {
         const ref = content as SpaceRef;
         await ctx.inTx(async (txCtx) => {
             if ((await queryOwnerState(txCtx, ownerUserId)) === undefined) return;
-            if ((await querySpaceByRef(txCtx, ownerUserId, spaceContentKey(ref))) !== undefined) {
-                return;
-            }
             const siblings = (await querySpaces(txCtx, ownerUserId)).filter(
                 (row) => row.role === "item" && row.sectionId === undefined,
             );
@@ -1278,7 +1275,7 @@ export class SpacesModule implements AgentModule {
                 createdAt: now,
                 updatedAt: now,
             };
-            await insertSpace(txCtx, space);
+            if (!(await insertSpaceIfAbsent(txCtx, space))) return;
             await this.#commitEvents(txCtx, ownerUserId, undefined, [
                 { type: "space_created", space },
             ]);

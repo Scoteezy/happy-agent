@@ -4,6 +4,7 @@ import { spaceMigrations, type SpaceRecord } from "../../sources/spaces/index.js
 import {
     deletePendingChanges,
     insertSpace,
+    insertSpaceIfAbsent,
     queryOwnersWithPendingChanges,
     queryPendingChanges,
     querySpace,
@@ -56,6 +57,32 @@ describe("spaces persistence", () => {
         await expect(updateSpace(ctx, { ...stored, version: 3 }, 1)).rejects.toThrow(
             "The space changed before it could be stored.",
         );
+        database.close();
+    });
+
+    it("frees a row's content key when the row hands its content over", async () => {
+        const database = moduleDatabase(spaceMigrations, "spaces-handover");
+        await database.ready;
+        const ctx = database.context;
+        const seeded = stemCell("rowaaaaaaaaaaaaaaaaaaaaa");
+        await insertSpace(ctx, seeded);
+        await updateSpace(ctx, { ...seeded, contents: [], visibility: "hidden", version: 2 }, 1);
+        await insertSpace(ctx, stemCell("rowbbbbbbbbbbbbbbbbbbbbb"));
+        expect(
+            (await querySpaceByRef(ctx, "standalone", "task:taskaaaaaaaaaaaaaaaaaaaa"))?.id,
+        ).toBe("rowbbbbbbbbbbbbbbbbbbbbb");
+        database.close();
+    });
+
+    it("seeds one row per piece of work however often seeding runs", async () => {
+        const database = moduleDatabase(spaceMigrations, "spaces-seed");
+        await database.ready;
+        const ctx = database.context;
+        expect(await insertSpaceIfAbsent(ctx, stemCell("rowaaaaaaaaaaaaaaaaaaaaa"))).toBe(true);
+        expect(await insertSpaceIfAbsent(ctx, stemCell("rowbbbbbbbbbbbbbbbbbbbbb"))).toBe(false);
+        expect((await querySpacesByAgent(ctx, AGENT)).map(({ id }) => id)).toEqual([
+            "rowaaaaaaaaaaaaaaaaaaaaa",
+        ]);
         database.close();
     });
 

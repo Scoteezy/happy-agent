@@ -15,3 +15,12 @@ reports now only defer the idle rule. The client signals `interacting` (hold eve
 `calm` (a gesture finished, or idle); only `calm`, idle, or a tidy the person asked for apply a
 batch, and never while `interacting` or mid-manager-turn. Applying a batch never changes what
 the person has selected.
+
+## One row per piece of work, enforced by the store
+
+A stem cell made before the sidebar was ever read collided with its own seeded row: the seed saw
+the new task, the stem cell took that row over, but the emptied row kept its content key and the
+insert failed. Every write now recomputes the key from the row's contents, and seeding is an
+insert-if-absent on `(owner, content key)`, so concurrent or repeated seeds can never make a
+second row for the same work. Rows that merely share a title are different conversations and are
+never merged.

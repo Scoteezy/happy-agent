@@ -115,6 +115,29 @@ export async function insertSpace(ctx: Context, space: SpaceRecord): Promise<voi
     );
 }
 
+/**
+ * Seed a row unless the person already has one for that content. Keyed on the content at the
+ * storage boundary, so two seeds racing for the same work leave one row and the loser learns it.
+ */
+export async function insertSpaceIfAbsent(ctx: Context, space: SpaceRecord): Promise<boolean> {
+    assertValue(spaceRecordSchema, space, "space");
+    const inserted = await agentDatabaseRows<{ readonly id: string }>(
+        ctx.db,
+        sql`INSERT INTO ${sql.raw(SPACES_TABLE)} (
+            id, owner_user_id, role, ref_key, name, icon_json, contents_json, section_id,
+            order_key, placement, visibility, manual_at, briefed_at, version, created_at,
+            updated_at
+        ) VALUES (
+            ${space.id}, ${space.ownerUserId}, ${space.role}, ${spaceRefKey(space)},
+            ${space.name ?? null}, ${space.icon === undefined ? null : JSON.stringify(space.icon)},
+            ${JSON.stringify(space.contents)}, ${space.sectionId ?? null}, ${space.orderKey},
+            ${space.placement}, ${space.visibility}, ${space.manualAt ?? null},
+            ${space.briefedAt ?? null}, ${space.version}, ${space.createdAt}, ${space.updatedAt}
+        ) ON CONFLICT (owner_user_id, ref_key) DO NOTHING RETURNING id`,
+    );
+    return inserted.length === 1;
+}
+
 /** Store a decided change; the version compare-and-swap refuses a row that moved meanwhile. */
 export async function updateSpace(
     ctx: Context,
@@ -125,7 +148,7 @@ export async function updateSpace(
     const changed = await agentDatabaseRows<{ readonly id: string }>(
         ctx.db,
         sql`UPDATE ${sql.raw(SPACES_TABLE)} SET
-            name = ${space.name ?? null},
+            ref_key = ${spaceRefKey(space)}, name = ${space.name ?? null},
             icon_json = ${space.icon === undefined ? null : JSON.stringify(space.icon)},
             contents_json = ${JSON.stringify(space.contents)},
             section_id = ${space.sectionId ?? null}, order_key = ${space.orderKey},
