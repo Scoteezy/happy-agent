@@ -32,3 +32,11 @@ with `named: false` and an empty title instead of "New Task"; notes call it "a n
 are otherwise never deleted, but a stem cell the person left without writing anything is not
 work: discard removes the row and archives its task, and refuses (409) as soon as the
 conversation holds any message.
+
+## Section names are unique per person
+
+On clean data a cheap manager created a "Movies" section for each of two new rows in one turn,
+and the batch put them in two sections with the same name. The daemon now owns the rule rather
+than the prompt: creating a section whose name (ignoring case and surrounding spaces) matches an
+existing or queued section returns that section's ID instead, carrying over any context or count
+it was given, and renaming a section onto another's name is refused.

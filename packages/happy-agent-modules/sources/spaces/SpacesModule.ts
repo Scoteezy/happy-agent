@@ -761,6 +761,27 @@ export class SpacesModule implements AgentModule {
                     throw new SpaceNotFoundError("The section was not found.");
                 }
             }
+            // Section names are unique per person: a second "Movies" becomes the first one.
+            if (change.type === "section" && change.name !== undefined) {
+                const twin = await this.#sectionNamed(txCtx, ownerUserId, change.name);
+                if (twin !== undefined && twin !== change.sectionId) {
+                    if (!change.create) {
+                        throw new SpaceConflictError(
+                            `Section ${twin} is already called ${change.name.trim()}. Move rows there instead.`,
+                        );
+                    }
+                    const { sectionId: _sectionId, create: _create, name: _name, ...rest } = change;
+                    if (Object.keys(rest).filter((key) => key !== "type").length > 0) {
+                        await this.queueChange(txCtx, ownerUserId, {
+                            ...rest,
+                            type: "section",
+                            sectionId: twin,
+                            create: false,
+                        });
+                    }
+                    return `Section ${twin} is already called ${change.name.trim()}; use it.`;
+                }
+            }
             const target =
                 change.type === "place" || change.type === "visibility"
                     ? `space:${change.spaceId}`
@@ -787,6 +808,36 @@ export class SpacesModule implements AgentModule {
                     : "Change queued";
             return `${what}. ${String(count)} changes wait for the next calm moment.`;
         });
+    }
+
+    /** The section this person has, or has queued, under this name, ignoring case and spaces. */
+    async #sectionNamed(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        name: string,
+    ): Promise<string | undefined> {
+        const key = name.trim().toLowerCase();
+        const pending = await queryPendingChanges(ctx, ownerUserId);
+        const removed = new Set(
+            pending.flatMap((change) =>
+                change.type === "remove_section" ? [change.sectionId] : [],
+            ),
+        );
+        const names = new Map<string, string>();
+        for (const section of await querySections(ctx, ownerUserId)) {
+            names.set(section.id, section.name);
+        }
+        for (const change of pending) {
+            if (change.type === "section" && change.name !== undefined) {
+                names.set(change.sectionId, change.name);
+            }
+        }
+        for (const [sectionId, sectionName] of names) {
+            if (!removed.has(sectionId) && sectionName.trim().toLowerCase() === key) {
+                return sectionId;
+            }
+        }
+        return undefined;
     }
 
     /** Set an icon now. Only the manager calls this. */

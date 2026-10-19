@@ -157,7 +157,7 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
         defineAgentTool({
             name: "update_section",
             description:
-                "Create a section (omit sectionId and give a name) or change one: its name, one-line context, visible count, or position. Returns the section ID, which place_space can use right away. Applies at the next calm moment.",
+                "Create a section (omit sectionId and give a name) or change one: its name, one-line context, visible count, or position. Returns the section ID, which place_space can use right away. Names are unique: creating a name that exists returns the existing section. Applies at the next calm moment.",
             parameters: updateSectionSchema,
             returnType: textResultSchema,
             durable: true,
