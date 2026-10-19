@@ -1318,6 +1318,24 @@ export class SpacesModule implements AgentModule {
                         event.previousTask.status !== "archived"
                     ) {
                         await this.#closeWork(ctx, `task:${event.task.id}`);
+                    } else if (
+                        event.task.status === "active" &&
+                        event.previousTask.status === "archived"
+                    ) {
+                        // Back from the archive: every member's sidebar gets it again.
+                        for (const state of await queryOwnerStates(ctx)) {
+                            const member = await this.#tasks.membership(
+                                ctx,
+                                event.task.id,
+                                state.ownerUserId,
+                            );
+                            if (member === undefined) continue;
+                            await this.#addWork(ctx, state.ownerUserId, {
+                                kind: "task",
+                                taskId: event.task.id,
+                                agentId: event.task.agentId,
+                            });
+                        }
                     } else if (event.task.name !== event.previousTask.name) {
                         await this.#touchWork(ctx, `task:${event.task.id}`);
                     }
@@ -1388,22 +1406,23 @@ export class SpacesModule implements AgentModule {
         });
     }
 
-    /** The work ended or was left: its rows are hidden at once, never deleted. */
+    /**
+     * The work was archived or left: its rows leave the sidebar at once, with anything queued
+     * for them. The work itself keeps its history; unarchiving brings a fresh row back.
+     */
     async #closeWork(ctx: Context, refKey: string, owners?: readonly string[]): Promise<void> {
         await ctx.inTx(async (txCtx) => {
             for (const row of await querySpacesByRef(txCtx, refKey)) {
                 if (owners !== undefined && !owners.includes(row.ownerUserId)) continue;
-                if (row.visibility === "hidden") continue;
-                const next: SpaceRecord = {
-                    ...row,
-                    visibility: "hidden",
-                    placement: "settled",
-                    version: row.version + 1,
-                    updatedAt: Date.now(),
-                };
-                await updateSpace(txCtx, next, row.version);
+                if (row.role !== "item") continue;
+                await deleteSpace(txCtx, row.id);
+                await deletePendingChanges(txCtx, row.ownerUserId, [`space:${row.id}`]);
                 await this.#commitEvents(txCtx, row.ownerUserId, undefined, [
-                    { type: "space_updated", space: next, previousVersion: row.version },
+                    { type: "space_removed", spaceId: row.id },
+                    {
+                        type: "batch_queued",
+                        pendingChanges: (await queryPendingChanges(txCtx, row.ownerUserId)).length,
+                    },
                 ]);
             }
         });

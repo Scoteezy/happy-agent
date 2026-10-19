@@ -40,3 +40,10 @@ and the batch put them in two sections with the same name. The daemon now owns t
 than the prompt: creating a section whose name (ignoring case and surrounding spaces) matches an
 existing or queued section returns that section's ID instead, carrying over any context or count
 it was given, and renaming a section onto another's name is refused.
+
+## Archived work leaves the sidebar
+
+Archiving a task only hid its row, which still came back from `GET /v0/spaces` and looked like a
+leftover to clients. Archiving (or leaving) work now removes its rows and anything queued for
+them, with `space.removed`; unarchiving adds a fresh pending row for each member. `hidden`
+remains the manager's choice for live work it tucks away.
