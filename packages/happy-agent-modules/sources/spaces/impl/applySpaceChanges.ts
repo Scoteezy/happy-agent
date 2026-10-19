@@ -26,7 +26,7 @@ export interface SpaceChangeOutcome {
  * Apply queued changes to one person's sidebar, in the order they were asked for.
  *
  * A change naming a row or section that no longer exists is dropped rather than failing the whole
- * batch: the person may have closed or moved things since the manager decided. Placing a row
+ * batch: the person may have closed or moved things since Prioritizing decided. Placing a row
  * shows it and settles its placement; a section that is removed while rows remain in it folds
  * those rows into Older instead of losing them.
  */
@@ -84,14 +84,12 @@ export function applySpaceChanges(
                 if (sectionId !== undefined && (!shelves.has(sectionId) || removed.has(sectionId)))
                     break;
                 const siblings = [...rows.values()]
-                    .filter(
-                        (other) =>
-                            other.id !== row.id &&
-                            other.role === "item" &&
-                            other.sectionId === sectionId,
-                    )
+                    .filter((other) => other.id !== row.id && other.sectionId === sectionId)
                     .sort(compareRows);
-                row.orderKey = rowKeyAfter(siblings, change.afterId ?? null);
+                row.orderKey =
+                    change.afterId === undefined || change.afterId === null
+                        ? rowKeyAtTop(siblings)
+                        : rowKeyAfter(siblings, change.afterId);
                 if (sectionId === undefined) delete row.sectionId;
                 else row.sectionId = sectionId;
                 row.visibility = "shown";
@@ -202,6 +200,15 @@ export function compareRows(left: SpaceRecord, right: SpaceRecord): number {
         : left.orderKey > right.orderKey
           ? 1
           : left.id.localeCompare(right.id);
+}
+
+/**
+ * The key for the top of a section: right after Happy where Happy sits, so new and moved work
+ * stays below it, otherwise first.
+ */
+export function rowKeyAtTop(siblings: readonly SpaceRecord[]): string {
+    const happy = siblings.find((sibling) => sibling.role === "happy");
+    return rowKeyAfter(siblings, happy?.id ?? null);
 }
 
 /** A key placing a row after `afterId` among `siblings`, or first when it is null or absent. */

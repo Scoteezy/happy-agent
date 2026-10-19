@@ -47,7 +47,7 @@ describe("archived work", () => {
         );
         expect(await removedIds()).toContain(viaTask.space.id);
 
-        // Unarchiving brings the work back as a new row for the manager to place.
+        // Unarchiving brings the work back as a new row for Prioritizing to place.
         const archived = (await gym.client.getTask(taskId)).task;
         await gym.client.unarchiveTask(taskId, { ifMatch: archived.version });
         const back = await gym.waitUntil(async () => {

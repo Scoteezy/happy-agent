@@ -19,16 +19,21 @@ export const createStemCellRequestSchema = Type.Object(
     { additionalProperties: false },
 );
 
-export const moveSpaceRequestSchema = Type.Object(
+/** The person's own change to a row: a move, a visibility, or removal of untouched new work. */
+export const updateSpaceRequestSchema = Type.Object(
     {
-        sectionId: Type.Union([cuid2Schema, Type.Null()]),
-        afterId: Type.Union([cuid2Schema, Type.Null()]),
+        sectionId: Type.Optional(Type.Union([cuid2Schema, Type.Null()])),
+        afterId: Type.Optional(Type.Union([cuid2Schema, Type.Null()])),
+        visibility: Type.Optional(
+            Type.Union([Type.Literal("shown"), Type.Literal("folded"), Type.Literal("hidden")]),
+        ),
+        removed: Type.Optional(Type.Literal(true)),
         mutationId,
     },
     { additionalProperties: false },
 );
 
-export const sectionDisclosureRequestSchema = Type.Object(
+export const updateSpaceSectionRequestSchema = Type.Object(
     {
         collapsed: Type.Optional(Type.Boolean()),
         tailExpanded: Type.Optional(Type.Boolean()),
@@ -43,7 +48,7 @@ export const spaceAttentionRequestSchema = Type.Object(
     { additionalProperties: false },
 );
 
-/** A body carrying nothing but an optional mutation ID: tidy, discard. */
+/** A body carrying nothing but an optional mutation ID. */
 export const spaceTidyRequestSchema = Type.Object({ mutationId }, { additionalProperties: false });
 
 /**
@@ -58,7 +63,6 @@ export function spaceResource(
     if (target === undefined) return undefined;
     return {
         id: space.id,
-        role: space.role,
         // Work that has not named itself yet has no title; clients label it themselves.
         title: description.named ? description.title : null,
         icon:

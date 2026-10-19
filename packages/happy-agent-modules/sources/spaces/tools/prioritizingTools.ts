@@ -65,25 +65,30 @@ const removeSectionSchema = Type.Object(
 );
 
 /**
- * The manager's whole tool array. Everything that moves a row or a section is queued for the next
- * calm moment; only icons apply at once. Each tool restates its outcome so the
- * manager never has to guess whether a change already happened.
+ * Prioritizing's whole tool array. Everything that moves a row or a section is queued for the next
+ * calm moment; only icons apply at once. Each tool restates its outcome so
+ * Prioritizing never has to guess whether a change already happened.
  */
-export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): AnyAgentTool[] {
+export function prioritizingTools(spaces: SpacesModule, ownerUserId: string): AnyAgentTool[] {
     return [
         defineAgentTool({
             name: "list_sidebar",
+            // Prioritizing has no tool search, so its whole array is loaded at once.
+            defer: false,
+            capabilities: ["Read the person's whole sidebar with row and section IDs."],
             description:
                 "Show the person's sidebar: sections in order, the rows in each with their IDs, icons, state, and last activity, rows under Happy, Older, hidden rows, and changes already queued.",
             parameters: emptySchema,
             returnType: textResultSchema,
             durable: true,
             shouldReviewInAutoMode: () => false,
-            execute: async (ctx) => ({ text: await spaces.managerOverview(ctx, ownerUserId) }),
+            execute: async (ctx) => ({ text: await spaces.prioritizingOverview(ctx, ownerUserId) }),
             toLLM,
         }),
         defineAgentTool({
             name: "place_space",
+            defer: false,
+            capabilities: ["Queue moving a sidebar row into a section."],
             description:
                 "Queue moving a row into a section (or directly under Happy with sectionId null), at the top or after another row. Placing a row shows it and settles its placement. Applies at the next calm moment.",
             parameters: placeSpaceSchema,
@@ -102,6 +107,8 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
         }),
         defineAgentTool({
             name: "set_space_visibility",
+            defer: false,
+            capabilities: ["Queue showing, folding, or hiding a sidebar row."],
             description:
                 'Queue showing a row, folding it into Older ("folded"), or hiding it ("hidden"). Hidden rows stay in History; nothing is deleted. Applies at the next calm moment.',
             parameters: setVisibilitySchema,
@@ -119,6 +126,8 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
         }),
         defineAgentTool({
             name: "set_space_icon",
+            defer: false,
+            capabilities: ["Set a sidebar row's icon."],
             description:
                 "Set a row's icon to one slug of the icon library. Applies at once, because it moves nothing.",
             parameters: setIconSchema,
@@ -132,6 +141,8 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
         }),
         defineAgentTool({
             name: "update_section",
+            defer: false,
+            capabilities: ["Queue creating, renaming, or reordering a sidebar section."],
             description:
                 "Create a section (omit sectionId and give a name) or change one: its name, visible count, or position. Returns the section ID, which place_space can use right away. Names are unique: creating a name that exists returns the existing section. Applies at the next calm moment.",
             parameters: updateSectionSchema,
@@ -166,6 +177,8 @@ export function spaceManagerTools(spaces: SpacesModule, ownerUserId: string): An
         }),
         defineAgentTool({
             name: "remove_section",
+            defer: false,
+            capabilities: ["Queue removing a sidebar section."],
             description:
                 "Queue removing a section. Rows still in it when the batch applies fold into Older. Applies at the next calm moment.",
             parameters: removeSectionSchema,

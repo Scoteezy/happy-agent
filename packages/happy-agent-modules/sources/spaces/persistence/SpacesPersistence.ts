@@ -165,7 +165,7 @@ export async function deleteSpace(ctx: Context, spaceId: string): Promise<void> 
     await agentDatabaseRun(ctx.db, sql`DELETE FROM ${sql.raw(SPACES_TABLE)} WHERE id = ${spaceId}`);
 }
 
-/** Record that the manager was told about this row. Bookkeeping only; the row does not move. */
+/** Record that Prioritizing was told about this row. Bookkeeping only; the row does not move. */
 export async function updateSpaceBriefedAt(
     ctx: Context,
     spaceId: string,
@@ -267,7 +267,7 @@ interface PendingRow {
     readonly change_json: string;
 }
 
-/** The changes waiting for a calm moment, in the order the manager asked for them. */
+/** The changes waiting for a calm moment, in the order Prioritizing asked for them. */
 export async function queryPendingChanges(
     ctx: Context,
     ownerUserId: string,
@@ -292,7 +292,7 @@ export async function queryOwnersWithPendingChanges(ctx: Context): Promise<strin
 
 /**
  * Queue one change. A later change to the same target replaces the earlier one and moves to the
- * end, so the batch reflects the manager's last word in the order it decided.
+ * end, so the batch reflects Prioritizing's last word in the order it decided.
  */
 export async function upsertPendingChange(
     ctx: Context,

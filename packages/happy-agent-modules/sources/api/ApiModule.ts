@@ -363,8 +363,8 @@ import {
 } from "../spaces/index.js";
 import {
     createStemCellRequestSchema,
-    moveSpaceRequestSchema,
-    sectionDisclosureRequestSchema,
+    updateSpaceRequestSchema,
+    updateSpaceSectionRequestSchema,
     spaceBatchResource,
     spaceAttentionRequestSchema,
     spaceResource,
@@ -6891,18 +6891,16 @@ export class ApiModule implements AgentModule {
                 response.writeHead(202).end();
                 return true;
             }
-            const disclosure = /^\/v0\/spaces\/sections\/([a-z][a-z0-9]*)\/collapse$/.exec(
-                url.pathname,
-            );
-            if (disclosure !== null && request.method === "POST") {
-                const body = await bodyAs(request, sectionDisclosureRequestSchema, "collapse");
+            const section = /^\/v0\/spaces\/sections\/([a-z][a-z0-9]*)$/.exec(url.pathname);
+            if (section !== null && request.method === "PATCH") {
+                const body = await bodyAs(request, updateSpaceSectionRequestSchema, "section");
                 if (body.collapsed === undefined && body.tailExpanded === undefined) {
                     throw invalidRequest("Say whether the section or its tail is open.");
                 }
-                const section = await spaces.setSectionDisclosure(
+                const next = await spaces.setSectionDisclosure(
                     ctx,
                     owner,
-                    disclosure[1] as string,
+                    section[1] as string,
                     {
                         ...(body.collapsed === undefined ? {} : { collapsed: body.collapsed }),
                         ...(body.tailExpanded === undefined
@@ -6911,28 +6909,26 @@ export class ApiModule implements AgentModule {
                     },
                     body.mutationId,
                 );
-                sendJson(response, 200, { section: spaceSectionResource(section) });
+                sendJson(response, 200, { section: spaceSectionResource(next) });
                 return true;
             }
-            const move = /^\/v0\/spaces\/([a-z][a-z0-9]*)\/move$/.exec(url.pathname);
-            if (move !== null && request.method === "POST") {
-                const body = await bodyAs(request, moveSpaceRequestSchema, "move");
-                const space = await spaces.move(
-                    ctx,
-                    owner,
-                    move[1] as string,
-                    body.sectionId,
-                    body.afterId,
-                    body.mutationId,
+            const row = /^\/v0\/spaces\/([a-z][a-z0-9]*)$/.exec(url.pathname);
+            if (row !== null && request.method === "PATCH") {
+                const { mutationId, removed, ...change } = await bodyAs(
+                    request,
+                    updateSpaceRequestSchema,
+                    "space",
                 );
+                const changing = Object.keys(change).length > 0;
+                if (removed === true) {
+                    if (changing) throw invalidRequest("A removed row cannot also be changed.");
+                    await spaces.remove(ctx, owner, row[1] as string, mutationId);
+                    response.writeHead(204).end();
+                    return true;
+                }
+                if (!changing) throw invalidRequest("Say how the row changes.");
+                const space = await spaces.update(ctx, owner, row[1] as string, change, mutationId);
                 sendJson(response, 200, { space: await this.#spaceResource(ctx, space) });
-                return true;
-            }
-            const discard = /^\/v0\/spaces\/([a-z][a-z0-9]*)\/discard$/.exec(url.pathname);
-            if (discard !== null && request.method === "POST") {
-                const body = await bodyAs(request, spaceTidyRequestSchema, "discard");
-                await spaces.discard(ctx, owner, discard[1] as string, body.mutationId);
-                response.writeHead(204).end();
                 return true;
             }
         } catch (error: unknown) {

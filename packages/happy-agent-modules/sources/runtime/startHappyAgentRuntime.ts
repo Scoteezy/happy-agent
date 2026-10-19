@@ -684,6 +684,7 @@ export async function startHappyAgentRuntime(
             history,
             events,
             durableFunctions,
+            subtasks,
         );
         registerShutdown("spaces", async () => await spaces.close());
         const apiModule = new ApiModule(

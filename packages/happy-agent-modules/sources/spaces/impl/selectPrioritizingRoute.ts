@@ -1,8 +1,8 @@
 import type { AgentModel } from "@slopus/happy-agent-base";
 import type { SessionReasoningEffort } from "@slopus/happy-providers";
 
-/** The model, account, and effort a manager turn runs on. */
-export interface SpaceManagerRoute {
+/** The model, account, and effort a Prioritizing turn runs on. */
+export interface PrioritizingRoute {
     readonly providerId: string;
     readonly model: string;
     readonly effort: SessionReasoningEffort;
@@ -21,14 +21,14 @@ const ECONOMICAL_MODEL_IDS = [
 const CHEAPEST_EFFORTS: readonly SessionReasoningEffort[] = ["off", "minimal", "low", "medium"];
 
 /**
- * Picks what the manager runs on: the cheapest model of the account Happy runs on, because only
+ * Picks what Prioritizing runs on: the cheapest model of the account Happy runs on, because only
  * that account is known to be signed in and paid for, and then of the installation's default
  * account.
  */
-export function selectSpaceManagerRoute(
+export function selectPrioritizingRoute(
     models: readonly AgentModel[],
     preferredProviderId: string | undefined,
-): SpaceManagerRoute | undefined {
+): PrioritizingRoute | undefined {
     const served =
         servedBy(models, preferredProviderId) ?? servedBy(models, models[0]?.providerId) ?? models;
     const model =

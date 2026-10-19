@@ -25,7 +25,7 @@ export const spaceIconSlugSchema = Type.Union(SPACE_ICON_SLUGS.map((slug) => Typ
 /** Happy is row one, exactly once per person; every other row is an item. */
 export const spaceRoleSchema = Type.Union([Type.Literal("happy"), Type.Literal("item")]);
 
-/** Pending means the manager has not placed the row yet; its position is still its section. */
+/** Pending means Prioritizing has not placed the row yet; its position is still its section. */
 export const spacePlacementSchema = Type.Union([Type.Literal("pending"), Type.Literal("settled")]);
 
 /** Shown in its section, folded into Older at the bottom, or hidden. Hidden is never deletion. */
@@ -80,7 +80,7 @@ export const spaceRecordSchema = Type.Object(
         id: cuid2Schema,
         ownerUserId: spaceOwnerIdSchema,
         role: spaceRoleSchema,
-        /** Absent until the manager chooses one. */
+        /** Absent until Prioritizing chooses one. */
         icon: Type.Optional(spaceIconSchema),
         contents: Type.Array(spaceRefSchema, { maxItems: 32 }),
         /** Absent: directly under Happy, which is where unplaced new work waits. */
@@ -88,9 +88,9 @@ export const spaceRecordSchema = Type.Object(
         orderKey: spaceOrderKeySchema,
         placement: spacePlacementSchema,
         visibility: spaceVisibilitySchema,
-        /** When the person last moved this row by hand; the manager leaves it there. */
+        /** When the person last moved this row by hand; Prioritizing leaves it there. */
         manualAt: Type.Optional(spaceTimestampSchema),
-        /** When the manager was first told about this row's work, so it is told only once. */
+        /** When Prioritizing was first told about this row's work, so it is told only once. */
         briefedAt: Type.Optional(spaceTimestampSchema),
         version: spaceVersionSchema,
         createdAt: spaceTimestampSchema,
@@ -117,7 +117,7 @@ export const spaceSectionRecordSchema = Type.Object(
 );
 
 /**
- * One reorganisation the manager wants and has not been allowed to make yet. Changes wait until
+ * One reorganisation Prioritizing wants and has not been allowed to make yet. Changes wait until
  * the person is calm, then apply together as one batch.
  */
 export const spacePendingChangeSchema = Type.Union([
@@ -213,10 +213,10 @@ export const spaceBatchSchema = Type.Object(
 export const spaceOwnerStateSchema = Type.Object(
     {
         ownerUserId: spaceOwnerIdSchema,
-        managerAgentId: Type.Optional(cuid2Schema),
+        prioritizingAgentId: Type.Optional(cuid2Schema),
         /**
-         * The person asked for something to happen now — a tidy, or a move in their own words —
-         * so the queued changes apply as soon as the manager finishes, without waiting for calm.
+         * The person asked for something to happen now — a move in their own words, or a new sidebar to organise —
+         * so the queued changes apply as soon as Prioritizing finishes, without waiting for calm.
          */
         applyRequestedAt: Type.Optional(spaceTimestampSchema),
     },
@@ -252,7 +252,7 @@ export interface SpaceTarget {
     readonly workspaceId?: string;
 }
 
-/** A row's content resolved for display and for the manager's judgement. */
+/** A row's content resolved for display and for Prioritizing's judgement. */
 export interface SpaceDescription {
     readonly title: string;
     /** False while the content still carries a placeholder name it will replace itself. */

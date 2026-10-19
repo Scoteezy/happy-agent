@@ -22,9 +22,9 @@ interface Snapshot {
     readonly sections: readonly { readonly id: string; readonly name: string }[];
 }
 
-/** A manager that makes a "Movies" section for every piece of new work, as a cheap model did. */
+/** A Prioritizing script that makes a "Movies" section for every piece of new work, as a cheap model did. */
 function sectionPerRow(request: GymInferenceRequest): GymTurn {
-    if (!request.instructions.includes("You are the sidebar manager")) {
+    if (!request.instructions.includes("You are Prioritizing")) {
         return { content: [{ type: "text", text: "Done." }] };
     }
     const last = request.messages.at(-1);
@@ -72,7 +72,7 @@ describe("sidebar sections", () => {
         const placements = () =>
             gym.inference.requests.filter(
                 (request) =>
-                    request.instructions.includes("You are the sidebar manager") &&
+                    request.instructions.includes("You are Prioritizing") &&
                     JSON.stringify(request.messages.at(-1)).includes("Change queued"),
             ).length;
         const rows: string[] = [];

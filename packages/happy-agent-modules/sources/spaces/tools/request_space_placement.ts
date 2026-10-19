@@ -30,17 +30,19 @@ type RequestSpacePlacementInput = Static<typeof requestSpacePlacementSchema>;
 const resultSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
 
 /**
- * The only sidebar write other agents have: they ask the sidebar manager, which decides. Keyed by
+ * The only sidebar write other agents have: they ask Prioritizing, which decides. Keyed by
  * the tool call, so a retried call asks once.
  */
 export function requestSpacePlacementTool(spaces: SpacesModule, actingAgentId: string) {
     return defineAgentTool({
         name: "request_space_placement",
         defer: true,
-        capabilities: ["Ask the sidebar manager to place, fold, or hide a conversation's row."],
+        capabilities: [
+            "Ask Prioritizing to place, fold, or hide a conversation's row in the sidebar.",
+        ],
         searchKeywords: ["sidebar", "move to section", "organize sidebar", "put this in"],
         description:
-            "Ask the person's sidebar manager to move a conversation's row in their sidebar: into a section, to Older, or out of sight. The manager decides and applies it at a calm moment, or at once when the person explicitly asked.",
+            "Ask Prioritizing, the helper that organises the person's sidebar, to move a conversation's row: into a section, to Older, or out of sight. Prioritizing decides and applies it at a calm moment, or at once when the person explicitly asked.",
         parameters: requestSpacePlacementSchema,
         returnType: resultSchema,
         durable: true,

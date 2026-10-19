@@ -126,4 +126,16 @@ export const spaceMigrations = [
             }
         },
     ],
+    [
+        "003-prioritizing",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            // The hidden sidebar manager became Prioritizing, a subtask of Happy. Its old agent is
+            // forgotten, and the next brief makes the subtask; rows and sections are kept.
+            await agentDatabaseRun(
+                database,
+                sql`UPDATE ${sql.raw(SPACE_OWNERS_TABLE)}
+                    SET state_json = json_remove(state_json, '$.managerAgentId')`,
+            );
+        },
+    ],
 ] as const;

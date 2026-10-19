@@ -14,7 +14,6 @@ afterEach(async () => {
 
 interface Space {
     readonly id: string;
-    readonly role: string;
     readonly title: string | null;
     readonly icon: { readonly type: string; readonly slug?: string } | null;
     readonly target: { readonly kind: string; readonly agentId: string | null };
@@ -43,7 +42,7 @@ interface Batch {
     }[];
 }
 
-const MANAGER_TOOLS = [
+const PRIORITIZING_TOOLS = [
     "list_sidebar",
     "place_space",
     "remove_section",
@@ -53,10 +52,10 @@ const MANAGER_TOOLS = [
 ];
 
 /**
- * A scripted sidebar manager. New work gets an icon and, when unplaced, a "Releases" section and
+ * A scripted Prioritizing. New work gets an icon and, when unplaced, a "Releases" section and
  * a placement there; a tidy request hides the row the test named. Everything else is plain text.
  */
-function scriptedManager(state: { hideOnTidy?: string }) {
+function scriptedPrioritizing(state: { hideOnTidy?: string }) {
     let call = 0;
     const tool = (name: string, args: Record<string, unknown>) => ({
         type: "tool_call" as const,
@@ -65,7 +64,7 @@ function scriptedManager(state: { hideOnTidy?: string }) {
         callId: `space_tool_${String(++call)}`,
     });
     return (request: GymInferenceRequest): GymTurn => {
-        if (!request.instructions.includes("You are the sidebar manager")) {
+        if (!request.instructions.includes("You are Prioritizing")) {
             return { content: [{ type: "text", text: "Done." }] };
         }
         const last = request.messages.at(-1);
@@ -83,7 +82,7 @@ function scriptedManager(state: { hideOnTidy?: string }) {
                     ],
                 };
             }
-            if (text.includes("tidy the sidebar now") && state.hideOnTidy !== undefined) {
+            if (text.includes("Tidy the sidebar now.") && state.hideOnTidy !== undefined) {
                 return {
                     content: [
                         tool("set_space_visibility", {
@@ -110,30 +109,37 @@ function scriptedManager(state: { hideOnTidy?: string }) {
 describe("spaces over the API", () => {
     it("places new work after its first message at a calm moment, with one note and a diff", async () => {
         const state: { hideOnTidy?: string } = {};
-        const gym = await createAgentGym({ timeoutMs: 30_000, inference: scriptedManager(state) });
+        const gym = await createAgentGym({
+            timeoutMs: 30_000,
+            inference: scriptedPrioritizing(state),
+        });
         running.add(gym);
         const snapshot = async () => await gym.http.ok<Snapshot>("GET", "/v0/spaces");
         const space = async (id: string) => (await snapshot()).spaces.find((row) => row.id === id)!;
         const batches = async () =>
             (await gym.http.ok<{ batches: Batch[] }>("GET", "/v0/spaces/batches")).batches;
-        const isManager = (request: GymInferenceRequest) =>
-            request.instructions.includes("You are the sidebar manager");
-        // The manager is idle once every run it started has finished.
-        const managerIdle = async () => {
-            const managerId = gym.inference.requests.find(isManager)?.sessionId;
-            if (managerId === undefined) return undefined;
-            const events = await gym.sessionEvents(managerId);
+        const isPrioritizing = (request: GymInferenceRequest) =>
+            request.instructions.includes("You are Prioritizing");
+        // Prioritizing is idle once every run it started has finished.
+        const prioritizingIdle = async () => {
+            const prioritizingId = gym.inference.requests.find(isPrioritizing)?.sessionId;
+            if (prioritizingId === undefined) return undefined;
+            const events = await gym.sessionEvents(prioritizingId);
             const started = events.filter((event) => event["type"] === "run.started").length;
             const finished = events.filter((event) => event["type"] === "run.finished").length;
             return started > 0 && started === finished ? true : undefined;
         };
 
-        // Happy is row one before anything else exists.
+        // Happy is row one before anything else exists: an ordinary row for Happy's bot.
         const initial = await snapshot();
         const happy = initial.spaces[0]!;
-        expect(happy).toMatchObject({ role: "happy", title: "Happy", visibility: "shown" });
-        // The manager is a helper of Happy, not a row.
-        expect(initial.spaces.map(({ role }) => role)).toEqual(["happy"]);
+        expect(happy).toMatchObject({
+            title: "Happy",
+            visibility: "shown",
+            target: { kind: "bot" },
+        });
+        expect(happy).not.toHaveProperty("role");
+        expect(initial.spaces).toHaveLength(1);
 
         // ⌘N: a fresh conversation with no project, waiting under Happy.
         const created = await gym.http.ok<{
@@ -151,27 +157,27 @@ describe("spaces over the API", () => {
         const retried = await gym.http.post("/v0/spaces/stem-cells", { id: created.space.id });
         expect(retried.status).toBe(200);
 
-        // The first message is an ordinary send; the manager names an icon at once and queues
+        // The first message is an ordinary send; Prioritizing names an icon at once and queues
         // the placement, which waits while the person is interacting.
         await gym.http.ok("POST", "/v0/spaces/attention", { state: "interacting" });
         await gym.send("Plan the Android 2.4 release.", { sessionId: created.agent.id });
         await gym.waitUntil(
             async () =>
                 (await space(created.space.id)).icon?.slug === "android" ? true : undefined,
-            "the manager's icon",
+            "the Prioritizing icon",
         );
         await gym.waitUntil(
             () =>
                 gym.inference.requests.some(
                     (request) =>
-                        isManager(request) &&
+                        isPrioritizing(request) &&
                         JSON.stringify(request.messages.at(-1)).includes("Change queued"),
                 )
                     ? true
                     : undefined,
             "the queued placement",
         );
-        await gym.waitUntil(managerIdle, "the manager to finish");
+        await gym.waitUntil(prioritizingIdle, "Prioritizing to finish");
         const queued = await snapshot();
         expect(await batches()).toEqual([]);
         expect(queued.spaces.find((row) => row.id === created.space.id)).toMatchObject({
@@ -180,12 +186,25 @@ describe("spaces over the API", () => {
         });
         expect(queued.sections).toEqual([]);
 
-        // The manager has exactly its own tools; ordinary conversations may only ask it.
-        const managerRequest = gym.inference.requests.find((request) =>
-            request.instructions.includes("You are the sidebar manager"),
-        )!;
-        expect(managerRequest.tools.map(({ name }) => name).sort()).toEqual(MANAGER_TOOLS);
-        expect(JSON.stringify(managerRequest.messages)).toContain("Plan the Android 2.4 release.");
+        // Prioritizing has exactly its own tools; ordinary conversations may only ask it.
+        const prioritizingRequest = gym.inference.requests.find(isPrioritizing)!;
+        expect(prioritizingRequest.tools.map(({ name }) => name).sort()).toEqual(
+            PRIORITIZING_TOOLS,
+        );
+        expect(JSON.stringify(prioritizingRequest.messages)).toContain(
+            "Plan the Android 2.4 release.",
+        );
+        // It is an ordinary subtask of Happy, listed in Happy's subtasks.
+        const happyAgent = await gym.http.ok<{
+            agent: { subtasks: { id: string; title: string; subtask: boolean }[] };
+        }>("GET", `/v0/agents/${happy.target.agentId!}`);
+        expect(happyAgent.agent.subtasks).toContainEqual(
+            expect.objectContaining({
+                id: prioritizingRequest.sessionId,
+                title: "Prioritizing",
+                subtask: true,
+            }),
+        );
         const taskRequest = gym.inference.requests.find(
             (request) => request.sessionId === created.agent.id,
         )!;
@@ -223,7 +242,7 @@ describe("spaces over the API", () => {
             .find((message) => message.id === batch!.noteMessageId);
         expect(JSON.stringify(note?.content)).toContain(batch!.note);
 
-        // A section's +: placed by the person, at the top; the manager only chooses its icon.
+        // A section's +: placed by the person, at the top; Prioritizing only chooses its icon.
         const second = await gym.http.ok<{ space: Space; agent: { id: string } }>(
             "POST",
             "/v0/spaces/stem-cells",
@@ -239,13 +258,13 @@ describe("spaces over the API", () => {
             async () => ((await space(second.space.id)).icon?.slug === "build" ? true : undefined),
             "the second icon",
         );
-        await gym.waitUntil(managerIdle, "the manager to finish");
+        await gym.waitUntil(prioritizingIdle, "Prioritizing to finish");
         expect(await batches()).toHaveLength(1);
 
-        // The person's own drag and disclosure apply at once.
+        // The person's own changes are PATCHes and apply at once.
         const moved = await gym.http.ok<{ space: Space }>(
-            "POST",
-            `/v0/spaces/${second.space.id}/move`,
+            "PATCH",
+            `/v0/spaces/${second.space.id}`,
             { sectionId: releases.id, afterId: created.space.id },
         );
         expect(
@@ -253,25 +272,60 @@ describe("spaces over the API", () => {
                 placed.spaces.find((row) => row.id === created.space.id)!.orderKey,
         ).toBe(true);
         expect(moved.space).toMatchObject({ placement: "settled", visibility: "shown" });
+        const folded = await gym.http.ok<{ space: Space }>(
+            "PATCH",
+            `/v0/spaces/${created.space.id}`,
+            { visibility: "folded" },
+        );
+        expect(folded.space).toMatchObject({ visibility: "folded", sectionId: releases.id });
+        const shown = await gym.http.ok<{ space: Space }>(
+            "PATCH",
+            `/v0/spaces/${created.space.id}`,
+            { visibility: "shown" },
+        );
+        expect(shown.space.visibility).toBe("shown");
         const opened = await gym.http.ok<{ section: Section }>(
-            "POST",
-            `/v0/spaces/sections/${releases.id}/collapse`,
+            "PATCH",
+            `/v0/spaces/sections/${releases.id}`,
             { tailExpanded: true },
         );
         expect(opened.section.tailExpanded).toBe(true);
-        const badMove = await gym.http.post(`/v0/spaces/${happy.id}/move`, {
+        expect((await gym.http.patch(`/v0/spaces/${happy.id}`, {})).status).toBe(400);
+        expect((await gym.http.patch(`/v0/spaces/${happy.id}`, { afterId: happy.id })).status).toBe(
+            409,
+        );
+        expect(
+            (await gym.http.patch(`/v0/spaces/${created.space.id}`, { removed: true })).status,
+        ).toBe(409);
+        // The person may drag Happy like any other row.
+        const happyMoved = await gym.http.ok<{ space: Space }>("PATCH", `/v0/spaces/${happy.id}`, {
             sectionId: null,
             afterId: null,
         });
-        expect(badMove.status).toBe(409);
+        expect(happyMoved.space.target.kind).toBe("bot");
 
-        // "Tidy now" applies the manager's batch as soon as it finishes, without a calm moment.
+        // "Tidy now" is one message to Prioritizing; its changes wait for calm like any other.
         state.hideOnTidy = second.space.id;
+        const tidyQueued = () =>
+            gym.inference.requests.filter(
+                (request) =>
+                    isPrioritizing(request) &&
+                    JSON.stringify(request.messages.at(-1)).includes("Change queued"),
+            ).length;
+        const queuedBefore = tidyQueued();
         expect((await gym.http.post("/v0/spaces/tidy", {})).status).toBe(202);
-        const tidy = await gym.waitUntil(async () => {
-            const applied = await batches();
-            return applied.length === 2 ? applied[0] : undefined;
-        }, "the tidy batch");
+        await gym.waitUntil(
+            () => (tidyQueued() > queuedBefore ? true : undefined),
+            "the tidy change",
+        );
+        await gym.waitUntil(prioritizingIdle, "Prioritizing to finish");
+        expect(await batches()).toHaveLength(1);
+        const tidyCalm = await gym.http.ok<{ batch: Batch | null }>(
+            "POST",
+            "/v0/spaces/attention",
+            { state: "calm" },
+        );
+        const tidy = tidyCalm.batch!;
         expect(tidy).toMatchObject({
             changes: [{ spaceId: second.space.id, to: { visibility: "hidden" } }],
         });

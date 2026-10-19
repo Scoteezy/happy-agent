@@ -9,6 +9,8 @@ import { assembleReviewerTools } from "../../sources/compute/tools/assembleRevie
 
 const sourcesRoot = join(dirname(fileURLToPath(import.meta.url)), "../../sources");
 const eagerDirectories = ["codeMode", "compute", "userInput"];
+/** Prioritizing's whole tool array, which it receives without tool search. */
+const eagerFiles = ["spaces/tools/prioritizingTools.ts"];
 
 interface ToolDefinition {
     readonly file: string;
@@ -44,9 +46,9 @@ describe("tool discovery policy", () => {
                 continue;
             }
 
-            const eager = eagerDirectories.some((directory) =>
-                definition.file.startsWith(`${directory}/`),
-            );
+            const eager =
+                eagerFiles.includes(definition.file) ||
+                eagerDirectories.some((directory) => definition.file.startsWith(`${directory}/`));
             expect.soft(definition.properties.get("defer"), location).toBe(String(!eager));
             expect.soft(definition.properties.get("capabilities"), location).toBeDefined();
             if (eager) {

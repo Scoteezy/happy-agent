@@ -2,7 +2,7 @@ import type { SpaceBatchChange, SpaceBatchSectionChange } from "../Space.js";
 
 /**
  * Happy's one-line note for a batch, written from what actually moved so it can never describe a
- * change the batch did not make ("Moved Preview viewer release to Older."). The manager's reasons
+ * change the batch did not make ("Moved Preview viewer release to Older."). Prioritizing's reasons
  * stay in the diff, never in the note: a cheap model's wording would not read as one clean line.
  * A bigger batch names two moves and counts the rest.
  */

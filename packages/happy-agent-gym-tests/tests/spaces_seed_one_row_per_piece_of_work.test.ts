@@ -9,7 +9,6 @@ afterEach(async () => {
 
 interface Space {
     readonly id: string;
-    readonly role: string;
     readonly visibility: string;
     readonly target: { readonly kind: string; readonly id: string };
 }

@@ -1,6 +1,6 @@
 /**
  * The bundled clay icon library. Clients ship the artwork; the daemon stores only a slug, and
- * the manager may choose only from this list. Kept in the library manifest's order.
+ * Prioritizing may choose only from this list. Kept in the library manifest's order.
  */
 export const SPACE_ICON_SLUGS = [
     "code",

@@ -27,6 +27,7 @@ import { ConfigModule } from "../config/index.js";
 import { DurableFunctionsModule } from "../durableFunctions/index.js";
 import { EventsModule } from "../events/index.js";
 import { HistoryModule } from "../history/index.js";
+import { SubtasksModule } from "../subtasks/index.js";
 import { SurfacesModule } from "../surfaces/index.js";
 import { TasksModule, type TaskRecord } from "../tasks/index.js";
 import { AGENT_MESSAGE_ORIGIN_METADATA, isUserOriginMetadata } from "../impl/messageOrigin.js";
@@ -49,10 +50,15 @@ import {
 } from "./Space.js";
 import { spaceEventSchema, type SpaceEvent, type SpaceEventListener } from "./SpaceEvent.js";
 import { spaceMigrations } from "./SpaceMigrations.js";
-import { applySpaceChanges, compareRows, rowKeyAfter } from "./impl/applySpaceChanges.js";
+import {
+    applySpaceChanges,
+    compareRows,
+    rowKeyAfter,
+    rowKeyAtTop,
+} from "./impl/applySpaceChanges.js";
 import { composeSpaceBatchNote } from "./impl/composeSpaceBatchNote.js";
-import { formatSpaceManagerInstructions } from "./impl/formatSpaceManagerInstructions.js";
-import { selectSpaceManagerRoute } from "./impl/selectSpaceManagerRoute.js";
+import { formatPrioritizingInstructions } from "./impl/formatPrioritizingInstructions.js";
+import { selectPrioritizingRoute } from "./impl/selectPrioritizingRoute.js";
 import { spaceContentKey } from "./impl/spaceRefKey.js";
 import {
     deletePendingChanges,
@@ -81,7 +87,7 @@ import {
     deleteSection,
 } from "./persistence/SpacesPersistence.js";
 import { requestSpacePlacementTool } from "./tools/request_space_placement.js";
-import { spaceManagerTools } from "./tools/spaceManagerTools.js";
+import { prioritizingTools } from "./tools/prioritizingTools.js";
 
 /** Without a focus change or a message for this long, the person counts as idle, which is calm. */
 export const SPACE_IDLE_MS = 2 * 60_000;
@@ -92,8 +98,8 @@ export const SPACE_IDLE_MS = 2 * 60_000;
 export const SPACE_INTERACTION_HOLD_MS = 10 * 60_000;
 /** How often queued changes are checked against the calm rule. */
 const CALM_CHECK_INTERVAL_MS = 15_000;
-const BRIEF_FUNCTION = "spaces.briefManager";
-const MANAGER_METADATA_KEY = "spacesManagerFor";
+const BRIEF_FUNCTION = "spaces.briefPrioritizing";
+const PRIORITIZING_METADATA_KEY = "spacesPrioritizingFor";
 const MAX_BRIEF_TEXT = 2_000;
 
 const briefArgumentsSchema = Type.Object(
@@ -106,16 +112,16 @@ const briefArgumentsSchema = Type.Object(
 );
 
 /**
- * One flat sidebar per person, kept tidy by a hidden manager.
+ * One flat sidebar per person, kept tidy by Prioritizing, a subtask of Happy.
  *
- * A space is one row: Happy, the manager (never shown), or an item wrapping a task, bot, Surface,
- * or other content. Sections are flat labels. New work is a stem cell: a fresh unnamed task
- * wrapped in a row that waits under Happy until the manager places it.
+ * A space is one row: Happy, or an item wrapping a task, bot, or Surface. Sections are flat
+ * labels. New work is a stem cell: a fresh unnamed task wrapped in a row that waits under Happy
+ * until Prioritizing places it.
  *
- * Every organisation write goes through the manager's tools, except the person's own explicit
- * actions: dragging a row, collapsing a section, and creating new work. The manager's moves are
- * queued and applied together at a calm moment — a focus switch or idle — with one note in
- * Happy's chat and a recorded diff. Icons apply at once because they move nothing.
+ * Every organisation write goes through Prioritizing's tools, except the person's own explicit
+ * actions: moving, folding, hiding, or removing a row, opening a section, and creating new work.
+ * Prioritizing's moves are queued and applied together at a calm moment with one note in Happy's
+ * chat and a recorded diff. Icons apply at once because they move nothing.
  */
 export class SpacesModule implements AgentModule {
     readonly name = "spaces";
@@ -125,6 +131,7 @@ export class SpacesModule implements AgentModule {
     readonly #config: ConfigModule;
     readonly #events: EventsModule;
     readonly #history: HistoryModule;
+    readonly #subtasks: SubtasksModule;
     readonly #surfaces: SurfacesModule;
     readonly #tasks: TasksModule;
     readonly #durableFunctions: DurableFunctionsModule;
@@ -133,10 +140,10 @@ export class SpacesModule implements AgentModule {
     readonly #activeAt = new Map<SpaceOwnerId, number>();
     /** When a client last said the person is mid-interaction (dragging, typing, navigating). */
     readonly #interactingSince = new Map<SpaceOwnerId, number>();
-    /** People whose client signalled calm while their manager was still deciding. */
+    /** People whose client signalled calm while Prioritizing was still deciding. */
     readonly #calmSignalled = new Set<SpaceOwnerId>();
-    /** Managers with a turn in progress; their batch waits until they finish. */
-    readonly #busyManagers = new Set<string>();
+    /** Prioritizing agents with a turn in progress; their batch waits until they finish. */
+    readonly #busyPrioritizing = new Set<string>();
     readonly #unsubscribe: (() => void)[] = [];
     #agents: AgentSystemRef | undefined;
     #lifetime: RootContext | undefined;
@@ -151,6 +158,7 @@ export class SpacesModule implements AgentModule {
         history: HistoryModule,
         events: EventsModule,
         durableFunctions: DurableFunctionsModule,
+        subtasks: SubtasksModule,
     ) {
         this.#config = config;
         this.#tasks = tasks;
@@ -159,9 +167,10 @@ export class SpacesModule implements AgentModule {
         this.#history = history;
         this.#events = events;
         this.#durableFunctions = durableFunctions;
-        // Telling the manager about new work commits with the work; the message is delivered
+        this.#subtasks = subtasks;
+        // Telling Prioritizing about new work commits with the work; the message is delivered
         // after the commit and survives a restart in between. A repeated delivery carries the
-        // same message ID, so the manager hears it once.
+        // same message ID, so Prioritizing hears it once.
         durableFunctions.register({
             name: BRIEF_FUNCTION,
             argumentsSchema: briefArgumentsSchema,
@@ -202,38 +211,40 @@ export class SpacesModule implements AgentModule {
         },
         instructions: () => "",
         overrideInstructions: (_ctx, scope, input) =>
-            managerOwner(scope.agent.metadata) === undefined
+            prioritizingOwner(scope.agent.metadata) === undefined
                 ? input.instructions
-                : formatSpaceManagerInstructions(),
+                : formatPrioritizingInstructions(),
         tools: async (ctx, scope): Promise<readonly AnyAgentTool[]> => {
-            if (managerOwner(scope.agent.metadata) !== undefined) return [];
+            if (prioritizingOwner(scope.agent.metadata) !== undefined) return [];
             // People ask for sidebar changes in the conversations they have, not in helpers.
             if ((await this.#requireAgents().parentOf(ctx, scope.agent.id)) !== null) return [];
             return [requestSpacePlacementTool(this, scope.agent.id)];
         },
-        // The manager is one job with one tool array and nothing else.
+        // Prioritizing is one job with one tool array and nothing else.
         overrideTools: (_ctx, scope, input) => {
-            const owner = managerOwner(scope.agent.metadata);
-            return owner === undefined ? input.tools : spaceManagerTools(this, owner);
+            const owner = prioritizingOwner(scope.agent.metadata);
+            return owner === undefined ? input.tools : prioritizingTools(this, owner);
         },
         beforeAgentLoop: (_ctx, scope) => {
-            if (managerOwner(scope.agent.metadata) !== undefined) {
-                this.#busyManagers.add(scope.agent.id);
+            if (prioritizingOwner(scope.agent.metadata) !== undefined) {
+                this.#busyPrioritizing.add(scope.agent.id);
             }
         },
         afterAgentSettled: async (ctx, scope) => {
-            const owner = managerOwner(scope.agent.metadata);
+            const owner = prioritizingOwner(scope.agent.metadata);
             if (owner === undefined) return;
-            this.#busyManagers.delete(scope.agent.id);
+            this.#busyPrioritizing.delete(scope.agent.id);
             const lifetime = this.#lifetime;
             if (lifetime === undefined) return;
-            // The manager has finished deciding; apply now if the person asked for it, or if
+            // Prioritizing has finished deciding; apply now if the person asked for it, or if
             // they are calm. Otherwise the calm check picks the batch up later.
-            void this.#applyIfDue(lifetime.named("spaces-manager-settled"), owner, "settled").catch(
-                (error: unknown) => {
-                    ctx.log.warn("The sidebar batch could not be applied.", {}, error);
-                },
-            );
+            void this.#applyIfDue(
+                lifetime.named("spaces-prioritizing-settled"),
+                owner,
+                "settled",
+            ).catch((error: unknown) => {
+                ctx.log.warn("The sidebar batch could not be applied.", {}, error);
+            });
         },
         messageAcceptedTransact: async (ctx, scope, accepted) => {
             if (accepted.message.role !== "user" || !isUserOriginMetadata(accepted.metadata)) {
@@ -245,7 +256,7 @@ export class SpacesModule implements AgentModule {
                 afterCommit(ctx, () => {
                     this.#activeAt.set(row.ownerUserId, now);
                 });
-                // New work is told to the manager once, with what the person first asked.
+                // New work is told to Prioritizing once, with what the person first asked.
                 if (row.role !== "item" || row.briefedAt !== undefined) continue;
                 if (row.icon !== undefined && row.icon.type !== "stem_cell") continue;
                 const text = accepted.message.content
@@ -284,7 +295,7 @@ export class SpacesModule implements AgentModule {
 
     /**
      * A person's whole sidebar. The first read makes it: Happy, and a row for everything the
-     * person already has, folded until the manager's first tidy.
+     * person already has, folded until Prioritizing's first tidy.
      */
     async snapshot(ctx: Context, ownerUserId: SpaceOwnerId): Promise<SpaceSnapshot> {
         return await ctx.inTx(async (txCtx) => {
@@ -365,7 +376,7 @@ export class SpacesModule implements AgentModule {
 
     /**
      * Wrap a freshly created task in a stem-cell row. Without a section it waits under Happy for
-     * the manager; with one, the person already chose where it goes, so it is settled at the top.
+     * Prioritizing; with one, the person already chose where it goes, so it is settled at the top.
      */
     async createStemCell(
         ctx: Context,
@@ -396,10 +407,7 @@ export class SpacesModule implements AgentModule {
             const previous = await querySpaceByRef(txCtx, ownerUserId, spaceContentKey(content));
             const rows = await querySpaces(txCtx, ownerUserId);
             const siblings = rows.filter(
-                (row) =>
-                    row.role === "item" &&
-                    row.sectionId === input.sectionId &&
-                    row.id !== previous?.id,
+                (row) => row.sectionId === input.sectionId && row.id !== previous?.id,
             );
             const now = Date.now();
             const space: SpaceRecord = {
@@ -409,7 +417,7 @@ export class SpacesModule implements AgentModule {
                 icon: { type: "stem_cell" },
                 contents: [content],
                 ...(input.sectionId === undefined ? {} : { sectionId: input.sectionId }),
-                orderKey: rowKeyAfter(siblings, null),
+                orderKey: rowKeyAtTop(siblings),
                 placement: input.sectionId === undefined ? "pending" : "settled",
                 visibility: "shown",
                 ...(input.sectionId === undefined ? {} : { manualAt: now }),
@@ -434,55 +442,62 @@ export class SpacesModule implements AgentModule {
     }
 
     /**
-     * The person dragged a row. Their own action applies at once, shows the row, settles it, and
-     * marks it as placed by hand so the manager keeps it there until its state changes.
+     * The person changed a row: moved, folded, or hid it. Their own action applies at once,
+     * settles the row, and marks it as placed by hand so Prioritizing keeps it there until its
+     * state changes. Giving `sectionId` moves the row, first unless `afterId` says otherwise; a
+     * moved row is shown unless `visibility` says otherwise.
      */
-    async move(
+    async update(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
         spaceId: string,
-        sectionId: string | null,
-        afterId: string | null,
+        change: {
+            readonly sectionId?: string | null;
+            readonly afterId?: string | null;
+            readonly visibility?: SpaceRecord["visibility"];
+        },
         mutationId?: string,
     ): Promise<SpaceRecord> {
-        if (afterId === spaceId)
+        if (change.afterId === spaceId) {
             throw new SpaceConflictError("A row cannot be placed after itself.");
+        }
         return await ctx.inTx(async (txCtx) => {
             const space = await this.#ownedSpace(txCtx, ownerUserId, spaceId);
-            if (space.role !== "item") {
-                throw new SpaceConflictError("Happy and the sidebar manager cannot be moved.");
-            }
-            if (sectionId !== null) {
-                const section = await querySection(txCtx, sectionId);
+            const moved = change.sectionId !== undefined || change.afterId !== undefined;
+            const target =
+                change.sectionId === undefined ? space.sectionId : (change.sectionId ?? undefined);
+            if (target !== undefined && target !== space.sectionId) {
+                const section = await querySection(txCtx, target);
                 if (section === undefined || section.ownerUserId !== ownerUserId) {
                     throw new SpaceNotFoundError("The section was not found.");
                 }
             }
-            const target = sectionId ?? undefined;
-            const siblings = (await querySpaces(txCtx, ownerUserId)).filter(
-                (row) =>
-                    row.role === "item" &&
-                    row.id !== spaceId &&
-                    row.visibility === "shown" &&
-                    row.sectionId === target,
-            );
-            if (afterId !== null && !siblings.some((row) => row.id === afterId)) {
-                throw new SpaceConflictError("The row to place after is not in that section.");
-            }
             const now = Date.now();
             const next: SpaceRecord = {
                 ...space,
-                orderKey: rowKeyAfter(siblings, afterId),
                 placement: "settled",
-                visibility: "shown",
+                visibility: change.visibility ?? (moved ? "shown" : space.visibility),
                 manualAt: now,
                 version: space.version + 1,
                 updatedAt: now,
             };
-            if (target === undefined) delete next.sectionId;
-            else next.sectionId = target;
+            if (moved) {
+                const siblings = (await querySpaces(txCtx, ownerUserId)).filter(
+                    (row) =>
+                        row.id !== spaceId &&
+                        row.visibility === "shown" &&
+                        row.sectionId === target,
+                );
+                const afterId = change.afterId ?? null;
+                if (afterId !== null && !siblings.some((row) => row.id === afterId)) {
+                    throw new SpaceConflictError("The row to place after is not in that section.");
+                }
+                next.orderKey = rowKeyAfter(siblings, afterId);
+                if (target === undefined) delete next.sectionId;
+                else next.sectionId = target;
+            }
             await updateSpace(txCtx, next, space.version);
-            // A queued move of this row would undo the person's choice.
+            // A queued change of this row would undo the person's choice.
             await deletePendingChanges(txCtx, ownerUserId, [`space:${spaceId}`]);
             await this.#commitEvents(txCtx, ownerUserId, mutationId, [
                 { type: "space_updated", space: next },
@@ -492,11 +507,11 @@ export class SpacesModule implements AgentModule {
     }
 
     /**
-     * The person left a stem cell they never wrote in. Its row goes and its task is archived;
-     * once its conversation holds any message it is real work and is refused. Discarding a row
+     * The person removed new work they never wrote in. Its row goes and its task is archived;
+     * once its conversation holds any message it is real work and is refused. Removing a row
      * that is already gone succeeds, so a retry is harmless.
      */
-    async discard(
+    async remove(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
         spaceId: string,
@@ -510,14 +525,16 @@ export class SpacesModule implements AgentModule {
             }
             const primary = space.contents[0];
             if (space.role !== "item" || primary?.kind !== "task" || space.contents.length > 1) {
-                throw new SpaceConflictError("Only a new conversation can be discarded.");
+                throw new SpaceConflictError("Only new work can be removed; hide it instead.");
             }
             if (
                 space.briefedAt !== undefined ||
                 (await this.#history.stats(txCtx, primary.agentId)).messages > 0 ||
                 (await this.#history.pending(txCtx, primary.agentId)).length > 0
             ) {
-                throw new SpaceConflictError("This conversation has messages; it is kept.");
+                throw new SpaceConflictError(
+                    "This conversation has messages, so it is kept; hide it instead.",
+                );
             }
             await deleteSpace(txCtx, space.id);
             await deletePendingChanges(txCtx, ownerUserId, [`space:${space.id}`]);
@@ -568,8 +585,8 @@ export class SpacesModule implements AgentModule {
     /**
      * The client's view of the person's attention. `interacting` holds every batch back until
      * the client says otherwise or goes quiet; `calm` — a navigation gesture just completed, or
-     * the person is idle — applies the queued batch now, unless the manager is mid-decision, in
-     * which case it applies as soon as the manager finishes. Returns the applied batch, if any.
+     * the person is idle — applies the queued batch now, unless Prioritizing is mid-decision, in
+     * which case it applies as soon as Prioritizing finishes. Returns the applied batch, if any.
      */
     async reportAttention(
         ctx: Context,
@@ -587,22 +604,16 @@ export class SpacesModule implements AgentModule {
         return await this.#applyIfDue(ctx, ownerUserId, "calm");
     }
 
-    /** "Tidy now": ask the manager, and apply its batch as soon as it finishes. */
+    /** "Tidy now" is one automatic message in Prioritizing's conversation and nothing more. */
     async requestTidy(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
         await ctx.inTx(async (txCtx) => {
             await this.#ensureOwner(txCtx, ownerUserId);
-            const state = await this.#ownerState(txCtx, ownerUserId);
-            await writeOwnerState(txCtx, { ...state, applyRequestedAt: Date.now() });
-            await this.#brief(
-                txCtx,
-                ownerUserId,
-                "The person asked you to tidy the sidebar now. Read it with list_sidebar and apply the rules. Your changes apply as soon as you finish.",
-            );
+            await this.#brief(txCtx, ownerUserId, "Tidy the sidebar now.");
         });
     }
 
-    /** The manager's view: everything it may judge, with IDs to act on. */
-    async managerOverview(ctx: Context, ownerUserId: SpaceOwnerId): Promise<string> {
+    /** Prioritizing's view: everything it may judge, with IDs to act on. */
+    async prioritizingOverview(ctx: Context, ownerUserId: SpaceOwnerId): Promise<string> {
         const snapshot = await this.snapshot(ctx, ownerUserId);
         const pending = await queryPendingChanges(ctx, ownerUserId);
         const now = Date.now();
@@ -667,7 +678,7 @@ export class SpacesModule implements AgentModule {
         return lines.join("\n");
     }
 
-    /** Queue one manager change for the next calm moment. Only the manager calls this. */
+    /** Queue one Prioritizing change for the next calm moment. Only Prioritizing calls this. */
     async queueChange(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
@@ -677,7 +688,7 @@ export class SpacesModule implements AgentModule {
             if (change.type === "place" || change.type === "visibility") {
                 const space = await this.#ownedSpace(txCtx, ownerUserId, change.spaceId);
                 if (space.role !== "item") {
-                    throw new SpaceConflictError("Happy and the sidebar manager cannot be moved.");
+                    throw new SpaceConflictError("Happy cannot be moved.");
                 }
             }
             if (change.type === "remove_section" || (change.type === "section" && !change.create)) {
@@ -762,7 +773,7 @@ export class SpacesModule implements AgentModule {
         return undefined;
     }
 
-    /** Set an icon now. Only the manager calls this. */
+    /** Set an icon now. Only Prioritizing calls this. */
     async setIcon(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
@@ -791,8 +802,8 @@ export class SpacesModule implements AgentModule {
     }
 
     /**
-     * Another agent asks for a row to move. The manager decides; when the person asked for it in
-     * their own words, the result applies as soon as the manager finishes.
+     * Another agent asks for a row to move. Prioritizing decides; when the person asked for it in
+     * their own words, the result applies as soon as Prioritizing finishes.
      */
     async requestPlacement(
         ctx: Context,
@@ -834,8 +845,8 @@ export class SpacesModule implements AgentModule {
                 );
             }
             return input.personAsked
-                ? "The sidebar manager will make the change shortly."
-                : "The sidebar manager has the request and will apply it at a calm moment.";
+                ? "Prioritizing will make the change shortly."
+                : "Prioritizing has the request and will apply it at a calm moment.";
         });
     }
 
@@ -955,8 +966,8 @@ export class SpacesModule implements AgentModule {
 
     /**
      * Apply the queued batch if this is the moment for it. Nothing applies while the person is
-     * mid-interaction or while the manager is still deciding. Otherwise a batch applies on a calm
-     * signal, after the person asked for it (once the manager has finished), or after idle.
+     * mid-interaction or while Prioritizing is still deciding. Otherwise a batch applies on a calm
+     * signal, after the person asked for it (once Prioritizing has finished), or after idle.
      */
     async #applyIfDue(
         ctx: Context,
@@ -967,14 +978,17 @@ export class SpacesModule implements AgentModule {
         if (this.#interacting(ownerUserId, now)) return undefined;
         const state = await queryOwnerState(ctx, ownerUserId);
         if (state === undefined) return undefined;
-        if (state.managerAgentId !== undefined && this.#busyManagers.has(state.managerAgentId)) {
-            // A calm moment that arrives mid-decision is kept for when the manager finishes.
+        if (
+            state.prioritizingAgentId !== undefined &&
+            this.#busyPrioritizing.has(state.prioritizingAgentId)
+        ) {
+            // A calm moment that arrives mid-decision is kept for when Prioritizing finishes.
             if (moment === "calm") this.#calmSignalled.add(ownerUserId);
             return undefined;
         }
         const requested = state.applyRequestedAt !== undefined;
         const signalled = this.#calmSignalled.has(ownerUserId);
-        // A request the manager has not taken up yet produces nothing to apply; only the end of
+        // A request Prioritizing has not taken up yet produces nothing to apply; only the end of
         // its turn settles the request.
         if (requested && moment !== "settled") {
             if ((await queryPendingChanges(ctx, ownerUserId)).length === 0) return undefined;
@@ -997,7 +1011,7 @@ export class SpacesModule implements AgentModule {
         }
     }
 
-    /** Queue a message for the person's manager, delivered after this transaction commits. */
+    /** Queue a message for the person's Prioritizing, delivered after this transaction commits. */
     async #brief(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
@@ -1018,16 +1032,19 @@ export class SpacesModule implements AgentModule {
         text: string,
     ): Promise<void> {
         const agents = this.#requireAgents();
-        const { managerAgentId, happyAgentId } = await this.#ensureManager(ctx, ownerUserId);
+        const { prioritizingAgentId, happyAgentId } = await this.#ensurePrioritizing(
+            ctx,
+            ownerUserId,
+        );
         const happyMode = (await agents.config(ctx, happyAgentId))?.metadata?.["lastMode"];
-        const route = selectSpaceManagerRoute(
+        const route = selectPrioritizingRoute(
             this.#config.models,
             Value.Check(messageModeSchema, happyMode) ? happyMode.providerId : undefined,
         );
-        if (route === undefined) throw new Error("No model is available for the sidebar manager.");
+        if (route === undefined) throw new Error("No model is available for Prioritizing.");
         await agents.send(
             ctx,
-            managerAgentId,
+            prioritizingAgentId,
             { role: "user", content: [{ type: "text", text }] },
             {
                 id: messageId,
@@ -1040,11 +1057,14 @@ export class SpacesModule implements AgentModule {
         );
     }
 
-    /** The manager is a hidden helper of Happy, made the first time it has something to do. */
-    async #ensureManager(
+    /**
+     * Prioritizing is an ordinary conversation subtask of Happy, made the first time it has
+     * something to do and made again if the person archived it.
+     */
+    async #ensurePrioritizing(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
-    ): Promise<{ readonly managerAgentId: string; readonly happyAgentId: string }> {
+    ): Promise<{ readonly prioritizingAgentId: string; readonly happyAgentId: string }> {
         return await ctx.inTx(async (txCtx) => {
             const agents = this.#requireAgents();
             await this.#ensureOwner(txCtx, ownerUserId);
@@ -1052,29 +1072,24 @@ export class SpacesModule implements AgentModule {
             const happyRef = happy?.contents[0];
             if (happyRef?.kind !== "bot") throw new Error("Happy is not available yet.");
             const state = await this.#ownerState(txCtx, ownerUserId);
-            if (
-                state.managerAgentId !== undefined &&
-                (await agents.config(txCtx, state.managerAgentId)) !== undefined
-            ) {
-                return { managerAgentId: state.managerAgentId, happyAgentId: happyRef.agentId };
+            if (state.prioritizingAgentId !== undefined) {
+                const current = await agents.config(txCtx, state.prioritizingAgentId);
+                if (current !== undefined && typeof current.metadata?.["archivedAt"] !== "number") {
+                    return {
+                        prioritizingAgentId: state.prioritizingAgentId,
+                        happyAgentId: happyRef.agentId,
+                    };
+                }
             }
-            const parent = await agents.config(txCtx, happyRef.agentId);
-            const config: AgentConfig = {
-                ...(parent?.environment === undefined ? {} : { environment: parent.environment }),
-                ...(parent?.modules === undefined ? {} : { modules: parent.modules }),
-                metadata: {
-                    title: "Sidebar manager",
-                    // Its replies are bookkeeping; Happy is not told each time it finishes.
-                    collaboration: { reportToCreator: false },
-                    [MANAGER_METADATA_KEY]: ownerUserId,
-                },
-            };
-            const created = await agents.create(txCtx, config, {
-                id: createId(),
-                parent: happyRef.agentId,
-            });
-            await writeOwnerState(txCtx, { ...state, managerAgentId: created.id });
-            return { managerAgentId: created.id, happyAgentId: happyRef.agentId };
+            const prioritizingAgentId = createId();
+            await this.#subtasks.createConversation(
+                txCtx,
+                happyRef.agentId,
+                { title: "Prioritizing", metadata: { [PRIORITIZING_METADATA_KEY]: ownerUserId } },
+                prioritizingAgentId,
+            );
+            await writeOwnerState(txCtx, { ...state, prioritizingAgentId });
+            return { prioritizingAgentId, happyAgentId: happyRef.agentId };
         });
     }
 
@@ -1091,8 +1106,8 @@ export class SpacesModule implements AgentModule {
     }
 
     /**
-     * Make sure the person has Happy, the manager row, and a row for everything they already
-     * have. Existing work arrives folded and unplaced, and the manager is asked to organise it.
+     * Make sure the person has Happy and a row for everything they already
+     * have. Existing work arrives folded and unplaced, and Prioritizing is asked to organise it.
      */
     async #ensureOwner(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
         const now = Date.now();
@@ -1241,7 +1256,7 @@ export class SpacesModule implements AgentModule {
     }
 
     /**
-     * New work for one person: an unplaced row under Happy that the manager places after its
+     * New work for one person: an unplaced row under Happy that Prioritizing places after its
      * first message. A row that already exists is left alone.
      */
     async #addWork(
@@ -1256,7 +1271,7 @@ export class SpacesModule implements AgentModule {
         await ctx.inTx(async (txCtx) => {
             if ((await queryOwnerState(txCtx, ownerUserId)) === undefined) return;
             const siblings = (await querySpaces(txCtx, ownerUserId)).filter(
-                (row) => row.role === "item" && row.sectionId === undefined,
+                (row) => row.sectionId === undefined,
             );
             const now = Date.now();
             const space: SpaceRecord = {
@@ -1265,7 +1280,7 @@ export class SpacesModule implements AgentModule {
                 role: "item",
                 ...(icon === undefined ? {} : { icon }),
                 contents: [ref],
-                orderKey: rowKeyAfter(siblings, null),
+                orderKey: rowKeyAtTop(siblings),
                 placement: "pending",
                 visibility: "shown",
                 version: 1,
@@ -1375,8 +1390,10 @@ type SpaceEventDraft = SpaceEvent extends infer Event
         : never
     : never;
 
-function managerOwner(metadata: AgentConfig["metadata"] | undefined): SpaceOwnerId | undefined {
-    const owner = metadata?.[MANAGER_METADATA_KEY];
+function prioritizingOwner(
+    metadata: AgentConfig["metadata"] | undefined,
+): SpaceOwnerId | undefined {
+    const owner = metadata?.[PRIORITIZING_METADATA_KEY];
     return Value.Check(spaceOwnerIdSchema, owner) ? owner : undefined;
 }
 
@@ -1421,10 +1438,9 @@ function surfaceTypeOf(type: string): "todo" | "document" | "calendar" | "refere
         : undefined;
 }
 
-/** Happy first, then sections' rows by key, then everything else by key. */
+/** Rows by key; Happy leads because it holds the first key. */
 function sortForDisplay(spaces: readonly SpaceRecord[]): SpaceRecord[] {
-    const rank = (space: SpaceRecord): number => (space.role === "happy" ? 0 : 1);
-    return [...spaces].sort((left, right) => rank(left) - rank(right) || compareRows(left, right));
+    return [...spaces].sort(compareRows);
 }
 
 function formatAge(ms: number): string {
