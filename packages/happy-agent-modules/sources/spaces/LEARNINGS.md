@@ -24,3 +24,11 @@ insert failed. Every write now recomputes the key from the row's contents, and s
 insert-if-absent on `(owner, content key)`, so concurrent or repeated seeds can never make a
 second row for the same work. Rows that merely share a title are different conversations and are
 never merged.
+
+## Unnamed work has no title, and untouched work can be discarded
+
+The desktop labels a row "New" itself, so a task still carrying its placeholder name is served
+with `named: false` and an empty title instead of "New Task"; notes call it "a new chat". Rows
+are otherwise never deleted, but a stem cell the person left without writing anything is not
+work: discard removes the row and archives its task, and refuses (409) as soon as the
+conversation holds any message.

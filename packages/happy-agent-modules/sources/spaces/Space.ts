@@ -313,6 +313,8 @@ export interface SpaceTarget {
 /** A row's content resolved for display and for the manager's judgement. */
 export interface SpaceDescription {
     readonly title: string;
+    /** False while the content still carries a placeholder name it will replace itself. */
+    readonly named: boolean;
     readonly target: SpaceTarget | undefined;
     readonly archived: boolean;
     readonly working: boolean;

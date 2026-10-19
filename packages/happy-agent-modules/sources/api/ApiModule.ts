@@ -6825,6 +6825,14 @@ export class ApiModule implements AgentModule {
                     owner,
                 );
                 return;
+            case "space_removed":
+                this.#journal.append(
+                    "space.removed",
+                    { spaceId: event.spaceId, ...revision, ...echo },
+                    event.at,
+                    owner,
+                );
+                return;
             case "section_created":
                 this.#journal.append(
                     "space.section.created",
@@ -6980,6 +6988,13 @@ export class ApiModule implements AgentModule {
                     body.mutationId,
                 );
                 sendJson(response, 200, { space: await this.#spaceResource(ctx, space) });
+                return true;
+            }
+            const discard = /^\/v0\/spaces\/([a-z][a-z0-9]*)\/discard$/.exec(url.pathname);
+            if (discard !== null && request.method === "POST") {
+                const body = await bodyAs(request, spaceTidyRequestSchema, "discard");
+                await spaces.discard(ctx, owner, discard[1] as string, body.mutationId);
+                response.writeHead(204).end();
                 return true;
             }
             const direct = /^\/v0\/spaces\/([a-z][a-z0-9]*)$/.exec(url.pathname);

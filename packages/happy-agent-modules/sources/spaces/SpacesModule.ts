@@ -59,6 +59,7 @@ import { selectSpaceManagerRoute } from "./impl/selectSpaceManagerRoute.js";
 import { spaceContentKey } from "./impl/spaceRefKey.js";
 import {
     deletePendingChanges,
+    deleteSpace,
     insertBatch,
     insertSection,
     insertSpace,
@@ -326,6 +327,7 @@ export class SpacesModule implements AgentModule {
                 const task = await this.#tasks.get(ctx, primary.taskId);
                 return await this.#agentDescription(ctx, space, {
                     title: task?.name ?? "Task",
+                    named: task === undefined || task.nameConfigured,
                     target: {
                         kind: "task",
                         id: primary.taskId,
@@ -340,6 +342,7 @@ export class SpacesModule implements AgentModule {
                 const bot = await this.#bots.get(ctx, primary.botId);
                 return await this.#agentDescription(ctx, space, {
                     title: space.role === "happy" ? "Happy" : (bot?.name ?? "Bot"),
+                    named: true,
                     target: {
                         kind: "bot",
                         id: primary.botId,
@@ -354,6 +357,7 @@ export class SpacesModule implements AgentModule {
                 const config = await this.#requireAgents().config(ctx, primary.agentId);
                 return await this.#agentDescription(ctx, space, {
                     title: config?.metadata?.title ?? "Conversation",
+                    named: true,
                     target: { kind: "agent", id: primary.agentId, agentId: primary.agentId },
                     archived: config === undefined,
                     imageUrl: undefined,
@@ -365,6 +369,7 @@ export class SpacesModule implements AgentModule {
                 );
                 return {
                     title: space.name ?? surface?.name ?? "List",
+                    named: true,
                     target: { kind: "surface", id: primary.surfaceId },
                     archived: surface === undefined,
                     working: false,
@@ -519,8 +524,56 @@ export class SpacesModule implements AgentModule {
             await deletePendingChanges(txCtx, ownerUserId, [`space:${spaceId}`]);
             await this.#commitEvents(txCtx, ownerUserId, mutationId, [
                 { type: "space_updated", space: next, previousVersion: space.version },
+                {
+                    type: "batch_queued",
+                    pendingChanges: (await queryPendingChanges(txCtx, ownerUserId)).length,
+                },
             ]);
             return next;
+        });
+    }
+
+    /**
+     * The person left a stem cell they never wrote in. Its row goes and its task is archived;
+     * once its conversation holds any message it is real work and is refused. Discarding a row
+     * that is already gone succeeds, so a retry is harmless.
+     */
+    async discard(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        spaceId: string,
+        mutationId?: string,
+    ): Promise<void> {
+        await ctx.inTx(async (txCtx) => {
+            const space = await querySpace(txCtx, spaceId);
+            if (space === undefined) return;
+            if (space.ownerUserId !== ownerUserId) {
+                throw new SpaceNotFoundError();
+            }
+            const primary = space.contents[0];
+            if (space.role !== "item" || primary?.kind !== "task" || space.contents.length > 1) {
+                throw new SpaceConflictError("Only a new conversation can be discarded.");
+            }
+            if (
+                space.briefedAt !== undefined ||
+                (await this.#history.stats(txCtx, primary.agentId)).messages > 0 ||
+                (await this.#history.pending(txCtx, primary.agentId)).length > 0
+            ) {
+                throw new SpaceConflictError("This conversation has messages; it is kept.");
+            }
+            await deleteSpace(txCtx, space.id);
+            await deletePendingChanges(txCtx, ownerUserId, [`space:${space.id}`]);
+            const task = await this.#tasks.get(txCtx, primary.taskId);
+            if (task !== undefined && task.status === "active") {
+                await this.#tasks.archive(txCtx, task.id, task.version);
+            }
+            await this.#commitEvents(txCtx, ownerUserId, mutationId, [
+                { type: "space_removed", spaceId: space.id },
+                {
+                    type: "batch_queued",
+                    pendingChanges: (await queryPendingChanges(txCtx, ownerUserId)).length,
+                },
+            ]);
         });
     }
 
@@ -842,7 +895,9 @@ export class SpacesModule implements AgentModule {
             const titles = new Map<string, string>();
             for (const space of spaces) {
                 if (space.role === "item") {
-                    titles.set(space.id, (await this.describe(txCtx, space)).title);
+                    const description = await this.describe(txCtx, space);
+                    // Work that has not named itself is never called by its placeholder.
+                    titles.set(space.id, description.named ? description.title : "a new chat");
                 }
             }
             const now = Date.now();
@@ -1329,6 +1384,7 @@ export class SpacesModule implements AgentModule {
         return {
             ...base,
             title: space.name ?? base.title,
+            named: space.name !== undefined || base.named,
             working: agentId !== undefined && this.#events.activeRunId(agentId) !== undefined,
             lastActivityAt:
                 agentId === undefined
@@ -1405,6 +1461,7 @@ function newWorkBrief(row: SpaceRecord, text: string): string {
 function blankDescription(title: string, target: SpaceDescription["target"]): SpaceDescription {
     return {
         title,
+        named: true,
         target,
         archived: false,
         working: false,

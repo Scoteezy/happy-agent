@@ -35,6 +35,10 @@ export const spaceEventSchema = Type.Union([
         { additionalProperties: false },
     ),
     Type.Object(
+        { ...envelope, type: Type.Literal("space_removed"), spaceId: cuid2Schema },
+        { additionalProperties: false },
+    ),
+    Type.Object(
         { ...envelope, type: Type.Literal("section_created"), section: spaceSectionRecordSchema },
         { additionalProperties: false },
     ),

@@ -1,0 +1,71 @@
+import { createAgentGym, type AgentGym } from "@slopus/happy-agent-gym";
+import { afterEach, describe, expect, it } from "vitest";
+
+const running = new Set<AgentGym>();
+afterEach(async () => {
+    await Promise.all([...running].map((gym) => gym.dispose()));
+    running.clear();
+});
+
+interface Space {
+    readonly id: string;
+    readonly title: string;
+    readonly named: boolean;
+    readonly target: { readonly kind: string; readonly id: string } | null;
+}
+interface StemCell {
+    readonly space: Space;
+    readonly agent: { readonly id: string };
+}
+
+describe("a stem cell", () => {
+    it("is untitled until named, and can be discarded only while nobody wrote in it", async () => {
+        const gym = await createAgentGym({ timeoutMs: 30_000 });
+        running.add(gym);
+        const rows = async () =>
+            (await gym.http.ok<{ spaces: Space[] }>("GET", "/v0/spaces")).spaces;
+        const cursor = (await gym.http.ok<{ cursor: string }>("GET", "/v0/spaces")).cursor;
+
+        // New work has no title of its own yet; the client labels it.
+        const untouched = await gym.http.ok<StemCell>("POST", "/v0/spaces/stem-cells", {});
+        expect(untouched.space).toMatchObject({ title: "", named: false });
+
+        // Leaving it untouched discards it: the row goes and its task is archived.
+        const discarded = await gym.http.post(`/v0/spaces/${untouched.space.id}/discard`, {
+            mutationId: "discard-1",
+        });
+        expect(discarded.status).toBe(204);
+        expect((await rows()).some((row) => row.id === untouched.space.id)).toBe(false);
+        expect((await gym.http.post(`/v0/spaces/${untouched.space.id}/discard`, {})).status).toBe(
+            204,
+        );
+        expect((await gym.client.getTask(untouched.space.target!.id)).task.status).toBe("archived");
+        // Space events are not in the published client's event union yet.
+        const events = (await gym.client.getEvents({ after: cursor, limit: 1_000 }))
+            .events as readonly { readonly type: string; readonly payload: unknown }[];
+        const removed = events.find((event) => event.type === "space.removed");
+        expect(removed?.payload).toMatchObject({
+            spaceId: untouched.space.id,
+            mutationId: "discard-1",
+        });
+
+        // Once a message exists it is real work and is kept.
+        const used = await gym.http.ok<StemCell>("POST", "/v0/spaces/stem-cells", {});
+        await gym.send("Plan the Android 2.4 release.", { sessionId: used.agent.id });
+        expect((await gym.http.post(`/v0/spaces/${used.space.id}/discard`, {})).status).toBe(409);
+        expect((await rows()).some((row) => row.id === used.space.id)).toBe(true);
+
+        // A name brings its title back.
+        const { task } = await gym.client.getTask(used.space.target!.id);
+        await gym.client.renameTask(
+            task.id,
+            { name: "Android 2.4 release" },
+            { ifMatch: task.version },
+        );
+        const renamed = await gym.waitUntil(async () => {
+            const row = (await rows()).find((candidate) => candidate.id === used.space.id);
+            return row?.named === true ? row : undefined;
+        }, "the named row");
+        expect(renamed.title).toBe("Android 2.4 release");
+    });
+});

@@ -161,6 +161,11 @@ export async function updateSpace(
     if (changed.length !== 1) throw new Error("The space changed before it could be stored.");
 }
 
+/** Remove a row outright. Only an untouched stem cell is ever removed; everything else hides. */
+export async function deleteSpace(ctx: Context, spaceId: string): Promise<void> {
+    await agentDatabaseRun(ctx.db, sql`DELETE FROM ${sql.raw(SPACES_TABLE)} WHERE id = ${spaceId}`);
+}
+
 /** Record that the manager was told about this row. Bookkeeping only; the row does not move. */
 export async function updateSpaceBriefedAt(
     ctx: Context,

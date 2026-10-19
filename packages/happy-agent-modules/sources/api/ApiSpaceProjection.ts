@@ -48,6 +48,7 @@ export const spaceAttentionRequestSchema = Type.Object(
     { additionalProperties: false },
 );
 
+/** A body carrying nothing but an optional mutation ID: tidy, discard. */
 export const spaceTidyRequestSchema = Type.Object({ mutationId }, { additionalProperties: false });
 
 export const spaceManagerRequestSchema = Type.Object(
@@ -77,7 +78,9 @@ export function spaceResource(
         id: space.id,
         ownerUserId: space.ownerUserId,
         role: space.role,
-        title: description.title,
+        // Work that has not named itself yet has no title; clients label it themselves.
+        title: description.named ? description.title : "",
+        named: description.named,
         name: space.name ?? null,
         icon:
             space.icon === undefined
