@@ -352,6 +352,27 @@ import {
     projectEventDiagnostics,
     projectMessageDiagnostics,
 } from "./projectCredentialDiagnostics.js";
+import {
+    SpaceConflictError,
+    SpaceInputError,
+    SpaceNotFoundError,
+    SpacesModule,
+    type SpaceEvent,
+    type SpaceOwnerId,
+    type SpaceRecord,
+} from "../spaces/index.js";
+import {
+    createStemCellRequestSchema,
+    moveSpaceRequestSchema,
+    sectionDisclosureRequestSchema,
+    spaceBatchResource,
+    spaceAttentionRequestSchema,
+    spaceFocusRequestSchema,
+    spaceManagerRequestSchema,
+    spaceResource,
+    spaceSectionResource,
+    spaceTidyRequestSchema,
+} from "./ApiSpaceProjection.js";
 import { SubtaskInputError, SubtasksModule } from "../subtasks/index.js";
 
 const API_PROTOCOL_VERSION = 31;
@@ -556,6 +577,7 @@ export class ApiModule implements AgentModule {
     readonly #userSettings: UserSettingsModule | undefined;
     readonly #surfaces: SurfacesModule | undefined;
     readonly #mobileConnector: MobileConnectorModule | undefined;
+    readonly #spaces: SpacesModule | undefined;
     /** The revocation signals each mobile connection already closes on. */
     readonly #mobileConnections = new WeakMap<MobileConnection, Set<AbortSignal>>();
     readonly #mobileClosers = new WeakMap<MobileConnection, () => void>();
@@ -712,6 +734,7 @@ export class ApiModule implements AgentModule {
         userSettings?: UserSettingsModule,
         surfaces?: SurfacesModule,
         mobileConnector?: MobileConnectorModule,
+        spaces?: SpacesModule,
     ) {
         this.#abort = abort;
         this.#config = config;
@@ -755,6 +778,7 @@ export class ApiModule implements AgentModule {
         this.#userSettings = userSettings;
         this.#surfaces = surfaces;
         this.#mobileConnector = mobileConnector;
+        this.#spaces = spaces;
     }
 
     readonly beforeStart = async (
@@ -1719,6 +1743,7 @@ export class ApiModule implements AgentModule {
             }
             if (await this.#handleBotRoute(ctx, request, response, url)) return;
             if (await this.#handleTaskRoute(ctx, request, response, url)) return;
+            if (await this.#handleSpaceRoute(ctx, request, response, url)) return;
             if (await this.#handleSurfaceRoute(ctx, request, response, url)) return;
             if (await this.#handleArtifactRoute(ctx, request, response, url)) return;
             if (request.method === "GET" && url.pathname === "/v0/projects") {
@@ -2624,6 +2649,13 @@ export class ApiModule implements AgentModule {
                 : [
                       this.#tasks.onEvent(async (_eventCtx, event) => {
                           await this.#convertTaskEvent(ctx, event);
+                      }),
+                  ]),
+            ...(this.#spaces === undefined
+                ? []
+                : [
+                      this.#spaces.onEvent(async (_eventCtx, event) => {
+                          await this.#convertSpaceEvent(ctx, event);
                       }),
                   ]),
             ...(this.#artifacts === undefined
@@ -6751,6 +6783,299 @@ export class ApiModule implements AgentModule {
         if (task === undefined) throw notFound("The task was not found.");
         sendJson(response, 200, await this.#taskResponse(ctx, task));
         return true;
+    }
+
+    /** The caller as a sidebar owner: the standalone person, or the authenticated team member. */
+    #spaceOwner(ctx: Context): SpaceOwnerId {
+        const owner = this.#spaces?.ownerFor(teamUser(ctx)?.id);
+        if (owner === undefined) throw new TeamAuthenticationError();
+        return owner;
+    }
+
+    async #spaceResource(ctx: Context, space: SpaceRecord): Promise<Record<string, unknown>> {
+        const spaces = this.#spaces;
+        if (spaces === undefined) throw new Error("Spaces are not available.");
+        return spaceResource(space, await spaces.describe(ctx, space));
+    }
+
+    async #convertSpaceEvent(ctx: Context, event: SpaceEvent): Promise<void> {
+        // A person's sidebar is private: in team mode only its owner sees its changes.
+        const owner = event.ownerUserId === "standalone" ? undefined : event.ownerUserId;
+        const echo = event.mutationId === undefined ? {} : { mutationId: event.mutationId };
+        const revision = { revision: event.revision };
+        switch (event.type) {
+            case "space_created":
+                this.#journal.append(
+                    "space.created",
+                    { space: await this.#spaceResource(ctx, event.space), ...revision, ...echo },
+                    event.at,
+                    owner,
+                );
+                return;
+            case "space_updated":
+                this.#journal.append(
+                    "space.updated",
+                    {
+                        space: await this.#spaceResource(ctx, event.space),
+                        previousVersion: event.previousVersion,
+                        ...revision,
+                        ...echo,
+                    },
+                    event.at,
+                    owner,
+                );
+                return;
+            case "section_created":
+                this.#journal.append(
+                    "space.section.created",
+                    { section: spaceSectionResource(event.section), ...revision, ...echo },
+                    event.at,
+                    owner,
+                );
+                return;
+            case "section_updated":
+                this.#journal.append(
+                    "space.section.updated",
+                    {
+                        section: spaceSectionResource(event.section),
+                        previousVersion: event.previousVersion,
+                        ...revision,
+                        ...echo,
+                    },
+                    event.at,
+                    owner,
+                );
+                return;
+            case "section_removed":
+                this.#journal.append(
+                    "space.section.removed",
+                    { sectionId: event.sectionId, ...revision },
+                    event.at,
+                    owner,
+                );
+                return;
+            case "batch_applied":
+                this.#journal.append(
+                    "space.batch.applied",
+                    { batch: spaceBatchResource(event.batch), ...revision },
+                    event.at,
+                    owner,
+                );
+                return;
+            case "batch_queued":
+                this.#journal.append(
+                    "space.batch.queued",
+                    {
+                        pendingBatch:
+                            event.pendingChanges === 0 ? null : { changes: event.pendingChanges },
+                        ...revision,
+                    },
+                    event.at,
+                    owner,
+                );
+                return;
+        }
+    }
+
+    async #handleSpaceRoute(
+        ctx: Context,
+        request: IncomingMessage,
+        response: ServerResponse,
+        url: URL,
+    ): Promise<boolean> {
+        const spaces = this.#spaces;
+        if (spaces === undefined || !url.pathname.startsWith("/v0/spaces")) return false;
+        const owner = this.#spaceOwner(ctx);
+        try {
+            if (request.method === "GET" && url.pathname === "/v0/spaces") {
+                const cursor = this.#journal.cursor();
+                const snapshot = await spaces.snapshot(ctx, owner);
+                sendJson(response, 200, {
+                    spaces: await Promise.all(
+                        snapshot.spaces.map(async (space) => await this.#spaceResource(ctx, space)),
+                    ),
+                    sections: snapshot.sections.map(spaceSectionResource),
+                    pendingBatch:
+                        snapshot.pendingChanges === 0 ? null : { changes: snapshot.pendingChanges },
+                    revision: snapshot.revision,
+                    cursor,
+                });
+                return true;
+            }
+            if (request.method === "GET" && url.pathname === "/v0/spaces/batches") {
+                const limit = Number(url.searchParams.get("limit") ?? "20");
+                if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+                    throw invalidRequest("The batch limit must be between 1 and 100.");
+                }
+                sendJson(response, 200, {
+                    batches: (await spaces.batches(ctx, owner, limit)).map(spaceBatchResource),
+                });
+                return true;
+            }
+            if (request.method === "POST" && url.pathname === "/v0/spaces/stem-cells") {
+                const body = await bodyAs(request, createStemCellRequestSchema, "stem cell");
+                return await this.#createStemCell(ctx, response, owner, body);
+            }
+            if (request.method === "POST" && url.pathname === "/v0/spaces/focus") {
+                const body = await bodyAs(request, spaceFocusRequestSchema, "focus report");
+                spaces.focus(owner, body.spaceId);
+                response.writeHead(204).end();
+                return true;
+            }
+            if (request.method === "POST" && url.pathname === "/v0/spaces/attention") {
+                const body = await bodyAs(request, spaceAttentionRequestSchema, "attention report");
+                const batch = await spaces.reportAttention(ctx, owner, body.state);
+                sendJson(response, 200, {
+                    batch: batch === undefined ? null : spaceBatchResource(batch),
+                });
+                return true;
+            }
+            if (request.method === "POST" && url.pathname === "/v0/spaces/tidy") {
+                const body = await bodyAs(request, spaceTidyRequestSchema, "tidy request");
+                await this.#withMutationId(
+                    body.mutationId,
+                    async () => await spaces.requestTidy(ctx, owner),
+                );
+                sendJson(response, 202, { requested: true });
+                return true;
+            }
+            if (request.method === "PUT" && url.pathname === "/v0/spaces/manager") {
+                const body = await bodyAs(request, spaceManagerRequestSchema, "manager settings");
+                await spaces.setManagerModel(ctx, owner, body.model ?? undefined);
+                sendJson(response, 200, { model: body.model });
+                return true;
+            }
+            const disclosure = /^\/v0\/spaces\/sections\/([a-z][a-z0-9]*)\/collapse$/.exec(
+                url.pathname,
+            );
+            if (disclosure !== null && request.method === "POST") {
+                const body = await bodyAs(request, sectionDisclosureRequestSchema, "collapse");
+                if (body.collapsed === undefined && body.tailExpanded === undefined) {
+                    throw invalidRequest("Say whether the section or its tail is open.");
+                }
+                const section = await spaces.setSectionDisclosure(
+                    ctx,
+                    owner,
+                    disclosure[1] as string,
+                    {
+                        ...(body.collapsed === undefined ? {} : { collapsed: body.collapsed }),
+                        ...(body.tailExpanded === undefined
+                            ? {}
+                            : { tailExpanded: body.tailExpanded }),
+                    },
+                    body.mutationId,
+                );
+                sendJson(response, 200, { section: spaceSectionResource(section) });
+                return true;
+            }
+            const move = /^\/v0\/spaces\/([a-z][a-z0-9]*)\/move$/.exec(url.pathname);
+            if (move !== null && request.method === "POST") {
+                const body = await bodyAs(request, moveSpaceRequestSchema, "move");
+                const space = await spaces.move(
+                    ctx,
+                    owner,
+                    move[1] as string,
+                    body.sectionId,
+                    body.afterId,
+                    body.mutationId,
+                );
+                sendJson(response, 200, { space: await this.#spaceResource(ctx, space) });
+                return true;
+            }
+            const direct = /^\/v0\/spaces\/([a-z][a-z0-9]*)$/.exec(url.pathname);
+            if (direct !== null && request.method === "GET") {
+                const space = await spaces.get(ctx, direct[1] as string);
+                if (space === undefined || space.ownerUserId !== owner) {
+                    throw notFound("The space was not found.");
+                }
+                sendJson(response, 200, { space: await this.#spaceResource(ctx, space) });
+                return true;
+            }
+        } catch (error: unknown) {
+            if (error instanceof SpaceNotFoundError) throw notFound(error.message);
+            if (error instanceof SpaceInputError) throw invalidRequest(error.message);
+            if (error instanceof SpaceConflictError) {
+                throw new ApiError(409, "conflict", error.message);
+            }
+            throw error;
+        }
+        return false;
+    }
+
+    /**
+     * New work: a fresh unnamed task with its own folder and no project, wrapped in a stem-cell
+     * row in the same transaction. A repeated ID answers with the row it already made.
+     */
+    async #createStemCell(
+        ctx: Context,
+        response: ServerResponse,
+        owner: SpaceOwnerId,
+        body: {
+            readonly id?: string;
+            readonly sectionId?: string | null;
+            readonly mutationId?: string;
+        },
+    ): Promise<boolean> {
+        const spaces = this.#spaces;
+        const tasks = this.#tasks;
+        if (spaces === undefined || tasks === undefined) {
+            throw notFound("New work is unavailable on this daemon.");
+        }
+        const { mutationId } = body;
+        const spaceId = body.id ?? createId();
+        const existing = await spaces.get(ctx, spaceId);
+        if (existing !== undefined) {
+            if (existing.ownerUserId !== owner) throw notFound("The space was not found.");
+            const target = existing.contents[0];
+            const task = target?.kind === "task" ? await tasks.get(ctx, target.taskId) : undefined;
+            sendJson(response, 200, {
+                space: await this.#spaceResource(ctx, existing),
+                agent: task === undefined ? null : await this.#stemCellAgent(ctx, task),
+            });
+            return true;
+        }
+        const ownerUserId = this.#team.enabled ? teamUser(ctx)?.id : undefined;
+        const { task, space, created } = await this.#withMutationId(
+            mutationId,
+            async () =>
+                await ctx.inTx(async (txCtx) => {
+                    const creation = await tasks.createWithResult(
+                        txCtx,
+                        ownerUserId === undefined ? {} : { ownerUserId },
+                    );
+                    const space = await spaces.createStemCell(txCtx, owner, {
+                        spaceId,
+                        task: creation.task,
+                        ...(body.sectionId === undefined || body.sectionId === null
+                            ? {}
+                            : { sectionId: body.sectionId }),
+                        ...(mutationId === undefined ? {} : { mutationId }),
+                    });
+                    return { task: creation.task, space, created: creation.created };
+                }),
+        );
+        // As for tasks: initial slash-command discovery belongs to the settled agent snapshot.
+        if (created) await this.#slashCommands.catalog(ctx, task.agentId);
+        await this.#agentEventChains.get(task.agentId);
+        await this.#queueAgentWork(ctx, task.agentId, undefined, async () => undefined);
+        const agent = await this.#stemCellAgent(ctx, task);
+        if (created && !this.#announcedAgentCreations.has(task.agentId)) {
+            boundedAdd(this.#announcedAgentCreations, task.agentId, MAX_ANNOUNCED_AGENT_CREATIONS);
+            this.#journal.append("agent.created", {
+                agent,
+                ...(mutationId === undefined ? {} : { mutationId }),
+            });
+        }
+        sendJson(response, 201, { space: await this.#spaceResource(ctx, space), agent });
+        return true;
+    }
+
+    async #stemCellAgent(ctx: Context, task: TaskRecord): Promise<Record<string, unknown>> {
+        const agent = await this.#buildAgentResource(ctx, task.agentId, task.workspaceId, null, {
+            userVisible: true,
+        });
+        if (agent === undefined) throw new Error("The new work has no agent.");
+        return agent;
     }
 
     async #handleArtifactRoute(

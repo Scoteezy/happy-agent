@@ -90,6 +90,7 @@ import { UserInputModule } from "../userInput/index.js";
 import { UserSettingsModule } from "../userSettings/index.js";
 import { TaskAutoJoinModule } from "../taskAutoJoin/index.js";
 import { SurfaceAutoJoinModule } from "../surfaceAutoJoin/index.js";
+import { SpacesModule } from "../spaces/index.js";
 import { SurfacesModule } from "../surfaces/index.js";
 import { WorkflowsModule } from "../workflows/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
@@ -202,6 +203,7 @@ export interface HappyAgentRuntimeModules {
     readonly userInput: UserInputModule;
     readonly userSettings: UserSettingsModule;
     readonly surfaces: SurfacesModule;
+    readonly spaces: SpacesModule;
     readonly workflows: WorkflowsModule;
     readonly workspaces: WorkspacesModule;
 }
@@ -674,6 +676,16 @@ export async function startHappyAgentRuntime(
             await codeMode.close();
         });
         const live = new LiveModule(config, durableFunctions, bots);
+        const spaces = new SpacesModule(
+            config,
+            tasks,
+            bots,
+            surfaces,
+            history,
+            events,
+            durableFunctions,
+        );
+        registerShutdown("spaces", async () => await spaces.close());
         const apiModule = new ApiModule(
             abort,
             config,
@@ -714,6 +726,7 @@ export async function startHappyAgentRuntime(
             userSettings,
             surfaces,
             mobileConnector,
+            spaces,
         );
         api = apiModule;
 
@@ -780,6 +793,7 @@ export async function startHappyAgentRuntime(
             userInput,
             userSettings,
             surfaces,
+            spaces,
             workflows,
             workspaces,
         };
@@ -821,6 +835,7 @@ export async function startHappyAgentRuntime(
             live,
             bots,
             tasks,
+            spaces,
             artifacts,
             artifactData,
             node,
