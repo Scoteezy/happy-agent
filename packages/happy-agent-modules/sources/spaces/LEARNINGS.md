@@ -52,6 +52,10 @@ leftover to clients. Archiving (or leaving) work now removes its rows and anythi
 them, with `space.removed`; unarchiving adds a fresh pending row for each member. `hidden`
 remains Prioritizing's choice for live work it tucks away.
 
+Bots follow the same restoration rule: a transition from archived to active adds one pending row
+for each already-seeded owner. The content-key constraint makes repeated notifications harmless;
+system bots remain outside the ordinary bot listener.
+
 Removing untouched work archives its task, so owning a sidebar row is insufficient authority.
 The API checks the same task-owner or team-owner policy as task archival inside the transaction
 that removes the row, before any row or task changes.

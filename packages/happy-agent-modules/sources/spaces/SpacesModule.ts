@@ -1302,7 +1302,10 @@ export class SpacesModule implements AgentModule {
                 if (lifetime === undefined) return;
                 const ctx = lifetime.named("spaces-bot-event");
                 if (event.bot.systemKey !== undefined) return;
-                if (event.type === "bot_created") {
+                if (
+                    event.type === "bot_created" ||
+                    (event.bot.status === "active" && event.previousBot.status === "archived")
+                ) {
                     for (const state of await queryOwnerStates(ctx)) {
                         await this.#addWork(
                             ctx,
