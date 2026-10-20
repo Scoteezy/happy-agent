@@ -364,12 +364,47 @@ const historyPagePresentationSchema = Type.Object(
     { additionalProperties: false },
 );
 
+/** The questions an answered `request_user_input` call asked and the answers it was given. */
+export const historyUserInputPresentationSchema = Type.Object(
+    {
+        type: Type.Literal("user_input"),
+        questions: Type.Array(
+            Type.Object(
+                {
+                    id: Type.String({ minLength: 1, maxLength: 128 }),
+                    header: Type.String({ minLength: 1, maxLength: 64 }),
+                    question: Type.String({ minLength: 1, maxLength: 4_000 }),
+                    multiSelect: Type.Boolean(),
+                    options: Type.Array(
+                        Type.Object(
+                            {
+                                label: Type.String({ minLength: 1, maxLength: 256 }),
+                                description: Type.String({ maxLength: 2_000 }),
+                            },
+                            { additionalProperties: false },
+                        ),
+                        { maxItems: 32 },
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+            { minItems: 1, maxItems: 4 },
+        ),
+        answers: Type.Record(
+            Type.String({ minLength: 1, maxLength: 128 }),
+            Type.Array(Type.String({ minLength: 1, maxLength: 20_000 }), { maxItems: 33 }),
+        ),
+    },
+    { additionalProperties: false },
+);
+
 /** A bounded result-derived presentation retained with durable tool history. */
 export const historyToolPresentationSchema = Type.Union([
     historyFileDiffPresentationSchema,
     historyMediaPresentationSchema,
     historyPagePresentationSchema,
     historyArtifactPresentationSchema,
+    historyUserInputPresentationSchema,
 ]);
 
 export type HistoryToolPresentation = Static<typeof historyToolPresentationSchema>;
@@ -482,6 +517,10 @@ const historyMessageFields = {
      * model-authored roles.
      */
     senderAgentId: Type.Optional(historyAgentIdSchema),
+    /** That sender's one-line account of what the message is, when it gave one. */
+    senderAgentExplanation: Type.Optional(
+        Type.String({ minLength: 1, maxLength: 120, pattern: "^[^\\u0000\\r\\n]+$" }),
+    ),
     blocks: Type.Array(historyBlockSchema, { maxItems: MAX_HISTORY_BLOCKS_PER_MESSAGE }),
     /** Display-only diagnostics, never part of model input or caller-authored message content. */
     error: Type.Optional(messageErrorSchema),

@@ -360,6 +360,45 @@ export const pagePresentationSchema = Type.Object({
 /** A legacy inline web page. New live pages use `ArtifactPresentation` and the artifact's `live`. */
 export type PagePresentation = Static<typeof pagePresentationSchema>;
 
+/** One question a `request_user_input` call asked, as the person was shown it. */
+export const userInputPresentationQuestionSchema = Type.Object({
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    header: Type.String({ minLength: 1, maxLength: 64 }),
+    question: Type.String({ minLength: 1, maxLength: 4_000 }),
+    multiSelect: Type.Boolean(),
+    /** Possibly empty, and then the question was answered in free text. */
+    options: Type.Array(
+        Type.Object({
+            label: Type.String({ minLength: 1, maxLength: 256 }),
+            description: Type.String({ maxLength: 2_000 }),
+        }),
+        { maxItems: 32 },
+    ),
+});
+
+/** One question a `request_user_input` call asked, as the person was shown it. */
+export type UserInputPresentationQuestion = Static<typeof userInputPresentationQuestionSchema>;
+
+/**
+ * The questions a completed `request_user_input` call asked and the answers the person gave, so
+ * a conversation keeps both where the call was made.
+ */
+export const userInputPresentationSchema = Type.Object({
+    type: Type.Literal("user_input"),
+    questions: Type.Array(userInputPresentationQuestionSchema, { minItems: 1, maxItems: 4 }),
+    /**
+     * Each question ID mapped to the person's values, in the shape a question's `answers` take:
+     * a value matching an option label is a selection, and any other is free text.
+     */
+    answers: Type.Record(
+        Type.String({ minLength: 1, maxLength: 128 }),
+        Type.Array(Type.String({ minLength: 1, maxLength: 20_000 }), { maxItems: 33 }),
+    ),
+});
+
+/** The questions a completed `request_user_input` call asked and the answers it was given. */
+export type UserInputPresentation = Static<typeof userInputPresentationSchema>;
+
 /** Every display-ready tool-call presentation the client understands. */
 export const toolPresentationSchema = Type.Union([
     explorationPresentationSchema,
@@ -371,6 +410,7 @@ export const toolPresentationSchema = Type.Union([
     mediaPresentationSchema,
     artifactPresentationSchema,
     pagePresentationSchema,
+    userInputPresentationSchema,
 ]);
 
 /** Every display-ready tool-call presentation the client understands. */
@@ -384,6 +424,11 @@ export const messageMetadataSchema = Type.Object({
     modelId: Type.Optional(Type.String()),
     /** The agent that sent this system-generated message, when one identified itself. */
     senderAgentId: Type.Optional(cuid2Schema),
+    /**
+     * That agent's one-line account of what the message is, for a client to show beside the
+     * sender until the message is opened. Present only when the sender gave one.
+     */
+    senderAgentExplanation: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
     /**
      * The local Happy user ID of the person who wrote a user message: the authenticated team member
      * who submitted it, or the exported-bot guest who wrote it.

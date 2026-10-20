@@ -42,6 +42,7 @@ import {
 import {
     isGuestOriginMetadata,
     isUserOriginMetadata,
+    senderAgentExplanationOf,
     senderAgentIdOf,
 } from "../impl/messageOrigin.js";
 import { decodeRequestProfile } from "../impl/requestProfile.js";
@@ -2468,6 +2469,8 @@ export class HistoryModule implements AgentModule {
                       ? metadataUserId
                       : undefined;
             const sender = fromUser ? undefined : senderAgentIdOf(accepted.metadata);
+            const senderExplanation =
+                sender === undefined ? undefined : senderAgentExplanationOf(accepted.metadata);
             // A message from another agent may carry the reasoning that agent exposed. It is
             // recorded as thinking, the way this module records any other reasoning; reasoning
             // that is only an opaque provider payload has nothing to show and is left out.
@@ -2497,6 +2500,9 @@ export class HistoryModule implements AgentModule {
                 // its run echoes the mutation recorded here.
                 ...(mutationId === undefined ? {} : { mutationId }),
                 ...(sender === undefined ? {} : { senderAgentId: sender }),
+                ...(senderExplanation === undefined
+                    ? {}
+                    : { senderAgentExplanation: senderExplanation }),
                 ...(accepted.metadata?.hideFromUser === undefined
                     ? {}
                     : { hideFromUser: accepted.metadata.hideFromUser }),

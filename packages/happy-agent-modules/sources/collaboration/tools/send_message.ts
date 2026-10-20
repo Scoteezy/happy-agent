@@ -3,8 +3,8 @@ import { defineAgentTool } from "@slopus/happy-agent-base";
 
 import type { CollaborationModule } from "../CollaborationModule.js";
 import {
-    collaborationSendInputSchema,
-    type CollaborationSendInput,
+    collaborationSendToolInputSchema,
+    type CollaborationSendToolInput,
 } from "../CollaborationAgent.js";
 
 /** Send one message to an Agent ID allowed by the installation's collaboration boundary. */
@@ -33,12 +33,12 @@ export function sendMessageTool(
             "",
             "Messages are one-way and steer the recipient's active turn in either direction. This returns as soon as the message is delivered, and there is nothing to wait on.",
         ].join("\n"),
-        parameters: collaborationSendInputSchema,
+        parameters: collaborationSendToolInputSchema,
         returnType: Type.Void(),
         durable: true,
         transactional: true,
         shouldReviewInAutoMode: () => false,
-        execute: async (ctx, input: CollaborationSendInput, call) => {
+        execute: async (ctx, input: CollaborationSendToolInput, call) => {
             await collaboration.sendMessage(ctx, actingAgentId, input, call.id);
         },
         toLLM: () => [

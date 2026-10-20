@@ -27,7 +27,7 @@ import type { ComputeModule } from "../compute/index.js";
 import { HistoryModule } from "../history/index.js";
 import type { ConfigModule } from "../config/index.js";
 import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
-import { senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import { senderAgentExplanationMetadata, senderAgentIdMetadata } from "../impl/messageOrigin.js";
 import { mutationIdMetadata, mutationIdOf } from "../impl/mutationEcho.js";
 import {
     collaborationAgentIdSchema,
@@ -405,6 +405,7 @@ export class CollaborationModule implements AgentModule {
             "steer",
             undefined,
             await this.#history.runMutationId(ctx, actingAgentId),
+            input.explanation,
         );
     }
 
@@ -697,6 +698,11 @@ export class CollaborationModule implements AgentModule {
                     },
                     ...senderAgentIdMetadata(scope.agent.id),
                     ...mutationIdMetadata(mutationId),
+                    // The report is written by this module rather than the collaborator's model,
+                    // so its line says which of the two reports it is.
+                    ...senderAgentExplanationMetadata(
+                        answer === "" ? "Stopped without answering" : "Finished: final answer",
+                    ),
                 },
             },
         );
@@ -718,6 +724,7 @@ export class CollaborationModule implements AgentModule {
         delivery: "send" | "steer",
         selection: (CollaborationAgentSelection & { readonly provider: string }) | undefined,
         mutationId: string | undefined,
+        explanation?: string,
     ): Promise<void> {
         const agents = this.#requireAgents();
         const run = async (work: (workCtx: Context) => Promise<void>): Promise<void> =>
@@ -765,6 +772,9 @@ export class CollaborationModule implements AgentModule {
                 metadata: {
                     collaboration: { fromAgentId, toAgentId },
                     ...senderAgentIdMetadata(fromAgentId),
+                    ...(explanation === undefined
+                        ? {}
+                        : senderAgentExplanationMetadata(explanation)),
                     ...(mode === undefined ? {} : { mode }),
                     ...mutationIdMetadata(mutationId),
                 },

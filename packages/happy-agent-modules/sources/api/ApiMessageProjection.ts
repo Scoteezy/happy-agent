@@ -92,6 +92,9 @@ export function messageResource(
             ...(message.senderAgentId === undefined
                 ? {}
                 : { senderAgentId: message.senderAgentId }),
+            ...(message.senderAgentExplanation === undefined
+                ? {}
+                : { senderAgentExplanation: message.senderAgentExplanation }),
         },
         ...(role === "user" && message.clientMetadata !== undefined
             ? { clientMetadata: message.clientMetadata }

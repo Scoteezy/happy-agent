@@ -1,6 +1,8 @@
 import { agentMetadataSchema } from "@slopus/happy-agent-base";
 import { Type, type Static } from "@sinclair/typebox";
 
+import { senderAgentExplanationSchemaOf } from "../impl/messageOrigin.js";
+
 /** IDs used by the collaboration tools and by Agent Base. */
 export const collaborationAgentIdSchema = Type.String({
     minLength: 2,
@@ -113,10 +115,27 @@ export const collaborationCreateOptionsSchema = Type.Object(
     { additionalProperties: false },
 );
 
-/** Send text to a collaborator this agent can already reach. */
+/**
+ * Send text to a collaborator this agent can already reach. The explanation is the line a person
+ * reading the recipient's conversation sees in place of the message until they open it; code that
+ * sends without one leaves that line to the sender's name alone.
+ */
 export const collaborationSendInputSchema = Type.Object(
     {
         toAgentId: collaborationAgentIdSchema,
+        text: collaborationMessageTextSchema,
+        explanation: Type.Optional(senderAgentExplanationSchemaOf()),
+    },
+    { additionalProperties: false },
+);
+
+/** What `send_agent_message` takes: a model always says in one line what its message is. */
+export const collaborationSendToolInputSchema = Type.Object(
+    {
+        toAgentId: collaborationAgentIdSchema,
+        explanation: senderAgentExplanationSchemaOf(
+            'One short line saying what this message is, shown to people in the recipient\'s chat before they open it, such as "Report: why the CSV tests fail" or "Asking for the failing test output".',
+        ),
         text: collaborationMessageTextSchema,
     },
     { additionalProperties: false },
@@ -144,4 +163,5 @@ export type CollaborationModelChoice = Static<typeof collaborationModelChoiceSch
 export type CollaborationCreateInput = Static<typeof collaborationCreateInputSchema>;
 export type CollaborationCreateOptions = Static<typeof collaborationCreateOptionsSchema>;
 export type CollaborationSendInput = Static<typeof collaborationSendInputSchema>;
+export type CollaborationSendToolInput = Static<typeof collaborationSendToolInputSchema>;
 export type CollaborationCreateResult = Static<typeof collaborationCreateResultSchema>;

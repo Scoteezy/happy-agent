@@ -9,6 +9,7 @@ import {
 
 import {
     historyToolPresentationSchema,
+    historyUserInputPresentationSchema,
     MAX_HISTORY_TOOL_OUTPUT_LENGTH,
     type HistoryToolPresentation,
 } from "../history/index.js";
@@ -62,6 +63,7 @@ const toolPresentationSchema = Type.Union([
     mediaPresentationSchema,
     artifactPresentationSchema,
     pagePresentationSchema,
+    historyUserInputPresentationSchema,
     Type.Object(
         {
             type: Type.Literal("search"),
@@ -140,7 +142,8 @@ export function toolCallResource(
         presentation.type !== "agent_spawn" &&
         presentation.type !== "media" &&
         presentation.type !== "artifact" &&
-        presentation.type !== "page";
+        presentation.type !== "page" &&
+        presentation.type !== "user_input";
     return {
         type: "tool_call",
         id: call.id,

@@ -48,6 +48,7 @@ describe("cross-workspace Agent-ID messaging", () => {
                             content: [
                                 {
                                     arguments: {
+                                        explanation: "Cross-workspace hello",
                                         text: "CROSS_WORKSPACE_MESSAGE_RECEIVED",
                                         toAgentId: recipientAgentId,
                                     },
