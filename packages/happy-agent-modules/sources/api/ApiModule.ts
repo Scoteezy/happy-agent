@@ -6922,7 +6922,25 @@ export class ApiModule implements AgentModule {
                 const changing = Object.keys(change).length > 0;
                 if (removed === true) {
                     if (changing) throw invalidRequest("A removed row cannot also be changed.");
-                    await spaces.remove(ctx, owner, row[1] as string, mutationId);
+                    await ctx.inTx(async (txCtx) => {
+                        const space = await spaces.get(txCtx, row[1] as string);
+                        if (space !== undefined && space.ownerUserId !== owner) {
+                            throw notFound("The space was not found.");
+                        }
+                        const target = space?.contents[0];
+                        const task =
+                            target?.kind === "task"
+                                ? await this.#tasks?.get(txCtx, target.taskId)
+                                : undefined;
+                        if (task !== undefined && !this.#canArchiveTask(txCtx, task)) {
+                            throw new ApiError(
+                                403,
+                                "forbidden",
+                                "Only the task's owner or the team owner can archive this task.",
+                            );
+                        }
+                        await spaces.remove(txCtx, owner, row[1] as string, mutationId);
+                    });
                     response.writeHead(204).end();
                     return true;
                 }

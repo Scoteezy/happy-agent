@@ -48,6 +48,10 @@ leftover to clients. Archiving (or leaving) work now removes its rows and anythi
 them, with `space.removed`; unarchiving adds a fresh pending row for each member. `hidden`
 remains Prioritizing's choice for live work it tucks away.
 
+Removing untouched work archives its task, so owning a sidebar row is insufficient authority.
+The API checks the same task-owner or team-owner policy as task archival inside the transaction
+that removes the row, before any row or task changes.
+
 ## The API is only what the desktop uses
 
 Kirill reviewed the contract before it was specified. Everything the desktop did not read was
