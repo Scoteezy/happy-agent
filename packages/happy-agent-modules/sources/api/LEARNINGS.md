@@ -15,6 +15,14 @@ protocol policy. HTTP rejects the old selector with `400 invalid_request`; curre
 schemas omit it. GitHub repository sources remain supported and use the Git authentication on the
 machine running the clone. This decision does not authorize publishing or pushing local changes.
 
+## Activity children include their recorded token totals
+
+Finished helper rows previously had no usage to show. Activity and the focused bootstrap now
+include each child's own lifetime recorded input plus output as `totalTokens`, excluding cache
+counters and descendants. No inference record means `null`; a recorded zero remains `0`.
+This uses Usage's aggregate rather than provider-reported totals, transcript estimates, or the
+tree usage shown for the parent. Other agent projections keep this enrichment off their path.
+
 ## Scheduled waits travel through the agent resource
 
 The desktop sidebar could not show waits because agent snapshots and updates omitted Scheduling's

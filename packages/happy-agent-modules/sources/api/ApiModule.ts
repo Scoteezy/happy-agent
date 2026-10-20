@@ -5206,9 +5206,16 @@ export class ApiModule implements AgentModule {
         const children = await agents.childOf(ctx, agentId);
         return {
             subagents: await Promise.all(
-                [...children]
-                    .reverse()
-                    .map(async (childId) => await this.#requireAgentResource(ctx, childId)),
+                [...children].reverse().map(async (childId) => {
+                    const [agent, usage] = await Promise.all([
+                        this.#requireAgentResource(ctx, childId),
+                        this.#usage.readAgent(ctx, childId),
+                    ]);
+                    return {
+                        ...agent,
+                        totalTokens: usage.inferenceCount === 0 ? null : usage.totalTokens,
+                    };
+                }),
             ),
             processes: await this.#compute.listProcesses(ctx, agentId),
         };
