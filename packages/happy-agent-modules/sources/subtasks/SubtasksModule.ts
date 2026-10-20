@@ -249,6 +249,20 @@ export class SubtasksModule implements AgentModule {
         });
     }
 
+    modelDescription(): string {
+        return this.#collaboration
+            .availableModels()
+            .map(
+                (model) =>
+                    `- ${model.providerId} + ${model.id} (${model.name}; effort: ${model.effortLevels.join(", ")}${model.serviceTiers === undefined ? "" : `; tiers: ${model.serviceTiers.join(", ")}`})`,
+            )
+            .join("\n");
+    }
+
+    /**
+     * Create a subtask and send its opening task. `unreported` is for a calling module that tells
+     * the coordinator about the subtask's work itself, so its replies are not reported again.
+     */
     async create(
         ctx: Context,
         parentAgentId: string,
@@ -256,6 +270,7 @@ export class SubtasksModule implements AgentModule {
         agentId: string,
         workspaceId?: string,
         creator?: CollaborationCreator,
+        options: { readonly unreported?: boolean } = {},
     ): Promise<SubtaskResult> {
         if (
             !Value.Check(createSubtaskInputSchema, input) ||
@@ -351,6 +366,9 @@ export class SubtasksModule implements AgentModule {
                           },
                       }),
                 metadata: {
+                    ...(options.unreported === true
+                        ? this.#collaboration.unreportedAgentMetadata()
+                        : {}),
                     title: input.title,
                     subtask: true,
                     subtaskOrderKey,

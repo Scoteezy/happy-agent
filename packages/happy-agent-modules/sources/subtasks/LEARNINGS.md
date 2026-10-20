@@ -99,3 +99,11 @@ A workspace-bound subtask opens a workspace in a project, which a bot kept insid
 not reach. Such a request is refused with an input error before any workspace is made. Subtasks
 that share the bot's folder, and exported-bot conversations, are the bot's own work and are not
 gated, so `#assertCanCreate` itself stays independent of reach.
+
+## A module that speaks for its subtask can silence its reports
+
+Prioritizing, the sidebar's organiser, is an ordinary subtask of Happy, but each of its turns
+reported a one-line reply into Happy's chat beside the sidebar's own batch note, so Happy's chat
+got narration and duplicates. `create` takes `unreported`, which stores the same "do not report to
+the creator" collaboration flag `createConversation` uses; the subtask is otherwise identical, and
+the calling module writes the one message its coordinator should see.

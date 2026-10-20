@@ -78,7 +78,9 @@ then became a conversation subtask (`createConversation`, with its own metadata)
 still saw as not a true subtask. It is now made through `SubtasksModule.create`, exactly as Happy
 makes any subtask, with an opening task and nothing special-cased; it is found by the agent ID in
 the person's bookkeeping. It is created lazily with the person's first stem cell — not on seed or
-the first read — and before that briefs and tidy do nothing.
+the first read — and before that briefs and tidy do nothing. As an ordinary subtask it reported every reply into
+Happy's chat beside the batch note, so it is created `unreported`: Happy's chat gains exactly one
+message per applied batch, and turns that change nothing say nothing.
 
 ## Recent work is never tucked away
 

@@ -40,7 +40,8 @@ One long-running subtask of Happy per person, made through `SubtasksModule.creat
 every subtask takes — with the person's first stem cell, and made again with the next one if the
 person archived it. Until then there is none, and briefs and tidy requests are dropped; its
 opening task places whatever was seeded before it existed. It appears in Happy's subtasks like any
-other and, like any other, reports each answer to Happy. It is recognised by the agent ID stored
+other, but is created `unreported`: Happy hears from it only through the batch note, exactly one
+line per applied batch. It is recognised by the agent ID stored
 in the person's bookkeeping, not by metadata. It runs on the cheapest model of Happy's account and
 its whole tool array and system prompt come from this module, so it can do nothing else. Briefs
 reach it through the `spaces.briefPrioritizing` durable function, committed with whatever caused

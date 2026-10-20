@@ -343,6 +343,23 @@ describe("spaces over the API", () => {
         });
         expect(tidy.note).toMatch(/^Hid [^.]+\.$/);
 
+        // Happy's chat gains exactly one message per applied batch, its note, and nothing else:
+        // Prioritizing's own replies, queued placements, and icons are never reported.
+        const applied = await batches();
+        expect(applied).toHaveLength(2);
+        const happyMessages = (
+            await gym.http.ok<{ runs: { messages: { id: string; role: string }[] }[] }>(
+                "GET",
+                `/v0/agents/${happy.target.agentId!}/messages`,
+            )
+        ).runs.flatMap((run) => run.messages);
+        expect(happyMessages.map(({ id }) => id).sort()).toEqual(
+            applied.map(({ noteMessageId }) => noteMessageId).sort(),
+        );
+        expect(
+            gym.inference.requests.filter((request) => request.sessionId === happy.target.agentId),
+        ).toEqual([]);
+
         // Every step reached the event journal for live clients.
         const types = new Set<string>();
         for (let after = initial.cursor; ; ) {

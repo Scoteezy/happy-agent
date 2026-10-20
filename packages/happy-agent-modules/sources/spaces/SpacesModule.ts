@@ -1135,7 +1135,9 @@ export class SpacesModule implements AgentModule {
             },
             prioritizingAgentId,
             undefined,
-            route.providerId,
+            { provider: route.providerId, model: route.model },
+            // Happy hears from Prioritizing only through the batch note, one line per batch.
+            { unreported: true },
         );
         await writeOwnerState(ctx, {
             ...(await this.#ownerState(ctx, ownerUserId)),
