@@ -304,6 +304,11 @@ connection on an already-open outer tunnel without interrupting established dest
 The independently owned proxy context explicitly carries the database namespace: detaching the
 admission request alone drops it and makes subsequent artifact reads fail.
 
+The route first matched only well-formed IDs, so `/v0/artifacts/Not-An-Id/proxy` fell through
+admission and the Node front door destroyed the socket instead of answering. Like the network
+proxy, it now matches any single segment, authenticates, and only then answers a malformed ID
+`404`, so a stranger still gets `401` and learns nothing from the ID's shape.
+
 ## Artifact files are matched on the request target as sent
 
 `new URL` resolves `..` and `%2e%2e` segments before routing, so matching artifact file paths on

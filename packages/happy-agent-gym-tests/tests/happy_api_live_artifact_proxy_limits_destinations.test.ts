@@ -117,6 +117,64 @@ it("restricts live artifact connections and applies the current URL to the next 
     expect(gym.inference.unscripted).toEqual([]);
 });
 
+it("answers a malformed artifact ID 404 after authentication and admits no nested path", async () => {
+    const gym = await createAgentGym({ inference: [] });
+    cleanups.push(() => gym.dispose());
+    for (const artifactId of ["Not-An-Id", "1artifact", "artifact_one", "%61rtifact", ""])
+        expect(await attachPath(gym, `/v0/artifacts/${artifactId}/proxy`), artifactId).toEqual({
+            status: 404,
+            code: "not_found",
+        });
+    // Authentication is checked before the ID, so a malformed ID reveals nothing to a stranger.
+    expect(await attachPath(gym, "/v0/artifacts/Not-An-Id/proxy", "wrong-token")).toMatchObject({
+        status: 401,
+    });
+    // Only one path segment names the artifact; deeper or different paths are not this route.
+    for (const path of [
+        "/v0/artifacts/artifactone/files/proxy",
+        "/v0/artifacts/artifactone/proxy/extra",
+        "/v0/artifacts/a/b/proxy",
+    ])
+        expect((await attachPath(gym, path)).status, path).not.toBe(200);
+    expect(gym.machineConnections).toEqual([]);
+    expect(gym.errors).toEqual([]);
+});
+
+/** Attach to a raw proxy path, answering its status and error code, or `0` when it was dropped. */
+function attachPath(
+    gym: AgentGym,
+    path: string,
+    token = gym.token,
+): Promise<{ status: number; code?: string }> {
+    return new Promise((resolve, reject) => {
+        const call = request({
+            socketPath: gym.socketPath,
+            method: "CONNECT",
+            path,
+            headers: { authorization: `Bearer ${token}` },
+        });
+        call.once("error", (error: NodeJS.ErrnoException) =>
+            error.code === "ECONNRESET" ? resolve({ status: 0 }) : reject(error),
+        );
+        call.once("connect", (response, socket, head) => {
+            let body = head.toString();
+            socket.on("data", (chunk: Buffer) => (body += chunk.toString()));
+            const done = () => {
+                socket.destroy();
+                const code = /"code":"([a-z_]+)"/u.exec(body)?.[1];
+                resolve({ status: response.statusCode!, ...(code === undefined ? {} : { code }) });
+            };
+            if (response.statusCode === 200) return done();
+            socket.once("end", done);
+            socket.once("close", done);
+        });
+        call.setTimeout(10_000, () =>
+            call.destroy(new Error("The artifact proxy did not answer.")),
+        );
+        call.end();
+    });
+}
+
 it("keeps an established destination stream open when the live URL changes", async () => {
     const first = await site("established site");
     const second = await site("new site");

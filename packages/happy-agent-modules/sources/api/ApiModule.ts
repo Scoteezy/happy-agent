@@ -2309,7 +2309,7 @@ export class ApiModule implements AgentModule {
         pathname: string,
         authorization: string | string[] | undefined,
     ): Promise<PreparedWorkspaceProxySocket> {
-        const artifact = /^\/v0\/artifacts\/([a-z][a-z0-9]*)\/proxy$/.exec(pathname);
+        const artifact = /^\/v0\/artifacts\/([^/]*)\/proxy$/.exec(pathname);
         if (artifact !== null)
             return await this.#prepareArtifactProxy(ctx, artifact[1]!, authorization);
         const network = /^\/v0\/networks\/([^/]*)\/proxy$/.exec(pathname);
@@ -2362,6 +2362,10 @@ export class ApiModule implements AgentModule {
             ctx = await this.#authenticate(ctx, authorization);
             this.#assertTeamUser(ctx);
             this.#assertSocketReady();
+            // Any ID is answered after authentication, as the network proxy does; one that cannot
+            // name an artifact is simply not found.
+            if (!/^[a-z][a-z0-9]*$/.test(artifactId))
+                throw notFound("The live artifact or its network was not found.");
             const connect = await this.#machineNetwork(
                 async () => await this.#artifacts?.proxy(ctx, artifactId),
             );
