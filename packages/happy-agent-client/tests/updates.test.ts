@@ -416,6 +416,44 @@ describe("HappyAgentClient updates", () => {
         await pending;
     });
 
+    it("retries at its first interval as soon as a daemon it backed off from says it is draining", async () => {
+        vi.useFakeTimers();
+        let attempts = 0;
+        let drainedAt: number | undefined;
+        let retriedAt: number | undefined;
+        const fetch: typeof globalThis.fetch = async () => {
+            attempts += 1;
+            if (attempts <= 8) throw new TypeError("connect ECONNREFUSED");
+            if (attempts === 9) {
+                drainedAt = Date.now();
+                return sseResponse(
+                    hello(CURSOR_0, false, true, {
+                        daemonId: DAEMON_A,
+                        daemonStartedAt: 10,
+                        draining: true,
+                    }),
+                );
+            }
+            retriedAt ??= Date.now();
+            throw new TypeError("connect ECONNREFUSED");
+        };
+        const controller = new AbortController();
+        const client = new HappyAgentClient({ endpoint: "http://agent.local", token: "t", fetch });
+        const updates = client.updates({ after: CURSOR_0, signal: controller.signal });
+        const read = (async () => {
+            for await (const _update of updates);
+        })();
+
+        // Eight failures back the client off to several seconds; the draining hello resets that.
+        await vi.advanceTimersByTimeAsync(40_000);
+        expect(drainedAt).toBeDefined();
+        expect(retriedAt).toBeDefined();
+        expect((retriedAt ?? 0) - (drainedAt ?? 0)).toBeLessThanOrEqual(200);
+
+        controller.abort();
+        await read;
+    });
+
     it("backs off again once the drained daemon has been away past its replacement window", async () => {
         vi.useFakeTimers();
         let attempts = 0;

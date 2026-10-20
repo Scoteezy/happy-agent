@@ -114,6 +114,8 @@ export async function* reconnectingUpdates(
                     if (frame.hello.draining === true) {
                         connection = "draining";
                         replacementExpectedUntil = Date.now() + REPLACEMENT_WINDOW_MS;
+                        // Its replacement answers soon, however far this client had backed off.
+                        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
                         yield {
                             kind: "draining",
                             cursor,
@@ -142,6 +144,8 @@ export async function* reconnectingUpdates(
                 if (frame.event.type === "daemon.draining" && connection !== "draining") {
                     connection = "draining";
                     replacementExpectedUntil = Date.now() + REPLACEMENT_WINDOW_MS;
+                    // Its replacement answers soon, however far this client had backed off.
+                    reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
                     yield {
                         kind: "draining",
                         cursor,
