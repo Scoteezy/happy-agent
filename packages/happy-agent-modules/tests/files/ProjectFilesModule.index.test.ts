@@ -131,6 +131,43 @@ describe("ProjectFilesModule index", () => {
         });
     });
 
+    it("rescans after a direct read that lands while a scan is still in flight", async () => {
+        const root = await workspace();
+        await writeFile(join(root, "README.md"), "workspace");
+        // A watch that has not gone live yet, as on a loaded machine just after the first search.
+        const git = {
+            invalidate: () => undefined,
+            markChanged: () => undefined,
+            watchWorkingTree: () => () => undefined,
+        } as unknown as GitModule;
+        const runners = new RunnersModule(await temporaryTestConfig());
+        runnerModules.add(runners);
+        const files = new ProjectFilesModule(
+            {} as ProjectsModule,
+            {} as WorkspacesModule,
+            git,
+            runners,
+        );
+        modules.add(files);
+        const resolvedRoot = await fileRoot(root);
+        await files.search(resolvedRoot, { query: "readme" });
+
+        await mkdir(join(root, "external"));
+        await writeFile(join(root, "external", "created.txt"), "outside");
+        // The scan the read meets may have passed this folder before it existed.
+        const scanning = vi.spyOn(FileFinder.prototype, "isScanning").mockReturnValue(true);
+        try {
+            await files.read(resolvedRoot, { path: "external/created.txt" });
+        } finally {
+            scanning.mockRestore();
+        }
+
+        await vi.waitFor(async () => {
+            const result = await files.search(resolvedRoot, { query: "external" });
+            expect(result.files.map((file) => file.path)).toContain("external/created.txt");
+        });
+    });
+
     it("rescans when the watched tree reports an unseen external file", async () => {
         const root = await workspace();
         await writeFile(join(root, "README.md"), "workspace");

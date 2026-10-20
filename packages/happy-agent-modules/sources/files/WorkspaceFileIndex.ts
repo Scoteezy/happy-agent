@@ -11,7 +11,7 @@ const SEARCH_READY_BUDGET_MS = 100;
 interface FinderState {
     readonly finder: FileFinder;
     lastScanAt: number;
-    /** Whether a file was added, removed, or renamed since the last scan started. */
+    /** Whether a file may have been added, removed, or renamed since the last scan started. */
     stale: boolean;
     readonly unwatch: () => void;
     /** Whether working-tree events are arriving; without them a search rescans on a timer. */
@@ -50,7 +50,12 @@ export class WorkspaceFileIndex {
     /** Requests a scan only when a file proven by a direct read is absent from a warm index. */
     ensure(root: string, path: string): void {
         const state = this.#finders.get(resolve(root));
-        if (state === undefined || state.finder.isScanning()) return;
+        if (state === undefined) return;
+        // A scan in flight may have passed the path before it existed, so the next search rescans.
+        if (state.finder.isScanning()) {
+            state.stale = true;
+            return;
+        }
         const result = state.finder.fileSearch(path, { pageSize: 10 });
         if (!result.ok) return;
         if (!result.value.items.some((item) => item.relativePath === path)) {
@@ -64,9 +69,8 @@ export class WorkspaceFileIndex {
         limit: number,
     ): Promise<readonly { readonly fileName: string; readonly path: string }[]> {
         const state = await this.#stateFor(root);
-        const outdated = state.watching
-            ? state.stale
-            : Date.now() - state.lastScanAt > RESCAN_AFTER_MS;
+        const outdated =
+            state.stale || (!state.watching && Date.now() - state.lastScanAt > RESCAN_AFTER_MS);
         if (outdated) this.#startScan(state);
         if (state.finder.isScanning()) {
             await this.#waitForScan(state.finder, SEARCH_READY_BUDGET_MS);

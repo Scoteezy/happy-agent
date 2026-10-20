@@ -35,6 +35,15 @@ excludes ignored directories, and is marked stale only when a path is created or
 workspace is never rescanned. The two-second age rule survives only for a tree that cannot be
 watched.
 
+## A direct read during a scan still asks for one
+
+A read that proves a file exists asks the index to rescan when the file is missing from it. The
+read used to drop that request while a scan was in flight, but the scan may have passed the folder
+before the file was created, and nothing else marked the index stale until the watch reported the
+change. On a loaded machine that took longer than the file search waited, so the file stayed
+missing. The read now marks the index stale during a scan, and any stale index rescans on the
+next search, whether or not its tree is watched.
+
 ## File trees must not wait for autocomplete indexing
 
 Using FFF's ignore set to filter tree branches made valid physical folders disappear and forced a
