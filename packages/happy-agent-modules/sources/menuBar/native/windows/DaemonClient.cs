@@ -8,6 +8,9 @@ using System.Text;
 using System.Threading;
 
 // The Windows daemon's existing private named-pipe HTTP API. No TCP port or new API is needed.
+//
+// This file is compiled by the .NET Framework's own csc.exe, which accepts C# 5 only, and is read in
+// the system code page: keep it to C# 5 syntax and ASCII source, with \u escapes for anything else.
 internal sealed class DaemonClient
 {
     private readonly string pipeName;
@@ -21,30 +24,72 @@ internal sealed class DaemonClient
         this.tokenFile = tokenFile;
     }
 
+    /// <summary>
+    /// Every account's latest reading, in configuration order. Friendly names come from the
+    /// configuration; when it cannot be read, names stay null and the tray keeps the ones it knew.
+    /// </summary>
     public DaemonUsage Usage(bool refreshAccounts)
     {
-        if (refreshAccounts) Request("POST", "/v0/usage/refresh", 202);
-        DaemonUsage usage;
-        using (var body = new MemoryStream(Request("GET", "/v0/usage", 200)))
-            usage = (DaemonUsage)new DataContractJsonSerializer(typeof(DaemonUsage),
-                new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true }).ReadObject(body);
-        using (var body = new MemoryStream(Request("GET", "/v0/config", 200)))
+        if (refreshAccounts) Request("POST", "/v0/usage/refresh", 202, false);
+        DaemonUsage usage = Read<DaemonUsage>(Request("GET", "/v0/usage", 200, false));
+        try
         {
-            var configuration = (DaemonConfiguration)new DataContractJsonSerializer(typeof(DaemonConfiguration),
-                new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true }).ReadObject(body);
+            var configuration = Read<DaemonConfiguration>(Request("GET", "/v0/config", 200, false));
             foreach (var provider in usage.Providers ?? new UsageProvider[0])
             {
                 ConfiguredProvider configured;
                 if (configuration.Config != null && configuration.Config.Providers != null &&
-                    configuration.Config.Providers.TryGetValue(provider.Id, out configured)) provider.Name = configured.Name;
+                    provider.Id != null &&
+                    configuration.Config.Providers.TryGetValue(provider.Id, out configured))
+                {
+                    provider.Name = configured.Name;
+                    if (configured.Hidden == true) provider.Hidden = true;
+                }
+                provider.Configured = true;
             }
         }
+        catch (Exception) { }
         return usage;
     }
 
-    public void Stop() { Request("POST", "/v0/shutdown", 202); }
+    /// <summary>
+    /// The bots and the person's joined tasks. A daemon without tasks answers 404 on the task list,
+    /// which leaves the bots alone rather than looking like a lost connection.
+    /// </summary>
+    public WorkRow[] Work(out WorkRow[] tasks)
+    {
+        WorkList bots = Read<WorkList>(Request("GET", "/v0/bots", 200, false));
+        byte[] taskBody = Request("GET", "/v0/tasks?scope=joined", 200, true);
+        tasks = taskBody == null ? new WorkRow[0] : (Read<WorkList>(taskBody).Tasks ?? new WorkRow[0]);
+        return bots.Bots ?? new WorkRow[0];
+    }
 
-    private byte[] Request(string method, string path, int expectedStatus)
+    /// <summary>
+    /// When the newest running turn in an agent's history began, in Unix milliseconds: the same
+    /// startedAt the desktop counts its running-turn clock from.
+    /// </summary>
+    public long? RunningTurnStart(string agentId)
+    {
+        MessagesPage page = Read<MessagesPage>(Request("GET",
+            "/v0/agents/" + Uri.EscapeDataString(agentId) + "/messages?limit=1&omitToolData=true", 200, false));
+        long? newest = null;
+        foreach (RunInfo run in page.Runs ?? new RunInfo[0])
+            if (run.Status == "running" && run.StartedAt.HasValue && (!newest.HasValue || run.StartedAt > newest))
+                newest = run.StartedAt;
+        return newest;
+    }
+
+    public void Stop() { Request("POST", "/v0/shutdown", 202, false); }
+
+    private static T Read<T>(byte[] body)
+    {
+        using (var stream = new MemoryStream(body))
+            return (T)new DataContractJsonSerializer(typeof(T),
+                new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true }).ReadObject(stream);
+    }
+
+    /// <summary>The response body, or null for a 404 when <paramref name="allowNotFound"/>.</summary>
+    private byte[] Request(string method, string path, int expectedStatus, bool allowNotFound)
     {
         string token = File.ReadAllText(tokenFile).Trim();
         if (token.Length == 0 || token.Contains("\r") || token.Contains("\n"))
@@ -73,6 +118,7 @@ internal sealed class DaemonClient
                 if (split < 0) throw new IOException("The daemon response is incomplete.");
                 string header = text.Substring(0, split);
                 string[] status = header.Split('\r')[0].Split(' ');
+                if (allowNotFound && status.Length >= 2 && status[1] == "404") return null;
                 if (status.Length < 2 || status[1] != expectedStatus.ToString())
                     throw new IOException("The daemon could not complete the request.");
                 int offset = Encoding.UTF8.GetByteCount(text.Substring(0, split + 4));
@@ -103,8 +149,8 @@ internal sealed class DaemonClient
     }
 }
 
-// Only the fields displayed by this client, from GET /v0/usage. Unrecognized additive fields
-// remain the server's concern; missing provider readings are displayed as unavailable, never zero.
+// Only the fields displayed by this client. Unrecognized additive fields remain the server's
+// concern; a missing provider reading is shown as waiting, never as zero.
 [DataContract] internal sealed class DaemonUsage
 {
     [DataMember(Name = "providers")] public UsageProvider[] Providers { get; set; }
@@ -112,11 +158,17 @@ internal sealed class DaemonClient
 }
 [DataContract] internal sealed class UsageProvider
 {
+    /// <summary>The configured friendly name, or null when configuration could not be read.</summary>
     public string Name { get; set; }
+    /// <summary>Whether configuration was read alongside this reading.</summary>
+    public bool Configured { get; set; }
     [DataMember(Name = "type")] public string Type { get; set; }
     [DataMember(Name = "providerId")] public string Id { get; set; }
-    [DataMember(Name = "enabled")] public bool Enabled { get; set; }
+    [DataMember(Name = "enabled")] public bool? Enabled { get; set; }
+    [DataMember(Name = "hidden")] public bool? Hidden { get; set; }
     [DataMember(Name = "usage")] public ProviderUsage Usage { get; set; }
+    [DataMember(Name = "checkedAt")] public long? CheckedAt { get; set; }
+    [DataMember(Name = "refreshing")] public bool? Refreshing { get; set; }
 }
 [DataContract] internal sealed class DaemonConfiguration
 {
@@ -129,9 +181,12 @@ internal sealed class DaemonClient
 [DataContract] internal sealed class ConfiguredProvider
 {
     [DataMember(Name = "name")] public string Name { get; set; }
+    [DataMember(Name = "hidden")] public bool? Hidden { get; set; }
 }
 [DataContract] internal sealed class ProviderUsage
 {
+    [DataMember(Name = "planName")] public string PlanName { get; set; }
+    [DataMember(Name = "exhausted")] public bool? Exhausted { get; set; }
     [DataMember(Name = "windows")] public UsageWindows Windows { get; set; }
 }
 [DataContract] internal sealed class UsageWindows
@@ -150,4 +205,41 @@ internal sealed class DaemonClient
 {
     [DataMember(Name = "input")] public long Input { get; set; }
     [DataMember(Name = "output")] public long Output { get; set; }
+}
+
+// GET /v0/bots and GET /v0/tasks?scope=joined: a bot or task with its agent tree.
+[DataContract] internal sealed class WorkList
+{
+    [DataMember(Name = "bots")] public WorkRow[] Bots { get; set; }
+    [DataMember(Name = "tasks")] public WorkRow[] Tasks { get; set; }
+}
+[DataContract] internal sealed class WorkRow
+{
+    [DataMember(Name = "id")] public string Id { get; set; }
+    [DataMember(Name = "name")] public string Name { get; set; }
+    [DataMember(Name = "status")] public string Status { get; set; }
+    [DataMember(Name = "creatorAgentId")] public string CreatorAgentId { get; set; }
+    [DataMember(Name = "agent")] public AgentNode Agent { get; set; }
+}
+[DataContract] internal sealed class AgentNode
+{
+    [DataMember(Name = "id")] public string Id { get; set; }
+    [DataMember(Name = "status")] public string Status { get; set; }
+    [DataMember(Name = "subagents")] public SubagentCounts Subagents { get; set; }
+    [DataMember(Name = "subtasks")] public AgentNode[] Subtasks { get; set; }
+}
+[DataContract] internal sealed class SubagentCounts
+{
+    [DataMember(Name = "running")] public int Running { get; set; }
+}
+
+// GET /v0/agents/:id/messages: only the runs, for when the running turn began.
+[DataContract] internal sealed class MessagesPage
+{
+    [DataMember(Name = "runs")] public RunInfo[] Runs { get; set; }
+}
+[DataContract] internal sealed class RunInfo
+{
+    [DataMember(Name = "status")] public string Status { get; set; }
+    [DataMember(Name = "startedAt")] public long? StartedAt { get; set; }
 }

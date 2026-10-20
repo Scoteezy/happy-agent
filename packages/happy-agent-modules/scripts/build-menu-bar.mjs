@@ -48,6 +48,7 @@ function main() {
                 "/reference:System.Drawing.dll",
                 "/reference:System.Runtime.Serialization.dll",
                 join(nativeRoot, "windows", "DaemonClient.cs"),
+                join(nativeRoot, "windows", "TrayContent.cs"),
                 join(nativeRoot, "windows", "WindowsTray.cs"),
             ],
             { stdio: "inherit", windowsHide: true },

@@ -1,7 +1,7 @@
 import AppKit
 
-/// One provider account on a single line: its name and plan, a small gauge for each window, and
-/// when the window holding it back starts over.
+/// One provider account on a single line: its name, its plan in a column of its own, a small gauge
+/// for each window, and when the window holding it back starts over.
 ///
 /// A gauge reads like a battery — the ring and the number are what is left, not what is spent —
 /// and turns yellow when little is left and red when almost nothing is. The row never highlights
@@ -9,10 +9,13 @@ import AppKit
 final class PlanRowView: NSView {
     private let entry: PlanEntry
     private let columns: [PlanWindowKind]
+    private let planWidth: CGFloat
 
-    init(entry: PlanEntry, columns: [PlanWindowKind]) {
+    /// `planWidth` is the vendor's plan column, shared by every row under the same header.
+    init(entry: PlanEntry, columns: [PlanWindowKind], planWidth: CGFloat) {
         self.entry = entry
         self.columns = columns
+        self.planWidth = planWidth
         super.init(
             frame: NSRect(x: 0, y: 0, width: MenuMetrics.width, height: MenuMetrics.rowHeight)
         )
@@ -28,7 +31,7 @@ final class PlanRowView: NSView {
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
-        let layout = PlanColumns(columns: columns, width: bounds.width)
+        let layout = PlanColumns(columns: columns, planWidth: planWidth, width: bounds.width)
         let limiting = entry.limiting
         for (index, kind) in columns.enumerated() {
             guard let window = entry.windows.first(where: { $0.kind == kind }) else {
@@ -50,38 +53,21 @@ final class PlanRowView: NSView {
             )
         }
 
-        // A long account name gives way to the plan, but only down to a readable length; past that
-        // the plan is shortened, and left out rather than squeezed into an unreadable stub.
-        let end = layout.namesEnd
-        let name = NSAttributedString(
-            string: entry.name,
-            attributes: [.font: MenuMetrics.font, .foregroundColor: NSColor.labelColor]
-        )
-        let fullName = ceil(name.size().width)
-        let plan = entry.planName.map {
-            ceil(NSAttributedString(string: $0, attributes: [.font: MenuMetrics.font]).size().width)
-        }
-        let room = end - MenuMetrics.inset
-        let besidePlan = plan.map { room - $0 - MenuMetrics.planGap } ?? room
-        let nameWidth = min(
-            fullName,
-            room,
-            max(besidePlan, min(fullName, MenuMetrics.nameMinimumWidth))
-        )
+        // The name gives way first: it is cut short before the plan column, and the plan only
+        // within its own column, so the gauges never move.
         drawLine(
-            name,
-            in: NSRect(x: MenuMetrics.inset, y: 0, width: nameWidth, height: bounds.height)
-        )
-        let planStart = MenuMetrics.inset + nameWidth + MenuMetrics.planGap
-        if let planName = entry.planName, let plan,
-            end - planStart >= min(plan, MenuMetrics.planMinimumWidth)
-        {
-            drawLine(
-                planName,
-                font: MenuMetrics.font,
-                color: .secondaryLabelColor,
-                in: NSRect(x: planStart, y: 0, width: end - planStart, height: bounds.height)
+            entry.name,
+            font: MenuMetrics.font,
+            color: .labelColor,
+            in: NSRect(
+                x: MenuMetrics.inset,
+                y: 0,
+                width: max(0, layout.namesEnd - MenuMetrics.inset),
+                height: bounds.height
             )
+        )
+        if let planName = entry.planName, let cell = layout.plan {
+            drawLine(planName, font: MenuMetrics.planFont, color: .secondaryLabelColor, in: cell)
         }
     }
 
@@ -158,10 +144,11 @@ final class PlanRowView: NSView {
         )
     }
 
-    /// Every window the vendor reported, Fable included, with its exact local reset time; a
-    /// blocked account first says until when.
+    /// The account and plan in full, then every window the vendor reported, Fable included, with
+    /// its exact local reset time; a blocked account first says until when.
     static func tooltip(_ entry: PlanEntry) -> String {
-        if entry.isPlaceholder { return "Waiting for the first usage reading" }
+        let account = [entry.name, entry.planName].compactMap { $0 }.joined(separator: " · ")
+        if entry.isPlaceholder { return "\(account)\nWaiting for the first usage reading" }
         var lines = entry.allWindows.map { window -> String in
             let left = "\(window.kind.label): \(Int(window.remainingPercent.rounded()))% left"
             guard let reset = window.resetsAt else { return left }
@@ -172,18 +159,20 @@ final class PlanRowView: NSView {
             let reset = limiting.resetsAt.map { ", resets \(resetPhrase($0, precise: true))" } ?? ""
             lines.insert(reached + reset, at: 0)
         }
-        return lines.joined(separator: "\n")
+        return ([account] + lines).joined(separator: "\n")
     }
 }
 
-/// A vendor's name above its accounts, with the names of the gauge columns when they differ from
-/// the vendor above.
+/// A vendor's name above its accounts, with the names of the plan and gauge columns when they
+/// differ from the vendor above.
 final class PlanHeaderView: NSView {
     private let vendor: PlanVendor
+    private let planWidth: CGFloat
     private let labelsColumns: Bool
 
-    init(vendor: PlanVendor, labelsColumns: Bool) {
+    init(vendor: PlanVendor, planWidth: CGFloat, labelsColumns: Bool) {
         self.vendor = vendor
+        self.planWidth = planWidth
         self.labelsColumns = labelsColumns
         super.init(
             frame: NSRect(x: 0, y: 0, width: MenuMetrics.width, height: MenuMetrics.headerHeight)
@@ -199,18 +188,21 @@ final class PlanHeaderView: NSView {
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
-        let layout = PlanColumns(columns: vendor.columns, width: bounds.width)
+        let layout = PlanColumns(columns: vendor.columns, planWidth: planWidth, width: bounds.width)
         drawLine(
-            headerText(vendor.name.uppercased(), kern: 0.6),
+            columnHeader(vendor.name.uppercased(), kern: 0.6),
             in: line(MenuMetrics.inset, layout.namesEnd - MenuMetrics.inset)
         )
         guard labelsColumns else { return }
+        if let plan = layout.plan {
+            drawLine(columnHeader("Plan"), in: line(plan.minX, plan.width))
+        }
         for (index, kind) in vendor.columns.enumerated() {
             let cell = layout.gauge(index)
-            drawLine(headerText(kind.label), in: line(cell.minX, cell.width), alignment: .right)
+            drawLine(columnHeader(kind.label), in: line(cell.minX, cell.width), alignment: .right)
         }
         let reset = layout.reset
-        drawLine(headerText("Resets"), in: line(reset.minX, reset.width), alignment: .right)
+        drawLine(columnHeader("Resets"), in: line(reset.minX, reset.width), alignment: .right)
     }
 
     /// The header's text sits low in its row, close to the accounts it names.
@@ -222,23 +214,26 @@ final class PlanHeaderView: NSView {
             height: bounds.height - MenuMetrics.headerTop
         )
     }
+}
 
-    private func headerText(_ text: String, kern: CGFloat = 0) -> NSAttributedString {
-        NSAttributedString(
-            string: text,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-                .foregroundColor: NSColor.tertiaryLabelColor,
-                .kern: kern,
-            ]
-        )
-    }
+/// A header's small, quiet text: the vendor's name and the names of its columns.
+private func columnHeader(_ text: String, kern: CGFloat = 0) -> NSAttributedString {
+    NSAttributedString(
+        string: text,
+        attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+            .kern: kern,
+        ]
+    )
 }
 
 /// Where a vendor's columns sit, measured from the right edge so every vendor's week, session,
-/// and reset line up however many columns it has.
-private struct PlanColumns {
+/// and reset line up however many columns it has. The plan column sits just left of the gauges,
+/// as wide as the vendor's widest plan up to a limit, and the name has whatever is left.
+struct PlanColumns {
     let columns: [PlanWindowKind]
+    let planWidth: CGFloat
     let width: CGFloat
 
     var reset: NSRect {
@@ -262,8 +257,35 @@ private struct PlanColumns {
         )
     }
 
-    var namesEnd: CGFloat {
+    private var gaugesStart: CGFloat {
         (columns.isEmpty ? reset.minX : gauge(0).minX) - MenuMetrics.resetGap
+    }
+
+    /// The plan column, or `nil` when no account under this header has a plan.
+    var plan: NSRect? {
+        guard planWidth > 0 else { return nil }
+        return NSRect(
+            x: gaugesStart - planWidth,
+            y: 0,
+            width: planWidth,
+            height: MenuMetrics.rowHeight
+        )
+    }
+
+    var namesEnd: CGFloat {
+        plan.map { $0.minX - MenuMetrics.planGap } ?? gaugesStart
+    }
+
+    /// The plan column a vendor's rows share: as wide as its widest plan, and never narrower than
+    /// its header, up to `MenuMetrics.planMaximumWidth`, past which a plan is cut short. No plan
+    /// under the vendor means no column.
+    static func planWidth(_ vendor: PlanVendor) -> CGFloat {
+        let plans = vendor.plans.compactMap(\.planName)
+        guard !plans.isEmpty else { return 0 }
+        let widest = plans.map {
+            ceil(NSAttributedString(string: $0, attributes: [.font: MenuMetrics.planFont]).size().width)
+        }.max() ?? 0
+        return min(max(widest, ceil(columnHeader("Plan").size().width)), MenuMetrics.planMaximumWidth)
     }
 
     /// Wide enough for "100%" beside its ring.

@@ -8,6 +8,28 @@ with no Electron runtime. Linux still has no status app. The Windows icon is sta
 resource/usage refreshes run only while its menu is open; parent-exit and stdin EOF notifications
 end its lifetime without a process-table polling loop.
 
+The person asked for the Windows tray to work as well as the Mac menu, so it now shows the same
+model: the headline, plan rows in configuration order kept still by the same plan book, the plan,
+session and week left in columns with the same thresholds, the reset in local time, and the five
+most recent top-level tasks and bots with the desktop's turn time. Rows are disabled menu items
+drawn by a custom renderer, so they never highlight or close the menu yet keep their colors and
+ring; the right-hand columns are laid out against the shortcut column, whose width the item's
+shortcut text reserves. Its icon stays still: animating it would mean reading the daemon while
+the menu is closed, which the tray deliberately never does.
+
+The tray is compiled by the system .NET Framework `csc.exe`, which accepts C# 5 only and reads
+files without a byte-order mark in the system code page. Keep the sources C# 5 and ASCII, with
+`\u` escapes for symbols; a literal "·" in an earlier version would have shown as mojibake. Only
+the release workflow builds it, so check a change by compiling the three files against .NET
+Framework 4.8 reference assemblies with `LangVersion` 5 before relying on that run.
+
+Windows needs no orphan reaping. The tray watches its parent through a retained process handle,
+which is signalled even when the daemon is killed outright, and end of input as well. It did leave
+a second icon behind, though: on Windows every child-process kill is `TerminateProcess`, so
+stopping the tray right after closing its input killed it before it could remove its icon, and
+the shell keeps a dead process's icon until the pointer passes over it. Supervision now only
+closes its input there and waits out the grace period before stopping it outright.
+
 ## Only a released binary has a menu bar
 
 The app used to start from any macOS build that had compiled it, which meant working on Happy
@@ -77,10 +99,19 @@ desktop's, from zero seconds.
 ## Plan usage: what is left, as a ring per window
 
 Each account is one line under a small vendor header: the friendly account name, the plan type in
-secondary text, a ring for the session and one for the week, and the reset. The person asked for
+a column of its own, a ring for the session and one for the week, and the reset. The person asked for
 remaining rather than spent, like a battery, so ring and number both show what is left; the ring
 turns yellow under 25% left and red under 10% or for the window that has the account blocked.
 Horizontal bars and rules were explicitly unwanted.
+
+The plan sat right after the name until the person asked for it as its own column, left of
+Session. It is left-aligned in secondary text, sized per vendor to that vendor's widest plan but
+never narrower than its "Plan" header and never wider than 100 points, so "SuperGrok Heavy" fits
+whole and Claude's names keep their room; an account without a plan leaves it blank. Because the
+column's width differs between vendors, a header names its columns whenever the plan column or the
+windows differ from the vendor above. The name is what gets cut short, never the plan column or
+the gauges, and the tooltip leads with the full name and plan. The menu became 400 points wide to
+make room: at 340, Grok's "Current CLI" was cut beside "SuperGrok Heavy".
 
 The earlier menu picked the single window closest to running out, which hid the week whenever the
 session was tighter, so both are always shown. A monthly window appears only when there is no
@@ -148,9 +179,8 @@ tints and inverts a template image, so anything less than full strength at rest 
 A provider ID is whatever someone called their account, so `bulka_happy_codex` is shown as
 "Bulka Happy Codex". Never render a raw ID.
 Both native apps use configuration's friendly account name verbatim, with vendor context shown
-separately: under a vendor header on macOS, and as "Codex · Current CLI" on Windows. The name is
-never rewritten with a plan suffix or automatic email shortening; macOS shows the plan type as
-separate secondary text beside it. Opening a menu calls the existing `POST /v0/usage/refresh`; ordinary snapshot
+separately, under a vendor header on both. The name is never rewritten with a plan suffix or
+automatic email shortening; both show the plan type in a column of its own. Opening a menu calls the existing `POST /v0/usage/refresh`; ordinary snapshot
 reads remain cached. macOS reacts to the existing usage events, while Windows reads cached
 snapshots on its existing open-menu timer.
 

@@ -81,7 +81,10 @@ export class MenuBarApp {
         if (child === undefined || child.exitCode !== null) return;
         this.#child = undefined;
         child.stdin?.end();
-        child.kill("SIGTERM");
+        // Windows has no signals: any kill is TerminateProcess, which leaves the tray's icon behind
+        // as a ghost until the pointer passes over it. End of input is how the tray learns to leave
+        // and take its icon down, so there it gets the grace period before being stopped outright.
+        if (process.platform !== "win32") child.kill("SIGTERM");
         const forceStop = setTimeout(() => child.kill("SIGKILL"), this.#stopGraceMs);
         forceStop.unref();
         child.once("exit", () => clearTimeout(forceStop));

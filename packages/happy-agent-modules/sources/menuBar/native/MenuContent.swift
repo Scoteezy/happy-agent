@@ -3,7 +3,7 @@ import AppKit
 /// The menu's measurements, matched to a native macOS menu: 13-point text, 22-point rows, and
 /// the same insets as an ordinary item.
 enum MenuMetrics {
-    static let width: CGFloat = 340
+    static let width: CGFloat = 400
     static let inset: CGFloat = 14
     static let rowHeight: CGFloat = 22
     static let headerHeight: CGFloat = 24
@@ -12,9 +12,9 @@ enum MenuMetrics {
     static let font = NSFont.menuFont(ofSize: 13)
     static let detailFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
 
-    static let planGap: CGFloat = 6
-    static let planMinimumWidth: CGFloat = 28
-    static let nameMinimumWidth: CGFloat = 80
+    static let planFont = NSFont.menuFont(ofSize: 12)
+    static let planGap: CGFloat = 8
+    static let planMaximumWidth: CGFloat = 100
     static let gaugeDiameter: CGFloat = 12
     static let gaugeLine: CGFloat = 2
     static let gaugeTextGap: CGFloat = 3
@@ -53,14 +53,18 @@ enum MenuContent {
         turnStart: (WorkEntry) -> Date?
     ) -> [NSView] {
         var rows: [NSView] = []
-        var previousColumns: [PlanWindowKind]?
+        var previous: (columns: [PlanWindowKind], planWidth: CGFloat)?
         for vendor in snapshot.vendors {
+            let planWidth = PlanColumns.planWidth(vendor)
+            // Column names are repeated only where the columns no longer line up with the ones
+            // named above.
+            let labels = previous.map { $0.columns != vendor.columns || $0.planWidth != planWidth }
             rows.append(
-                PlanHeaderView(vendor: vendor, labelsColumns: vendor.columns != previousColumns)
+                PlanHeaderView(vendor: vendor, planWidth: planWidth, labelsColumns: labels ?? true)
             )
-            previousColumns = vendor.columns
+            previous = (vendor.columns, planWidth)
             for plan in vendor.plans {
-                rows.append(PlanRowView(entry: plan, columns: vendor.columns))
+                rows.append(PlanRowView(entry: plan, columns: vendor.columns, planWidth: planWidth))
             }
         }
         let now = Date()

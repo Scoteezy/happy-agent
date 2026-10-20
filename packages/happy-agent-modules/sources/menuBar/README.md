@@ -9,11 +9,14 @@ greyed out while the daemon is not answering. Clicking it shows a compact, read-
 ```text
 7 working                    1.3M tokens in 24h
 ──────────────────────────────────────────────
-CLAUDE                  Session   Week  Resets
-Current CLI  Max 20x     64% ◔    82% ◕  3:30 AM
-Work  Max 5x             19% ◔    56% ◑  Thu
-CODEX
-Current CLI  Pro         88% ◕     9% ◔  Wed
+CLAUDE             Plan      Session   Week  Resets
+Current CLI        Max 20x    64% ◔    82% ◕  3:30 AM
+Work               Max 5x     19% ◔    56% ◑  Thu
+Research lab sh…              92% ◕    37% ◔  Fri
+CODEX                Plan
+Current CLI          Pro      88% ◕     9% ◔  Wed
+GROK      Plan                 Week    Month  Resets
+Current CLI  SuperGrok Heavy  80% ◕    55% ◑  Nov 9
 ──────────────────────────────────────────────
 Release 0.42 preview                       5s
 Chief of Staff                          1m 44s
@@ -36,8 +39,11 @@ Investigate the flaky gym test          1h 5m
   `startedAt`, from `run.started` and `run.boundary` events, or from the agent's latest history
   page for a turn that was already running when the menu bar started.
 - Plan usage is grouped by vendor, one line per configured account that has a usage source: the
-  account name, the plan type, a small ring for the session and the week showing what is left,
-  and when the window holding the account back resets, in the Mac's local time. Rings turn
+  account name, the plan type in its own column just left of Session, a small ring for the
+  session and the week showing what is left, and when the window holding the account back
+  resets, in the Mac's local time. The plan column is as wide as the vendor's widest plan (never
+  narrower than its header, at most 100 points), blank for an account without a plan, and the
+  account name is what gets cut short when space runs out; the tooltip has both in full. Rings turn
   yellow under 25% left and red under 10% or when the account is exhausted. Claude's Fable
   allowance has no ring; it is in the row's tooltip, and when it blocks the account the week
   ring and the reset turn red.
@@ -97,6 +103,22 @@ instance — and the module stops trying rather than reporting a failure.
 binary embeds. It is a plain Swift executable rather than an application bundle: it never opens a
 window, so it needs no `Info.plist`, and one file is what the binary can carry. Building on any
 platform other than macOS produces nothing.
+
+## Windows
+
+`native/windows` is the Windows notification-area app, compiled on Windows by the .NET
+Framework's own `csc.exe` (`node scripts/build-menu-bar.mjs win32-x64`), so its sources stay C# 5
+and ASCII. Its menu follows the macOS one where WinForms allows: the same headline, plan usage per
+account in configuration order kept still by the same plan book (placeholders, carried readings,
+columns that only grow), the plan, session and week left as columns with the same red thresholds
+and a small ring for the window holding the account back, the next reset in local time, and the
+five most recent top-level tasks and bots with the desktop's turn time. Below them sit the
+daemon's CPU and memory and the Stop and Force stop controls.
+
+It reads the daemon only while its menu is open, every five seconds, with a one-second clock
+for the session times; there is no event stream, so a turn start is read from the agent's history
+each time the menu opens. The icon does not animate, because nothing is read while the menu is
+closed. The release workflow's Windows packaging job is the only place it is compiled.
 
 ## Turning it off
 
