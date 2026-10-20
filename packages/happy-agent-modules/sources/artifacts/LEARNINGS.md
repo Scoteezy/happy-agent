@@ -193,12 +193,19 @@ CONNECT, exposed through the artifact proxy route. Each new connection reads the
 current URL. Only public addresses are allowed, except the exact recorded localhost or literal
 loopback host and port; private LAN and link-local addresses never receive an exception.
 
-The classifier in `impl/artifactNetwork.ts` is ported from Desktop, including embedded IPv4
-classification and the corrected RFC 6145 translated prefix. Hostnames are normalized only for
-classification; exception equality preserves their requested spelling. DNS runs on the daemon's
-host and the existing compute connector receives a checked IP literal, never a hostname. Exact
-localhost skips DNS and tries IPv6 only after IPv4 refuses. This deliberately does not support
-names known only inside a runner or container. No compute or supervisor resolver was added.
+The classifier in `impl/artifactNetwork.ts` stays aligned with Desktop. An IPv6 blocklist missed
+reserved and special-purpose space, and treating every embedded IPv4 as loopback granted
+transition addresses the local exception. Public IPv6 now requires `2000::/3` outside
+`2001::/23`, `2001:db8::/32`, `2002::/16`, and `3fff::/20`, or a public IPv4 embedded in a mapped,
+translated, or well-known NAT64 address. Only `::1` and mapped/translated `127/8` are IPv6 loopback.
+
+Hostnames are normalized only for classification; exception equality preserves their requested
+spelling. DNS runs on the daemon's host and the existing compute connector receives checked IP
+literals, never a hostname. Every public answer is retained and tried in order on connection
+errors under the proxy's single connection deadline, so an unreachable IPv6 route does not hide
+a working IPv4 answer. Exact localhost skips DNS and tries IPv6 only after IPv4 refuses. This
+deliberately does not support names known only inside a runner or container. No compute or
+supervisor resolver was added.
 
 ## A few standard components, served with the daemon
 

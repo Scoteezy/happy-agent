@@ -22,6 +22,21 @@ describe("artifact network addresses", () => {
         ["::ffff:0:8.8.8.8", true, false],
         ["::ffff:0:192.168.0.1", false, false],
         ["::ffff:0:169.254.169.254", false, false],
+        ["2001:2::1", false, false],
+        ["2001:1ff::1", false, false],
+        ["2001:200::1", true, false],
+        ["2001:db8::1", false, false],
+        ["3fff::1", false, false],
+        ["3fff:fff::1", false, false],
+        ["3fff:1000::1", true, false],
+        ["4000::1", false, false],
+        ["8000::1", false, false],
+        ["64:ff9b::808:808", true, false],
+        ["64:ff9b::7f00:1", false, false],
+        ["2002:7f00:1::", false, false],
+        ["2002:808:808::", false, false],
+        ["::127.0.0.1", false, false],
+        ["::8.8.8.8", false, false],
         ["64:ff9b::a00:1", false, false],
         ["64:ff9b:1::808:808", false, false],
         ["2002:c0a8:101::", false, false],
@@ -61,7 +76,7 @@ describe("artifact network addresses", () => {
         );
         await expect(
             artifactNetworkDestinations("https://example.com/", "cdn.example", 443, lookup),
-        ).resolves.toEqual(["8.8.8.8"]);
+        ).resolves.toEqual(["8.8.8.8", "1.1.1.1"]);
         expect(lookup).toHaveBeenCalledExactlyOnceWith("cdn.example");
         for (const addresses of [["127.0.0.1"], ["8.8.8.8", "10.0.0.1"], []]) {
             lookup.mockResolvedValue(addresses);
@@ -92,6 +107,9 @@ describe("artifact network addresses", () => {
             ["http://169.254.169.254/", "169.254.169.254", 80],
             ["http://[fe80::1]/", "fe80::1", 80],
             ["http://0.0.0.0/", "0.0.0.0", 80],
+            ["http://[64:ff9b::7f00:1]/", "64:ff9b::7f00:1", 80],
+            ["http://[2002:7f00:1::]/", "2002:7f00:1::", 80],
+            ["http://[::7f00:1]/", "::7f00:1", 80],
         ] as const) {
             await expect(
                 artifactNetworkDestinations(url, host, port, lookup),
@@ -130,6 +148,53 @@ describe("artifact network addresses", () => {
         }
         expect(connect).not.toHaveBeenCalled();
         socket.destroy();
+    });
+
+    it("tries every checked public answer in order without another resolution", async () => {
+        const socket = new PassThrough();
+        const lookup = vi.fn(
+            async (_host: string): Promise<readonly string[]> => [
+                "2606:4700:4700::1111",
+                "1.1.1.1",
+            ],
+        );
+        const connect = vi.fn(async (_host: string, _port: number) => socket);
+        connect.mockRejectedValueOnce(
+            Object.assign(new Error("No IPv6 route"), { code: "ENETUNREACH" }),
+        );
+        expect(
+            await connectArtifactNetwork(
+                "https://example.com/",
+                "example.com",
+                443,
+                lookup,
+                connect,
+            ),
+        ).toBe(socket);
+        expect(lookup).toHaveBeenCalledExactlyOnceWith("example.com");
+        expect(connect.mock.calls).toEqual([
+            ["2606:4700:4700::1111", 443],
+            ["1.1.1.1", 443],
+        ]);
+        socket.destroy();
+    });
+
+    it("returns the last connection error after all checked public answers fail", async () => {
+        const lookup = vi.fn(
+            async (_host: string): Promise<readonly string[]> => ["8.8.8.8", "1.1.1.1"],
+        );
+        const last = new Error("Last destination failed");
+        const connect = vi.fn(async (_host: string, _port: number): Promise<PassThrough> => {
+            throw last;
+        });
+        await expect(
+            connectArtifactNetwork("https://example.com/", "example.com", 443, lookup, connect),
+        ).rejects.toBe(last);
+        expect(connect.mock.calls).toEqual([
+            ["8.8.8.8", 443],
+            ["1.1.1.1", 443],
+        ]);
+        expect(lookup).toHaveBeenCalledOnce();
     });
 
     it("tries IPv6 localhost only after an IPv4 connection refusal", async () => {

@@ -3,7 +3,7 @@ import type { Duplex } from "node:stream";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
-// Ported from Happy Desktop's artifactNetwork.ts; both classify embedded IPv4 before IPv6.
+// Kept in step with Happy Desktop's artifactNetwork.ts.
 const refusedAddresses = (() => {
     const list = new BlockList();
     for (const [network, prefix] of [
@@ -25,16 +25,17 @@ const refusedAddresses = (() => {
     ] as const)
         list.addSubnet(network, prefix, "ipv4");
     for (const [network, prefix] of [
-        ["100::", 64],
+        ["2001::", 23],
         ["2001:db8::", 32],
-        ["fc00::", 7],
-        ["fe80::", 10],
-        ["fec0::", 10],
-        ["ff00::", 8],
+        ["2002::", 16],
+        ["3fff::", 20],
     ] as const)
         list.addSubnet(network, prefix, "ipv6");
     return list;
 })();
+
+const globalIpv6 = new BlockList();
+globalIpv6.addSubnet("2000::", 3, "ipv6");
 
 function ipv6Bytes(address: string): number[] {
     let text = address.toLowerCase();
@@ -63,18 +64,12 @@ function ipv6Bytes(address: string): number[] {
     return bytes;
 }
 
-/** The IPv4 an IPv6 stands for (mapped, translated, compatible, NAT64, 6to4), or null for a range that hides its destination. */
-function ipv6Embedded(bytes: readonly number[]): string | null | undefined {
+/** Only mapped and translated addresses can share the literal IPv4 loopback exception. */
+function ipv6Mapped(bytes: readonly number[]): string | undefined {
     const zero = (from: number, to: number) => bytes.slice(from, to).every((value) => value === 0);
     const quad = (at: number) => bytes.slice(at, at + 4).join(".");
     if (zero(0, 10) && bytes[10] === 255 && bytes[11] === 255) return quad(12);
     if (zero(0, 8) && bytes[8] === 255 && bytes[9] === 255 && zero(10, 12)) return quad(12);
-    if (zero(0, 12)) return quad(12);
-    const nat64 = bytes[0] === 0 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b;
-    if (nat64 && zero(4, 12)) return quad(12);
-    if (nat64 && bytes[4] === 0 && bytes[5] === 1) return null;
-    if (bytes[0] === 0x20 && bytes[1] === 0x01 && zero(2, 4)) return null;
-    if (bytes[0] === 0x20 && bytes[1] === 0x02) return quad(2);
     return undefined;
 }
 
@@ -82,10 +77,17 @@ export function artifactAddressPublic(address: string): boolean {
     const family = isIP(address);
     if (family === 4) return !refusedAddresses.check(address, "ipv4");
     if (family !== 6) return false;
-    const embedded = ipv6Embedded(ipv6Bytes(address));
-    if (embedded === null) return false;
+    const bytes = ipv6Bytes(address);
+    const nat64 =
+        bytes[0] === 0 &&
+        bytes[1] === 0x64 &&
+        bytes[2] === 0xff &&
+        bytes[3] === 0x9b &&
+        bytes.slice(4, 12).every((byte) => byte === 0);
+    const embedded = ipv6Mapped(bytes) ?? (nat64 ? bytes.slice(12).join(".") : undefined);
     if (embedded !== undefined) return !refusedAddresses.check(embedded, "ipv4");
-    return !refusedAddresses.check(address.replace(/%.*$/u, ""), "ipv6");
+    const literal = address.replace(/%.*$/u, "");
+    return globalIpv6.check(literal, "ipv6") && !refusedAddresses.check(literal, "ipv6");
 }
 
 export function artifactAddressLoopback(address: string): boolean {
@@ -94,8 +96,8 @@ export function artifactAddressLoopback(address: string): boolean {
     if (family !== 6) return false;
     const bytes = ipv6Bytes(address);
     if (bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1) return true;
-    const embedded = ipv6Embedded(bytes);
-    return embedded !== undefined && embedded !== null && embedded.startsWith("127.");
+    const embedded = ipv6Mapped(bytes);
+    return embedded !== undefined && embedded.startsWith("127.");
 }
 
 /** Normalize only for address classification; exception equality uses the host as written. */
@@ -125,7 +127,7 @@ export async function artifactNetworkDestinations(
     const host = artifactNetworkHost(requestedHost);
     const addresses = isIP(host) === 0 ? await resolve(host) : [host];
     if (addresses.length === 0 || !addresses.every(artifactAddressPublic)) return undefined;
-    return [addresses[0]!];
+    return addresses;
 }
 
 /** Resolve once, decide once, then pass only checked IP literals to the recorded network. */
@@ -138,12 +140,18 @@ export async function connectArtifactNetwork(
 ): Promise<Duplex | undefined> {
     const addresses = await artifactNetworkDestinations(recordedUrl, host, port, resolve);
     if (addresses === undefined) return undefined;
-    try {
-        return await connect(addresses[0]!, port);
-    } catch (error) {
-        if (addresses.length !== 2 || !Value.Check(refusedConnection, error)) throw error;
-        return await connect(addresses[1]!, port);
+    // WorkspaceProxy's one connection deadline wraps this whole sequence, not each attempt.
+    const loopback = artifactAddressLoopback(addresses[0]!);
+    let failure: unknown;
+    for (const address of addresses) {
+        try {
+            return await connect(address, port);
+        } catch (error) {
+            if (loopback && !Value.Check(refusedConnection, error)) throw error;
+            failure = error;
+        }
     }
+    throw failure;
 }
 
 /** Review text uses the same address classification, not a second network policy. */
