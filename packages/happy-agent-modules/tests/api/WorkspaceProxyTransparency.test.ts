@@ -423,9 +423,9 @@ describe("workspace proxy transparency", () => {
         const port = await listening(target);
         const proxy = proxyWith();
         const hosts: string[] = [];
-        const recording: WorkspaceProxyConnector = async (host, targetPort) => {
+        const recording: WorkspaceProxyConnector = async (host, targetPort, hostAsWritten) => {
             hosts.push(`${host} ${String(targetPort)}`);
-            return await to(port)(host, targetPort);
+            return await to(port)(host, targetPort, hostAsWritten);
         };
         const plain = await attach(proxy, proxy.route(recording));
         const plainReply = readAll(plain.socket);

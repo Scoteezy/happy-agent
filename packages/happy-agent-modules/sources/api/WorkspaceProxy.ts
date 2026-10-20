@@ -36,7 +36,19 @@ const HOP_HEADERS = new Set([
 ]);
 
 /** Opens a connection from the workspace's own network. */
-export type WorkspaceProxyConnector = (host: string, port: number) => Promise<Duplex>;
+export type WorkspaceProxyConnector = (
+    host: string,
+    port: number,
+    hostAsWritten: string,
+) => Promise<Duplex>;
+
+/** An admitted route refused this destination before connecting. */
+export class WorkspaceProxyPolicyError extends Error {
+    constructor() {
+        super("The artifact does not allow this destination.");
+        this.name = "WorkspaceProxyPolicyError";
+    }
+}
 
 /** The loopback TCP hop Bun front doors forward workspace tunnels to, and how they are admitted. */
 export interface WorkspaceProxyTcpHop {
@@ -249,7 +261,12 @@ export class WorkspaceProxy {
     }
 
     /** Open one connection through a route, bounded only until it is established. */
-    async #open(connector: WorkspaceProxyConnector, host: string, port: number): Promise<Duplex> {
+    async #open(
+        connector: WorkspaceProxyConnector,
+        host: string,
+        port: number,
+        hostAsWritten: string,
+    ): Promise<Duplex> {
         return await new Promise<Duplex>((resolve, reject) => {
             let settled = false;
             const timer = setTimeout(() => {
@@ -257,7 +274,7 @@ export class WorkspaceProxy {
                 reject(new ConnectTimeoutError());
             }, this.#connectTimeoutMs);
             timer.unref();
-            connector(host, port).then(
+            connector(host, port, hostAsWritten).then(
                 (opened) => {
                     clearTimeout(timer);
                     // Whoever takes the connection adds its own handling; until then, and for a
@@ -324,7 +341,7 @@ export class WorkspaceProxy {
             abandoned = true;
             upstream?.destroy();
         });
-        this.#open(connector, hostname, port).then(
+        this.#open(connector, hostname, port, requestedHost(request.url!)).then(
             (connection) => {
                 if (abandoned) {
                     connection.destroy();
@@ -362,7 +379,9 @@ export class WorkspaceProxy {
             },
             (error: unknown) => {
                 if (abandoned) return;
-                if (error instanceof ConnectTimeoutError) {
+                if (error instanceof WorkspaceProxyPolicyError) {
+                    sendProxyError(response, 403, error.message);
+                } else if (error instanceof ConnectTimeoutError) {
                     sendProxyError(response, 504, "The proxied service took too long to answer.");
                 } else {
                     sendProxyError(response, 502, "The proxied service could not be reached.");
@@ -392,7 +411,12 @@ export class WorkspaceProxy {
         // HTTP hands a CONNECT socket over without its error handling. A reset while the
         // connection is still being opened must only close this tunnel.
         socket.on("error", () => undefined);
-        this.#open(connector, connectableHost(target.hostname), port).then(
+        this.#open(
+            connector,
+            connectableHost(target.hostname),
+            port,
+            requestedHost(`http://${request.url!}`),
+        ).then(
             (upstream) => {
                 if (socket.destroyed) {
                     upstream.destroy();
@@ -403,7 +427,9 @@ export class WorkspaceProxy {
                 joinTunnel(socket, upstream);
             },
             (error: unknown) => {
-                if (error instanceof ConnectTimeoutError) refuse(socket, 504, "Gateway Timeout");
+                if (error instanceof WorkspaceProxyPolicyError) refuse(socket, 403, "Forbidden");
+                else if (error instanceof ConnectTimeoutError)
+                    refuse(socket, 504, "Gateway Timeout");
                 else refuse(socket, 502, "Bad Gateway");
             },
         );
@@ -463,6 +489,15 @@ function closeAfterFlush(stream: Duplex): void {
 /** A URL's host as a connection names it: an IPv6 literal without its brackets. */
 function connectableHost(hostname: string): string {
     return hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+}
+
+/** Preserve spelling for origin policy; URL parsing above still owns syntax and connection routing. */
+function requestedHost(target: string): string {
+    const authority = target.slice(target.indexOf("://") + 3).split(/[/?#\\]/, 1)[0]!;
+    const hostPort = authority.slice(authority.lastIndexOf("@") + 1);
+    return hostPort.startsWith("[")
+        ? hostPort.slice(1, hostPort.indexOf("]"))
+        : hostPort.split(":", 1)[0]!;
 }
 
 /** The headers a hop forwards: everything except what describes its own connection. */

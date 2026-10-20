@@ -55,6 +55,12 @@ The network is captured at creation and cannot change. `url` on `update_artifact
 version; metadata edits preserve it, and file edits are refused. `show_page` is a deprecated
 creation alias owned by this module. Every live create or update is reviewed in Auto.
 
+Live pages use the artifact proxy, not the unrestricted network proxy. `proxy` owns the connection
+policy: public destinations, or the exact recorded loopback host and port, evaluated against the
+current URL for every connection. `impl/artifactNetwork.ts` holds the shared address classifier.
+The daemon resolves names locally and hands the network only checked IP literals; private LAN
+and link-local addresses are refused. Auto review text discloses loopback exposure explicitly.
+
 ## Backgrounds
 
 Clients show an artifact on a transparent slot, so the surface around it shows through. A version

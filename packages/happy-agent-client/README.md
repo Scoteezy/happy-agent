@@ -417,8 +417,9 @@ The daemon checks every destination connection against the artifact's current UR
 when showing a pinned version. Public destinations are allowed. The only non-public exception
 is the exact host and effective port of a recorded `localhost` or literal loopback URL, with
 every resolved address loopback. Private LAN and link-local destinations are always refused.
-The daemon resolves on the recorded network's machine and connects to the checked address without
-a second lookup. URL updates govern subsequent connections; already-open connections remain.
+The daemon resolves on its own host and connects the recorded network's machine to the checked
+IP literal without a second lookup. The exact recorded loopback exception needs no DNS.
+URL updates govern subsequent connections; already-open connections remain.
 
 Use a browser profile scoped to the artifact ID on its daemon or connection, shared by that
 artifact's versions and views but never by other artifacts or the workspace browser. Never send

@@ -4446,7 +4446,8 @@ missing, deleted, or not live; otherwise it has the same refusals as the network
 The daemon owns one destination-policy boundary for every nested `CONNECT` and proxied HTTP
 request on this tunnel. The client supplies only the artifact ID, never a network or an
 allowlist. Before opening each destination connection, the daemon reads the artifact's current
-`live.url` and resolves the requested host on the recorded network's machine:
+`live.url`, resolves non-literal requested hosts on the daemon's host, and connects the recorded
+network's machine to a checked IP literal:
 
 - The destination is allowed when every resolved address is public.
 - The only exception is for a recorded URL whose host is itself loopback, determined from the
@@ -4455,6 +4456,9 @@ allowlist. Before opening each destination connection, the daemon reads the arti
   and the port must equal the URL's effective port (`80` for HTTP or `443` for HTTPS when omitted).
   Every resolved address must then be loopback. Equality is of hostnames, not resolved addresses;
   a different spelling or hostname resolving to the same address gets no exception.
+  This exception needs no DNS: recorded `localhost` connects to `127.0.0.1` on the network's
+  machine, then to `::1` only if the first connection is refused; a recorded literal loopback IP
+  connects to exactly that literal.
 - Everything else is refused before connecting. Private LAN addresses, including `10.0.0.0/8`,
   `172.16.0.0/12`, `192.168.0.0/16`, and `fc00::/7`, are never allowed, even as the recorded URL.
   Link-local addresses (`169.254.0.0/16` and `fe80::/10`) are never allowed either.
@@ -4467,6 +4471,9 @@ addresses they represent, not treated as public DNS names. An empty or failed re
 permits a connection. The daemon connects to exactly an address it checked, without a second
 lookup. A policy refusal answers the nested request with `403`; resolution and connection
 failures follow the network proxy's existing failure behavior.
+
+Names resolvable only inside the recorded network are not supported. The daemon never asks that
+network to resolve a hostname or falls back to its DNS.
 
 A public recorded hostname gets no loopback exception: rebinding `attacker.com` to loopback
 cannot authorize it, even when `attacker.com` is the recorded URL's host. Mixed public/non-public

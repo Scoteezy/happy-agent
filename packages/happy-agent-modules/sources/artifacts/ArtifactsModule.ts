@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import type { Duplex } from "node:stream";
 
 import { createId } from "@paralleldrive/cuid2";
 import { ensurePrivateDirectory } from "@slopus/happy-agent-compute";
@@ -98,6 +100,7 @@ import {
     type ArtifactContentSource,
 } from "./impl/artifactContentFiles.js";
 import { ARTIFACT_REFERENCE_INSTRUCTIONS } from "./tools/common.js";
+import { connectArtifactNetwork, describeArtifactNetworkExposure } from "./impl/artifactNetwork.js";
 import {
     LIVE_ARTIFACT_FALLBACK,
     normalizeArtifactUrl,
@@ -118,6 +121,13 @@ export interface ArtifactActor {
     readonly author: ArtifactAuthor;
     readonly source: ArtifactSource;
 }
+
+/** Undefined refuses a destination without opening a connection. */
+export type ArtifactProxy = (
+    ctx: Context,
+    host: string,
+    port: number,
+) => Promise<Duplex | undefined>;
 
 /** How many versions one agent makes of one artifact in any hour before it must slow down. */
 export const MAX_AGENT_ARTIFACT_VERSIONS_PER_HOUR = 100;
@@ -224,6 +234,32 @@ export class ArtifactsModule implements AgentModule {
     /** One artifact, a tombstone included. */
     async get(ctx: Context, artifactId: string): Promise<ArtifactRecord | undefined> {
         return structuredClone(await queryArtifact(ctx, artifactId));
+    }
+
+    /** An attachment to the recorded network; each connection uses the current artifact policy. */
+    async proxy(ctx: Context, artifactId: string): Promise<ArtifactProxy | undefined> {
+        const artifact = await this.get(ctx, artifactId);
+        if (artifact?.status !== "active" || artifact.live === undefined) return undefined;
+        const network = await this.#compute.namedNetwork(artifact.live.networkId);
+        if (network === undefined) return undefined;
+        return async (connectCtx, host, port) => {
+            const current = await this.get(connectCtx, artifactId);
+            if (current?.status !== "active" || current.live === undefined) return undefined;
+            return await connectArtifactNetwork(
+                current.live.url,
+                host,
+                port,
+                async (hostname) =>
+                    (await lookup(hostname, { all: true })).map((answer) => answer.address),
+                async (address, targetPort) =>
+                    await network(connectCtx, { host: address, port: targetPort }),
+            );
+        };
+    }
+
+    /** Disclose local exposure using the proxy's address classifier. */
+    describeLiveNetwork(url: string): string {
+        return describeArtifactNetworkExposure(url);
     }
 
     /** One page of the catalog, newest created first. */

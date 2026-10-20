@@ -98,6 +98,7 @@ import {
     type AgentModuleHooks,
     type AgentSystemRef,
     withAgentConfig,
+    withAgentDatabase,
 } from "@slopus/happy-agent-base";
 import { Type, type Static, type TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
@@ -339,7 +340,11 @@ import {
     mobilePairingBodySchema,
     workspaceCreateBodySchema,
 } from "./ApiSchemas.js";
-import { WorkspaceProxy, type WorkspaceProxyTcpHop } from "./WorkspaceProxy.js";
+import {
+    WorkspaceProxy,
+    WorkspaceProxyPolicyError,
+    type WorkspaceProxyTcpHop,
+} from "./WorkspaceProxy.js";
 import { requestedAgentMode } from "./requestedAgentMode.js";
 import { describeDrainBlockers, type DrainBlocker } from "./impl/describeDrainBlockers.js";
 import {
@@ -2304,6 +2309,9 @@ export class ApiModule implements AgentModule {
         pathname: string,
         authorization: string | string[] | undefined,
     ): Promise<PreparedWorkspaceProxySocket> {
+        const artifact = /^\/v0\/artifacts\/([a-z][a-z0-9]*)\/proxy$/.exec(pathname);
+        if (artifact !== null)
+            return await this.#prepareArtifactProxy(ctx, artifact[1]!, authorization);
         const network = /^\/v0\/networks\/([^/]*)\/proxy$/.exec(pathname);
         if (network !== null)
             return await this.#prepareNetworkProxy(ctx, network[1]!, authorization);
@@ -2341,6 +2349,39 @@ export class ApiModule implements AgentModule {
             return {
                 handled: true,
                 rejection: this.#socketRejection(ctx, error, "The workspace was not found."),
+            };
+        }
+    }
+
+    async #prepareArtifactProxy(
+        ctx: Context,
+        artifactId: string,
+        authorization: string | string[] | undefined,
+    ): Promise<PreparedWorkspaceProxySocket> {
+        try {
+            ctx = await this.#authenticate(ctx, authorization);
+            this.#assertTeamUser(ctx);
+            this.#assertSocketReady();
+            const connect = await this.#machineNetwork(
+                async () => await this.#artifacts?.proxy(ctx, artifactId),
+            );
+            if (connect === undefined)
+                throw notFound("The live artifact or its network was not found.");
+            const connectCtx = withAgentDatabase(
+                detach(ctx).named("artifact-proxy-connections"),
+                ctx.db,
+            );
+            const route = this.#workspaceProxy.route(async (_host, port, hostAsWritten) => {
+                const connection = await connect(connectCtx, hostAsWritten, port);
+                if (connection === undefined) throw new WorkspaceProxyPolicyError();
+                return connection;
+            });
+            const revoked = mobileDevice(ctx)?.revoked;
+            return { handled: true, route, ...(revoked === undefined ? {} : { revoked }) };
+        } catch (error: unknown) {
+            return {
+                handled: true,
+                rejection: this.#socketRejection(ctx, error, "The live artifact was not found."),
             };
         }
     }

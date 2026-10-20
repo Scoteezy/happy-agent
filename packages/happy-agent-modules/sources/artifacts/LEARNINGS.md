@@ -185,6 +185,21 @@ snapshot, weakly keyed by that invocation's arguments, for the description to re
 checks the reviewed network or revision again, and a changed target requires another review;
 concurrent invocations do not share a mutable last-target slot.
 
+## Live pages use one destination-policy boundary
+
+An unrestricted network tunnel let a remote page reach the agent's loopback, private LAN, or
+cloud metadata. Kirill chose one artifact-owned connector for both HTTP requests and nested
+CONNECT, exposed through the artifact proxy route. Each new connection reads the artifact's
+current URL. Only public addresses are allowed, except the exact recorded localhost or literal
+loopback host and port; private LAN and link-local addresses never receive an exception.
+
+The classifier in `impl/artifactNetwork.ts` is ported from Desktop, including embedded IPv4
+classification and the corrected RFC 6145 translated prefix. Hostnames are normalized only for
+classification; exception equality preserves their requested spelling. DNS runs on the daemon's
+host and the existing compute connector receives a checked IP literal, never a hostname. Exact
+localhost skips DNS and tries IPv6 only after IPv4 refuses. This deliberately does not support
+names known only inside a runner or container. No compute or supervisor resolver was added.
+
 ## A few standard components, served with the daemon
 
 The master plan keeps what we hardcode to a diff, code, a tree of changed files, charts, and

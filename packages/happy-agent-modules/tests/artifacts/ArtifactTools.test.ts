@@ -136,6 +136,9 @@ describe("the artifact tools", () => {
         expect(await tool.shouldReviewInAutoMode(args, ctx)).toBe(true);
         expect(await tool.shouldRunInFullAccessInAutoMode?.(args, ctx)).toBe(false);
         expect(tool.describeAutoPermissionAction?.(args, ctx)).toContain('network "host"');
+        expect(tool.describeAutoPermissionAction?.(args, ctx)).toContain(
+            "exposes localhost:5173 on the agent's machine to the page",
+        );
         const artifact = (await call(ctx, tool, args, { remembered })) as ArtifactRecord;
         expect(artifact).toMatchObject({
             live: { url: "http://localhost:5173/", networkId: "host" },
@@ -178,6 +181,9 @@ describe("the artifact tools", () => {
         await expect(tool.shouldReviewInAutoMode(args, ctx)).resolves.toBe(true);
         expect(await tool.shouldRunInFullAccessInAutoMode?.(args, ctx)).toBe(false);
         expect(tool.describeAutoPermissionAction?.(args, ctx)).toContain('recorded network "host"');
+        expect(tool.describeAutoPermissionAction?.(args, ctx)).toContain(
+            "permits only public destinations",
+        );
         expect(tool.describeAutoPermissionAction?.(args, ctx)).toContain(
             'to "https://example.com/new"',
         );
@@ -224,6 +230,11 @@ describe("the artifact tools", () => {
         }
         expect(w.events).toHaveLength(count);
         expect((await w.artifacts.get(w.ctx, artifact.id))?.latestVersion).toBe(3);
+        const privateUrl = { artifactId: artifact.id, url: "http://169.254.169.254/" };
+        expect(await tool.shouldReviewInAutoMode(privateUrl, ctx)).toBe(true);
+        expect(tool.describeAutoPermissionAction?.(privateUrl, ctx)).toContain(
+            "non-public address; the artifact proxy will refuse it",
+        );
     });
 
     it("composes live version changes with caller transactions and keeps the original network across authors", async () => {

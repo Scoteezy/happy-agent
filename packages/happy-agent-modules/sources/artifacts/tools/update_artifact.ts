@@ -123,7 +123,7 @@ export function updateArtifactTool(
             if (current?.live !== undefined) {
                 const effectiveUrl =
                     url === undefined ? current.live.url : normalizeArtifactUrl(url);
-                return `updating live artifact ${quoteVisibleExact(artifactId)} to ${quoteVisibleExact(effectiveUrl)}, titled ${quoteVisibleExact(title ?? current.title)}. The user's client loads it through recorded network ${quoteVisibleExact(current.live.networkId)}, reaching local servers and the internet and running the page's scripts in an isolated artifact browser profile. No Full access is granted`;
+                return `updating live artifact ${quoteVisibleExact(artifactId)} to ${quoteVisibleExact(effectiveUrl)}, titled ${quoteVisibleExact(title ?? current.title)}. The user's client loads it through recorded network ${quoteVisibleExact(current.live.networkId)}, running the page's scripts in an isolated artifact browser profile. ${artifacts.describeLiveNetwork(effectiveUrl)} No Full access is granted`;
             }
             return files === undefined || files.length === 0
                 ? describeArtifactWrite(artifactId, "changing it")

@@ -113,7 +113,7 @@ export function createArtifactTool(
                 throw new ArtifactInputError(
                     "The live artifact target has not been resolved for review.",
                 );
-            return `creating a live artifact at ${quoteVisibleExact(live.url)}, titled ${quoteVisibleExact(input.title)}. The user's client loads it through this agent's network ${quoteVisibleExact(live.networkId)}, reaching its local servers and the internet and running the page's scripts in an isolated artifact browser profile. Access: the shared artifact catalog and the recorded network; no Full access is granted`;
+            return `creating a live artifact at ${quoteVisibleExact(live.url)}, titled ${quoteVisibleExact(input.title)}. The user's client loads it through this agent's network ${quoteVisibleExact(live.networkId)}, running the page's scripts in an isolated artifact browser profile. ${artifacts.describeLiveNetwork(live.url)} Access: the shared artifact catalog and the recorded network; no Full access is granted`;
         },
         // The artifact's identity is minted once and remembered in this invocation's own store,
         // so a call repeated after an interruption finds the artifact it already made.

@@ -295,6 +295,15 @@ unknown, or no-longer-served ID is `404`; the daemon never opens such a tunnel i
 Both proxy routes share `prepareWorkspaceProxySocket`, so the Node and Bun front doors admit them
 the same way. Protocol 28 marks the routes.
 
+Live artifacts use their own `CONNECT /v0/artifacts/:artifactId/proxy` admission. Artifacts owns
+the single destination policy and returns an artifact-scoped connector; the forwarding proxy
+only carries the requested hostname spelling and renders its refusal as 403. Both HTTP and
+nested CONNECT use that connector. Existing network and workspace connectors are unchanged.
+The artifact is reread for every connection, so changing its URL or deleting it affects the next
+connection on an already-open outer tunnel without interrupting established destination streams.
+The independently owned proxy context explicitly carries the database namespace: detaching the
+admission request alone drops it and makes subsequent artifact reads fail.
+
 ## Artifact files are matched on the request target as sent
 
 `new URL` resolves `..` and `%2e%2e` segments before routing, so matching artifact file paths on
