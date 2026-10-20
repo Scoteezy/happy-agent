@@ -1237,7 +1237,10 @@ export class SpacesModule implements AgentModule {
             if (!joinedBy(surface.members, ownerUserId)) continue;
             const surfaceType = surfaceTypeOf(surface.type);
             if (surfaceType === undefined) continue;
-            await seed({ kind: "surface", surfaceId: surface.id, surfaceType });
+            await seed(
+                { kind: "surface", surfaceId: surface.id, surfaceType },
+                surface.image === null ? undefined : { type: "image" },
+            );
         }
         // Prioritizing's opening task places the seeded rows; that first tidy applies at once.
         await writeOwnerState(ctx, {
@@ -1316,6 +1319,49 @@ export class SpacesModule implements AgentModule {
                 } else if (event.bot.name !== event.previousBot.name) {
                     await this.#touchWork(ctx, `bot:${event.bot.id}`);
                 }
+            }),
+            this.#surfaces.onEvent(async (_eventCtx, event) => {
+                if (event.type !== "surface.created" && event.type !== "surface.updated") return;
+                const lifetime = this.#lifetime;
+                if (lifetime === undefined) return;
+                const ctx = lifetime.named("spaces-surface-event");
+                const surfaceId =
+                    event.type === "surface.created"
+                        ? event.payload.surface.id
+                        : event.payload.surfaceId;
+                await ctx.inTx(async (txCtx) => {
+                    // Notifications are durable and may lag later membership changes. Reconcile
+                    // against current state so a delayed join cannot resurrect a row after leave.
+                    const surface = (await this.#surfaces.list(txCtx)).find(
+                        (candidate) => candidate.id === surfaceId,
+                    );
+                    const surfaceType =
+                        surface === undefined ? undefined : surfaceTypeOf(surface.type);
+                    if (surface === undefined || surfaceType === undefined) return;
+                    for (const state of await queryOwnerStates(txCtx)) {
+                        if (joinedBy(surface.members, state.ownerUserId)) {
+                            await this.#addWork(
+                                txCtx,
+                                state.ownerUserId,
+                                {
+                                    kind: "surface",
+                                    surfaceId,
+                                    surfaceType,
+                                },
+                                surface.image === null ? undefined : { type: "image" },
+                            );
+                        } else {
+                            await this.#closeWork(txCtx, `surface:${surfaceId}`, [
+                                state.ownerUserId,
+                            ]);
+                        }
+                    }
+                    if (event.type === "surface.updated") {
+                        // Names and pictures are projected live; advance rows and emit their
+                        // complete snapshots so connected sidebars refresh those projections.
+                        await this.#touchWork(txCtx, `surface:${surfaceId}`);
+                    }
+                });
             }),
         );
     }

@@ -56,6 +56,13 @@ Removing untouched work archives its task, so owning a sidebar row is insufficie
 The API checks the same task-owner or team-owner policy as task archival inside the transaction
 that removes the row, before any row or task changes.
 
+## Surfaces keep following membership after the first read
+
+Seeding only once left newly created or joined Surfaces absent and left stale rows after leaving.
+Spaces now owns a Surfaces event subscription and reconciles each seeded owner's membership in
+one transaction, emitting private row events and refreshing names and pictures. Durable events
+read current membership so a delayed join cannot undo a later leave; closing Spaces unsubscribes.
+
 ## The API is only what the desktop uses
 
 Kirill reviewed the contract before it was specified. Everything the desktop did not read was
