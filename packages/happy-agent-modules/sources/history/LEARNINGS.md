@@ -236,4 +236,13 @@ earliest reset among the spent accounts. A retry reopens the smart route the way
 does, so its accounts are tried again.
 
 Record IDs are the API's message IDs, so they are CUID2s as API.md requires. Error rows once got
-UUIDs, which the retry and switch routes could not address.
+UUIDs, which the retry and switch routes could not address. Rows recorded before that change keep
+their UUIDs, so those old failures cannot be retried or switched from their own message.
+
+A context overflow is recovered before it is reported. When a response overflows before saying
+anything visible, Agent Base resets the context once and retries the turn. History records no error
+row for that first overflow, because the person would otherwise see a failure card for something
+already being fixed. The reset's own transaction records the "Context reset" service row with
+`notice: { kind: "context_reset" }`, and the API reports the one retry as `retrying` with
+`kind: "context_too_long"`. Only an overflow later in the same run becomes the `context_too_long`
+failure.

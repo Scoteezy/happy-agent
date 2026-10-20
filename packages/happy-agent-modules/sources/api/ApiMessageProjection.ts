@@ -82,6 +82,9 @@ export function messageResource(
         ...(role === "service" && message.failure !== undefined
             ? { failure: structuredClone(message.failure) }
             : {}),
+        ...(role === "service" && message.notice !== undefined
+            ? { notice: structuredClone(message.notice) }
+            : {}),
         metadata: {
             ...(role === "user" && message.userId !== undefined ? { userId: message.userId } : {}),
             ...(message.provider === undefined ? {} : { providerId: message.provider }),

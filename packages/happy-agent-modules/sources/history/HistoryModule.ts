@@ -2,6 +2,7 @@ import { createId } from "@paralleldrive/cuid2";
 import type {
     AgentBaseAcceptedMessage,
     AgentBaseInference,
+    AgentBaseModelChange,
     AgentBasePersistedEvent,
     AgentBaseSettlement,
     AgentBaseToolOutcome,
@@ -147,6 +148,8 @@ const PENDING_BLOCKS_KEY = "pending_blocks";
 const PENDING_INFERENCE_ID_KEY = "pending_inference_id";
 const EXECUTION_BASELINE_KEY = "execution_baseline";
 const EXECUTION_ANCHOR_KEY = "execution_anchor";
+/** Set once a run has overflowed its context and Agent Base reset it to retry. */
+const CONTEXT_RESET_KEY = "context_reset";
 const TOOL_NAME_KEY = "tool_name";
 const TOOL_PRESENTATION_KEY = "tool_presentation";
 const toolOutcomePresentationSchema = Type.Object(
@@ -428,6 +431,24 @@ export class HistoryModule implements AgentModule {
             throw new Error("The history module produced an invalid message.");
         }
         await this.#direct(ctx, (txCtx) => this.#append(txCtx, agentId, normalized));
+    }
+
+    /**
+     * Record that the conversation outgrew the model's context window and was reset, as the one
+     * service line every reader sees. It joins the caller's transaction, which is the reset itself.
+     */
+    async recordContextReset(ctx: Context, agentId: string): Promise<HistoryMessage> {
+        const runId = this.#events?.activeRunId(agentId);
+        const message: HistoryMessage = {
+            at: Date.now(),
+            role: "service",
+            recordId: createRecordId(),
+            blocks: [{ type: "text", text: "Context reset" }],
+            notice: { kind: "context_reset" },
+            ...(runId === undefined ? {} : { runId }),
+        };
+        await this.#direct(ctx, (txCtx) => this.#append(txCtx, agentId, message));
+        return message;
     }
 
     /** Replace one durable message under its stable identity. */
@@ -1329,7 +1350,17 @@ export class HistoryModule implements AgentModule {
                 ...attribution,
             });
         }
-        if (inference.errorMessage !== undefined) {
+        // A run's first overflow before any visible output is not a failure: Agent Base resets the
+        // context once and retries the turn, and the reset records its own notice. Only an
+        // overflow after that reset reaches the person as `context_too_long`.
+        const overflowed =
+            inference.errorMessage !== undefined &&
+            blocks.length === 0 &&
+            attempts?.at(-1)?.contextOverflow === true;
+        const recovering =
+            overflowed && (await scope.runKV.read(ctx, CONTEXT_RESET_KEY)) === undefined;
+        if (recovering) await scope.runKV.write(ctx, CONTEXT_RESET_KEY, true);
+        if (inference.errorMessage !== undefined && !recovering) {
             const attempt = attempts?.at(-1);
             // A smart route reports a candidate that had no credential as its own failure.
             const unavailable =
@@ -2293,6 +2324,13 @@ export class HistoryModule implements AgentModule {
          * transaction, because a conversation the archive could not record is not one the agent
          * should go on to claim it remembers.
          */
+        modelChanged: async (ctx, scope, change: AgentBaseModelChange) => {
+            // The reset's own transaction records its notice, so it exists exactly when it happened.
+            if (change.reason === "context_overflow") {
+                await this.recordContextReset(ctx, scope.agent.id);
+            }
+            return undefined;
+        },
         afterInferenceTransact: async (
             ctx: Context,
             scope: AgentModuleScope,

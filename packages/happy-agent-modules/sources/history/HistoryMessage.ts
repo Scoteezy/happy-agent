@@ -7,6 +7,7 @@ import {
     configurationBlockSchema,
     messageErrorSchema,
     messageFailureSchema,
+    serviceNoticeSchema,
     toolCallRequestBlockSchema,
     userIdSchema,
     type ClientMetadata,
@@ -478,6 +479,8 @@ const historyMessageFields = {
     error: Type.Optional(messageErrorSchema),
     /** Typed failure of an error row, protocol 30; identical for every reader. */
     failure: Type.Optional(messageFailureSchema),
+    /** Typed non-failure notice of a service row, such as a context reset; protocol 30. */
+    notice: Type.Optional(serviceNoticeSchema),
     /** Stable identity for this archive record. Reuse is a storage conflict. */
     recordId: historyRecordIdSchema,
     /** The accepted run this message belongs to. */

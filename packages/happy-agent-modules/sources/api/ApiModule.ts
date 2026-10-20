@@ -633,6 +633,8 @@ export class ApiModule implements AgentModule {
     readonly #announcedPendingMessages = new Set<string>();
     /** Each working agent's live provider retry, bounded like the other per-agent caches. */
     readonly #liveRetries = new Map<string, AgentRetrying>();
+    /** Agents whose context was just reset after an overflow, awaiting the one retry it starts. */
+    readonly #contextResets = new Set<string>();
     readonly #apiPendingMessageIds = new Set<string>();
     readonly #announcedExecutionConfigurations = new Map<string, string>();
     readonly #announcedAgentCreations = new Set<string>();
@@ -759,6 +761,14 @@ export class ApiModule implements AgentModule {
         this.#subscribeToModules(ctx);
         await this.prepare();
         return {
+            modelChanged: (_hookCtx, scope, change) => {
+                // Agent Base reports the retry after an overflow reset as an ordinary retry; this
+                // is what lets that one retry be shown as `context_too_long`.
+                if (change.reason === "context_overflow") {
+                    boundedAdd(this.#contextResets, scope.agent.id, MAX_ANNOUNCED_AGENT_CREATIONS);
+                }
+                return undefined;
+            },
             metadataChangedTransact: async (hookCtx, scope, change) => {
                 const archivedAt = change.update["archivedAt"];
                 if (
@@ -3753,6 +3763,7 @@ export class ApiModule implements AgentModule {
         payload: Readonly<Record<string, unknown>> | undefined,
     ): Promise<{ readonly retrying?: AgentRetrying | null }> {
         if (eventType === "loop.settled" || eventType === "loop.started") {
+            this.#contextResets.delete(agentId);
             return this.#liveRetries.delete(agentId) ? { retrying: null } : {};
         }
         if (eventType !== "provider.event") return {};
@@ -3764,17 +3775,23 @@ export class ApiModule implements AgentModule {
                 typeof reported === "number" && Number.isInteger(reported) && reported >= 1
                     ? reported
                     : 1;
+            // An overflow reset retries the turn exactly once.
+            const contextReset = this.#contextResets.delete(agentId);
             // The mode the person last sent with names the route being retried.
             const config = await this.#agentSystem().config(ctx, agentId);
             const mode = config === undefined ? undefined : agentModeFromConfig(config);
             const provider = Value.Check(messageModeSchema, mode) ? mode.providerId : undefined;
             const retrying: AgentRetrying = {
-                attempt,
-                maxAttempts: Math.max(
-                    attempt,
-                    this.#config.configuration.values.settings.inferenceMaxRetries,
-                ),
-                kind: "provider_unavailable",
+                ...(contextReset
+                    ? { attempt: 1, maxAttempts: 1, kind: "context_too_long" }
+                    : {
+                          attempt,
+                          maxAttempts: Math.max(
+                              attempt,
+                              this.#config.configuration.values.settings.inferenceMaxRetries,
+                          ),
+                          kind: "provider_unavailable",
+                      }),
                 vendorName:
                     provider === undefined
                         ? "The provider"

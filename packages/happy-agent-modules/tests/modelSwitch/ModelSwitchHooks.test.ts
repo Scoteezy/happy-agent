@@ -140,6 +140,33 @@ describe("ModelSwitchModule lifecycle", () => {
             database.close();
         }
     });
+
+    it("explains a context reset after an overflow rather than a profile change", async () => {
+        const database = moduleDatabase([], "model-switch-context-overflow");
+        try {
+            const result = await modelSwitchNoticeFromHook(
+                new ModelSwitchModule(),
+                database.context,
+                {
+                    change: {
+                        ...modelChange({
+                            previousModel: "openai/gpt-5.6-sol",
+                            model: "openai/gpt-5.6-sol",
+                        }),
+                        reason: "context_overflow",
+                    },
+                },
+            );
+            const text = textFromNotice(result);
+
+            expect(text).toContain("<context-reset-history-context>");
+            expect(text).toContain("outgrew the model's context window");
+            expect(text).toContain("it no longer fit in the context window");
+            expect(text).not.toContain("request profile");
+        } finally {
+            database.close();
+        }
+    });
 });
 
 describe("ModelSwitchModule history handoff", () => {

@@ -12,6 +12,8 @@ export interface ModelSwitchNotice {
     readonly provider: string;
     /** Whether the same model/provider started fresh because the opaque request profile changed. */
     readonly profileReset?: boolean | undefined;
+    /** Whether the same model started fresh because the conversation outgrew its context window. */
+    readonly contextOverflow?: boolean | undefined;
     /** The tool that reads the durable history, when the agent has one. */
     readonly historyTool?: string | undefined;
     /** The two ends of the erased conversation, when a history was there to read. */
@@ -32,21 +34,15 @@ export interface ModelSwitchNotice {
  */
 export function createModelSwitchNotice(notice: ModelSwitchNotice): string {
     const excerpt = notice.excerpt;
-    const tag =
-        notice.profileReset === true
-            ? "profile-reset-history-context"
-            : "model-switch-history-context";
+    const reason = noticeReason(notice);
+    const tag = reason.tag;
     return [
         `<${tag}>`,
-        notice.profileReset === true
-            ? "The request profile changed, so the active model started a fresh private context."
-            : `The active model/provider configuration changed from ${notice.previousModel} on ${notice.previousProvider} to ${notice.model} on ${notice.provider}.`,
+        reason.opening,
         investigate(notice),
         ...(excerpt === undefined
             ? [
-                  notice.profileReset === true
-                      ? "The conversation itself is not part of this context: the request profile requires a fresh context, so none of it is visible to you, and the work it describes still stands. Do not repeat or undo work that may already be done."
-                      : "The conversation itself is not part of this context: the two configurations are incompatible, so none of it is visible to you, and the work it describes still stands. Do not repeat or undo work that may already be done.",
+                  `The conversation itself is not part of this context: ${reason.invisible}, so none of it is visible to you, and the work it describes still stands. Do not repeat or undo work that may already be done.`,
               ]
             : [
                   `The excerpt${notice.historyTool === undefined ? " exposes" : " and tool expose"} the durable inference-oriented history, not raw provider protocol traffic or hidden reasoning. Exposed thinking and conversation are prioritized; tool calls are summarized and tool outputs are truncated.`,
@@ -58,6 +54,35 @@ export function createModelSwitchNotice(notice: ModelSwitchNotice): string {
               ]),
         `</${tag}>`,
     ].join("\n");
+}
+
+/** Why the context started fresh: the notice's tag, its first line, and its no-excerpt reason. */
+function noticeReason(notice: ModelSwitchNotice): {
+    readonly tag: string;
+    readonly opening: string;
+    readonly invisible: string;
+} {
+    if (notice.contextOverflow === true) {
+        return {
+            tag: "context-reset-history-context",
+            opening:
+                "The conversation outgrew the model's context window, so the active model started a fresh private context and is answering the latest request again.",
+            invisible: "it no longer fit in the context window",
+        };
+    }
+    if (notice.profileReset === true) {
+        return {
+            tag: "profile-reset-history-context",
+            opening:
+                "The request profile changed, so the active model started a fresh private context.",
+            invisible: "the request profile requires a fresh context",
+        };
+    }
+    return {
+        tag: "model-switch-history-context",
+        opening: `The active model/provider configuration changed from ${notice.previousModel} on ${notice.previousProvider} to ${notice.model} on ${notice.provider}.`,
+        invisible: "the two configurations are incompatible",
+    };
 }
 
 function overview(excerpt: HistoryExcerpt): string {

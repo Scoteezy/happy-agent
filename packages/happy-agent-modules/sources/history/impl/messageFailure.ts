@@ -47,6 +47,15 @@ export function messageFailure(input: {
             command,
         };
     }
+    // History records an overflow only after Agent Base's one automatic reset failed to fit it.
+    if (attempt?.contextOverflow === true) {
+        return {
+            ...base,
+            kind: "context_too_long",
+            message: "This chat no longer fits the model's context window, so start a new chat.",
+            modelId: attempt.mode.modelId,
+        };
+    }
     if (input.disabled && attempt?.errorCode === undefined) {
         return {
             ...base,

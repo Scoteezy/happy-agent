@@ -113,6 +113,20 @@ describe("a failed turn's typed failure", () => {
         });
     });
 
+    it("names the model a chat outgrew, ahead of a spent pool or a disabled route", () => {
+        const failure = build({
+            disabled: true,
+            spentPool: { name: "claude-pool", resetsAt: null },
+            attempt: attempt({ errorCode: "inference_failed", contextOverflow: true }),
+        });
+        expect(failure).toMatchObject({
+            kind: "context_too_long",
+            modelId: "anthropic/opus-5-5",
+            message: "This chat no longer fits the model's context window, so start a new chat.",
+        });
+        expect(isKnownMessageFailure(failure)).toBe(true);
+    });
+
     it("says a custom source needs its settings checked", () => {
         expect(
             build({

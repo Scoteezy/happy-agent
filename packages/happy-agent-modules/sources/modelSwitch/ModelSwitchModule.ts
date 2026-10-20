@@ -70,7 +70,9 @@ export class ModelSwitchModule implements AgentModule {
             // reset because the empty context is discarded, but there is no erased work to inherit,
             // so a notice would only tell a new agent to go looking for a past it never had.
             if (change.previousModel === undefined) return undefined;
+            const contextOverflow = change.reason === "context_overflow";
             const profileReset =
+                !contextOverflow &&
                 change.previousModel === change.model &&
                 change.previousProvider === change.provider;
             const text = createModelSwitchNotice({
@@ -78,6 +80,7 @@ export class ModelSwitchModule implements AgentModule {
                 previousProvider: change.previousProvider,
                 model: this.#label(change.model, change.provider),
                 provider: change.provider,
+                ...(contextOverflow ? { contextOverflow: true } : {}),
                 ...(profileReset ? { profileReset: true } : {}),
                 ...(this.#history === undefined ? {} : { historyTool: HISTORY_TOOL_NAME }),
                 ...(await this.#excerpt(ctx, scope.agent.id)),
