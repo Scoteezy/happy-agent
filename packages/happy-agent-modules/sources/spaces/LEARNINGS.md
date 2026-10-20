@@ -73,10 +73,12 @@ now." in Prioritizing's conversation, and its changes wait for calm like any oth
 
 ## The organiser is Prioritizing, a real subtask of Happy
 
-The organiser was a hidden child agent called "Sidebar manager", invisible in Happy's tree. It is
-now Prioritizing, a conversation subtask of Happy made through `SubtasksModule`, listed in Happy's
-subtasks and shown while working or waiting like any other; an archived one is replaced on next
-use.
+The organiser was a hidden child agent called "Sidebar manager", invisible in Happy's tree. It
+then became a conversation subtask (`createConversation`, with its own metadata), which Kirill
+still saw as not a true subtask. It is now made through `SubtasksModule.create`, exactly as Happy
+makes any subtask, with an opening task and nothing special-cased; it is found by the agent ID in
+the person's bookkeeping. It is created lazily with the person's first stem cell — not on seed or
+the first read — and before that briefs and tidy do nothing.
 
 ## Recent work is never tucked away
 

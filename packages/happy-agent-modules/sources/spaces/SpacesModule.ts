@@ -3,7 +3,6 @@ import {
     cuid2Schema,
     DEFAULT_AGENT_PERMISSION_MODE,
     withAgentDatabase,
-    type AgentConfig,
     type AgentModule,
     type AgentModuleHooks,
     type AgentSystemRef,
@@ -68,6 +67,7 @@ import {
     insertSpace,
     insertSpaceIfAbsent,
     queryBatches,
+    queryOwnerByPrioritizingAgent,
     queryOwnerState,
     queryOwnerStates,
     queryOwnersWithPendingChanges,
@@ -99,7 +99,9 @@ export const SPACE_INTERACTION_HOLD_MS = 10 * 60_000;
 /** How often queued changes are checked against the calm rule. */
 const CALM_CHECK_INTERVAL_MS = 15_000;
 const BRIEF_FUNCTION = "spaces.briefPrioritizing";
-const PRIORITIZING_METADATA_KEY = "spacesPrioritizingFor";
+/** The opening task of a new Prioritizing; work seeded before it existed waits for it. */
+const PRIORITIZING_OPENING =
+    "Keep this person's sidebar tidy from now on. Read it with list_sidebar. Give every row without an icon one, and place the rows not placed yet: group active work into a few sections and leave quiet work in Older.";
 const MAX_BRIEF_TEXT = 2_000;
 /** Work active this recently is never folded or hidden by Prioritizing. */
 export const SPACE_RECENT_WORK_MS = 2 * 60 * 60_000;
@@ -212,28 +214,27 @@ export class SpacesModule implements AgentModule {
             });
         },
         instructions: () => "",
-        overrideInstructions: (_ctx, scope, input) =>
-            prioritizingOwner(scope.agent.metadata) === undefined
+        overrideInstructions: async (ctx, scope, input) =>
+            (await queryOwnerByPrioritizingAgent(ctx, scope.agent.id)) === undefined
                 ? input.instructions
                 : formatPrioritizingInstructions(),
         tools: async (ctx, scope): Promise<readonly AnyAgentTool[]> => {
-            if (prioritizingOwner(scope.agent.metadata) !== undefined) return [];
             // People ask for sidebar changes in the conversations they have, not in helpers.
             if ((await this.#requireAgents().parentOf(ctx, scope.agent.id)) !== null) return [];
             return [requestSpacePlacementTool(this, scope.agent.id)];
         },
         // Prioritizing is one job with one tool array and nothing else.
-        overrideTools: (_ctx, scope, input) => {
-            const owner = prioritizingOwner(scope.agent.metadata);
-            return owner === undefined ? input.tools : prioritizingTools(this, owner);
+        overrideTools: async (ctx, scope, input) => {
+            const owner = await queryOwnerByPrioritizingAgent(ctx, scope.agent.id);
+            return owner === undefined ? input.tools : prioritizingTools(this, owner.ownerUserId);
         },
-        beforeAgentLoop: (_ctx, scope) => {
-            if (prioritizingOwner(scope.agent.metadata) !== undefined) {
+        beforeAgentLoop: async (ctx, scope) => {
+            if ((await queryOwnerByPrioritizingAgent(ctx, scope.agent.id)) !== undefined) {
                 this.#busyPrioritizing.add(scope.agent.id);
             }
         },
         afterAgentSettled: async (ctx, scope) => {
-            const owner = prioritizingOwner(scope.agent.metadata);
+            const owner = (await queryOwnerByPrioritizingAgent(ctx, scope.agent.id))?.ownerUserId;
             if (owner === undefined) return;
             this.#busyPrioritizing.delete(scope.agent.id);
             const lifetime = this.#lifetime;
@@ -433,6 +434,8 @@ export class SpacesModule implements AgentModule {
                 await deletePendingChanges(txCtx, ownerUserId, [`space:${previous.id}`]);
             }
             await insertSpace(txCtx, space);
+            // Prioritizing begins with the person's first new work.
+            await this.#ensurePrioritizing(txCtx, ownerUserId);
             await this.#commitEvents(txCtx, ownerUserId, input.mutationId, [
                 ...(previous === undefined
                     ? []
@@ -606,7 +609,10 @@ export class SpacesModule implements AgentModule {
         return await this.#applyIfDue(ctx, ownerUserId, "calm");
     }
 
-    /** "Tidy now" is one automatic message in Prioritizing's conversation and nothing more. */
+    /**
+     * "Tidy now" is one automatic message in Prioritizing's conversation and nothing more. Before
+     * the person's first new work there is no Prioritizing, and it does nothing.
+     */
     async requestTidy(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
         await ctx.inTx(async (txCtx) => {
             await this.#ensureOwner(txCtx, ownerUserId);
@@ -831,8 +837,11 @@ export class SpacesModule implements AgentModule {
             if (rows.length === 0) {
                 return "That conversation is not in anyone's sidebar, so there is nothing to move.";
             }
+            let briefed = false;
             for (const row of rows) {
                 const description = await this.describe(txCtx, row);
+                if ((await this.#livePrioritizing(txCtx, row.ownerUserId)) === undefined) continue;
+                briefed = true;
                 if (input.personAsked) {
                     const state = await this.#ownerState(txCtx, row.ownerUserId);
                     await writeOwnerState(txCtx, { ...state, applyRequestedAt: Date.now() });
@@ -850,6 +859,9 @@ export class SpacesModule implements AgentModule {
                     // One request is one message, however often the tool call is retried.
                     `${input.requestId}:${row.ownerUserId}`,
                 );
+            }
+            if (!briefed) {
+                return "Nothing organises that sidebar yet; the person can move the row themselves.";
             }
             return input.personAsked
                 ? "Prioritizing will make the change shortly."
@@ -1029,13 +1041,17 @@ export class SpacesModule implements AgentModule {
         }
     }
 
-    /** Queue a message for the person's Prioritizing, delivered after this transaction commits. */
+    /**
+     * Queue a message for the person's Prioritizing, delivered after this transaction commits.
+     * A person without Prioritizing yet has nobody to tell, so nothing is queued.
+     */
     async #brief(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
         text: string,
         operationId?: string,
     ): Promise<void> {
+        if ((await this.#livePrioritizing(ctx, ownerUserId)) === undefined) return;
         await this.#durableFunctions.invoke(ctx, {
             function: BRIEF_FUNCTION,
             arguments: { ownerUserId, messageId: createId(), text },
@@ -1049,18 +1065,11 @@ export class SpacesModule implements AgentModule {
         messageId: string,
         text: string,
     ): Promise<void> {
-        const agents = this.#requireAgents();
-        const { prioritizingAgentId, happyAgentId } = await this.#ensurePrioritizing(
-            ctx,
-            ownerUserId,
-        );
-        const happyMode = (await agents.config(ctx, happyAgentId))?.metadata?.["lastMode"];
-        const route = selectPrioritizingRoute(
-            this.#config.models,
-            Value.Check(messageModeSchema, happyMode) ? happyMode.providerId : undefined,
-        );
+        const prioritizingAgentId = await this.#livePrioritizing(ctx, ownerUserId);
+        if (prioritizingAgentId === undefined) return;
+        const route = await this.#prioritizingRoute(ctx, ownerUserId);
         if (route === undefined) throw new Error("No model is available for Prioritizing.");
-        await agents.send(
+        await this.#requireAgents().send(
             ctx,
             prioritizingAgentId,
             { role: "user", content: [{ type: "text", text }] },
@@ -1075,39 +1084,62 @@ export class SpacesModule implements AgentModule {
         );
     }
 
+    /** The person's Prioritizing, unless they have none yet or archived it. */
+    async #livePrioritizing(ctx: Context, ownerUserId: SpaceOwnerId): Promise<string | undefined> {
+        const agentId = (await queryOwnerState(ctx, ownerUserId))?.prioritizingAgentId;
+        if (agentId === undefined) return undefined;
+        const config = await this.#requireAgents().config(ctx, agentId);
+        return config === undefined || typeof config.metadata?.["archivedAt"] === "number"
+            ? undefined
+            : agentId;
+    }
+
+    /** The cheapest model of the account Happy last ran on. */
+    async #prioritizingRoute(ctx: Context, ownerUserId: SpaceOwnerId) {
+        const happyAgentId = await this.#happyAgentId(ctx, ownerUserId);
+        const happyMode =
+            happyAgentId === undefined
+                ? undefined
+                : (await this.#requireAgents().config(ctx, happyAgentId))?.metadata?.["lastMode"];
+        return selectPrioritizingRoute(
+            this.#config.models,
+            Value.Check(messageModeSchema, happyMode) ? happyMode.providerId : undefined,
+        );
+    }
+
+    async #happyAgentId(ctx: Context, ownerUserId: SpaceOwnerId): Promise<string | undefined> {
+        const happy = (await querySpaceByRef(ctx, ownerUserId, "happy"))?.contents[0];
+        return happy?.kind === "bot" ? happy.agentId : undefined;
+    }
+
     /**
-     * Prioritizing is an ordinary conversation subtask of Happy, made the first time it has
-     * something to do and made again if the person archived it.
+     * Prioritizing is an ordinary subtask of Happy, made through the same path as any subtask
+     * Happy creates, with its opening task. It is made with the person's first new work, and
+     * again with the next new work after the person archived it.
      */
-    async #ensurePrioritizing(
-        ctx: Context,
-        ownerUserId: SpaceOwnerId,
-    ): Promise<{ readonly prioritizingAgentId: string; readonly happyAgentId: string }> {
-        return await ctx.inTx(async (txCtx) => {
-            const agents = this.#requireAgents();
-            await this.#ensureOwner(txCtx, ownerUserId);
-            const happy = await querySpaceByRef(txCtx, ownerUserId, "happy");
-            const happyRef = happy?.contents[0];
-            if (happyRef?.kind !== "bot") throw new Error("Happy is not available yet.");
-            const state = await this.#ownerState(txCtx, ownerUserId);
-            if (state.prioritizingAgentId !== undefined) {
-                const current = await agents.config(txCtx, state.prioritizingAgentId);
-                if (current !== undefined && typeof current.metadata?.["archivedAt"] !== "number") {
-                    return {
-                        prioritizingAgentId: state.prioritizingAgentId,
-                        happyAgentId: happyRef.agentId,
-                    };
-                }
-            }
-            const prioritizingAgentId = createId();
-            await this.#subtasks.createConversation(
-                txCtx,
-                happyRef.agentId,
-                { title: "Prioritizing", metadata: { [PRIORITIZING_METADATA_KEY]: ownerUserId } },
-                prioritizingAgentId,
-            );
-            await writeOwnerState(txCtx, { ...state, prioritizingAgentId });
-            return { prioritizingAgentId, happyAgentId: happyRef.agentId };
+    async #ensurePrioritizing(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
+        if ((await this.#livePrioritizing(ctx, ownerUserId)) !== undefined) return;
+        const happyAgentId = await this.#happyAgentId(ctx, ownerUserId);
+        const route = await this.#prioritizingRoute(ctx, ownerUserId);
+        if (happyAgentId === undefined || route === undefined) return;
+        const prioritizingAgentId = createId();
+        await this.#subtasks.create(
+            ctx,
+            happyAgentId,
+            {
+                title: "Prioritizing",
+                text: PRIORITIZING_OPENING,
+                provider: route.providerId,
+                model: route.model,
+                effort: route.effort,
+            },
+            prioritizingAgentId,
+            undefined,
+            route.providerId,
+        );
+        await writeOwnerState(ctx, {
+            ...(await this.#ownerState(ctx, ownerUserId)),
+            prioritizingAgentId,
         });
     }
 
@@ -1135,8 +1167,8 @@ export class SpacesModule implements AgentModule {
     }
 
     /**
-     * Make sure the person has Happy and a row for everything they already
-     * have. Existing work arrives folded and unplaced, and Prioritizing is asked to organise it.
+     * Make sure the person has Happy and a row for everything they already have. Existing work
+     * arrives folded and unplaced, and Prioritizing organises it when it begins.
      */
     async #ensureOwner(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
         const now = Date.now();
@@ -1197,17 +1229,11 @@ export class SpacesModule implements AgentModule {
             if (surfaceType === undefined) continue;
             await seed({ kind: "surface", surfaceId: surface.id, surfaceType });
         }
+        // Prioritizing's opening task places the seeded rows; that first tidy applies at once.
         await writeOwnerState(ctx, {
             ownerUserId,
             ...(seeded > 0 ? { applyRequestedAt: now } : {}),
         });
-        if (seeded > 0) {
-            await this.#brief(
-                ctx,
-                ownerUserId,
-                "This is a new sidebar. Everything the person already has is folded into Older and not placed yet. Read it with list_sidebar, choose an icon for each row, group the active work into a few sections, and leave quiet work in Older. Your changes apply as soon as you finish.",
-            );
-        }
         await this.#commitEvents(ctx, ownerUserId, undefined, drafts);
     }
 
@@ -1418,13 +1444,6 @@ type SpaceEventDraft = SpaceEvent extends infer Event
         ? Omit<Event, "at" | "ownerUserId" | "mutationId">
         : never
     : never;
-
-function prioritizingOwner(
-    metadata: AgentConfig["metadata"] | undefined,
-): SpaceOwnerId | undefined {
-    const owner = metadata?.[PRIORITIZING_METADATA_KEY];
-    return Value.Check(spaceOwnerIdSchema, owner) ? owner : undefined;
-}
 
 function newWorkBrief(row: SpaceRecord, text: string): string {
     const excerpt = text.length > MAX_BRIEF_TEXT ? `${text.slice(0, MAX_BRIEF_TEXT)}…` : text;

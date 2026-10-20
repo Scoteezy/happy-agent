@@ -36,9 +36,12 @@ task.
 
 ## Prioritizing
 
-One long-running conversation subtask of Happy per person, made through
-`SubtasksModule.createConversation` on first use and made again if the person archived it. It
-appears in Happy's subtasks like any other. It runs on the cheapest model of Happy's account and
+One long-running subtask of Happy per person, made through `SubtasksModule.create` — the path
+every subtask takes — with the person's first stem cell, and made again with the next one if the
+person archived it. Until then there is none, and briefs and tidy requests are dropped; its
+opening task places whatever was seeded before it existed. It appears in Happy's subtasks like any
+other and, like any other, reports each answer to Happy. It is recognised by the agent ID stored
+in the person's bookkeeping, not by metadata. It runs on the cheapest model of Happy's account and
 its whole tool array and system prompt come from this module, so it can do nothing else. Briefs
 reach it through the `spaces.briefPrioritizing` durable function, committed with whatever caused
 them. Tidy is one such brief and nothing more.

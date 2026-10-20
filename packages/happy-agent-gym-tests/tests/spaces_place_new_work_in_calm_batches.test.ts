@@ -141,6 +141,16 @@ describe("spaces over the API", () => {
         expect(happy).not.toHaveProperty("role");
         expect(initial.spaces).toHaveLength(1);
 
+        // Prioritizing does not exist before the first new work, so a tidy does nothing.
+        const happySubtasks = async () =>
+            (
+                await gym.http.ok<{
+                    agent: { subtasks: { id: string; title: string; subtask: boolean }[] };
+                }>("GET", `/v0/agents/${happy.target.agentId!}`)
+            ).agent.subtasks;
+        expect((await gym.http.post("/v0/spaces/tidy", {})).status).toBe(202);
+        expect(await happySubtasks()).toEqual([]);
+
         // ⌘N: a fresh conversation with no project, waiting under Happy.
         const created = await gym.http.ok<{
             space: Space;
@@ -187,18 +197,18 @@ describe("spaces over the API", () => {
         expect(queued.sections).toEqual([]);
 
         // Prioritizing has exactly its own tools; ordinary conversations may only ask it.
-        const prioritizingRequest = gym.inference.requests.find(isPrioritizing)!;
+        const prioritizingRequest = gym.inference.requests.findLast(isPrioritizing)!;
         expect(prioritizingRequest.tools.map(({ name }) => name).sort()).toEqual(
             PRIORITIZING_TOOLS,
         );
         expect(JSON.stringify(prioritizingRequest.messages)).toContain(
             "Plan the Android 2.4 release.",
         );
-        // It is an ordinary subtask of Happy, listed in Happy's subtasks.
-        const happyAgent = await gym.http.ok<{
-            agent: { subtasks: { id: string; title: string; subtask: boolean }[] };
-        }>("GET", `/v0/agents/${happy.target.agentId!}`);
-        expect(happyAgent.agent.subtasks).toContainEqual(
+        expect(JSON.stringify(prioritizingRequest.messages[0])).toContain(
+            "Keep this person's sidebar tidy",
+        );
+        // The first new work made it: an ordinary subtask of Happy, started with an opening task.
+        expect(await happySubtasks()).toContainEqual(
             expect.objectContaining({
                 id: prioritizingRequest.sessionId,
                 title: "Prioritizing",

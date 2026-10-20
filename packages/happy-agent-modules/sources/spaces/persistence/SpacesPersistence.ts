@@ -378,6 +378,21 @@ export async function queryOwnerState(
         : parseValue(spaceOwnerStateSchema, rows[0].state_json, "owner state");
 }
 
+/** The person whose Prioritizing this agent is, if it is anyone's. */
+export async function queryOwnerByPrioritizingAgent(
+    ctx: Context,
+    agentId: string,
+): Promise<SpaceOwnerState | undefined> {
+    const rows = await agentDatabaseRows<{ readonly state_json: string }>(
+        ctx.db,
+        sql`SELECT state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)}
+            WHERE json_extract(state_json, '$.prioritizingAgentId') = ${agentId} LIMIT 1`,
+    );
+    return rows[0] === undefined
+        ? undefined
+        : parseValue(spaceOwnerStateSchema, rows[0].state_json, "owner state");
+}
+
 /** Every person who has a sidebar. */
 export async function queryOwnerStates(ctx: Context): Promise<SpaceOwnerState[]> {
     const rows = await agentDatabaseRows<{ readonly state_json: string }>(

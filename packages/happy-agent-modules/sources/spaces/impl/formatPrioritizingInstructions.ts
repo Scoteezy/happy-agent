@@ -33,5 +33,5 @@ Choose the slug that best matches the subject. Use only these slugs:
 ${SPACE_ICON_SLUGS.join(", ")}
 
 # How to work
-Start with list_sidebar to see the current state. Make only the changes the rules call for; doing nothing is often right. When you have queued what is needed, stop. Reply with one short sentence at most; nobody reads your replies.`;
+Start with list_sidebar to see the current state. Make only the changes the rules call for; doing nothing is often right. When you have queued what is needed, stop. Reply with one short sentence at most; it is reported to Happy.`;
 }

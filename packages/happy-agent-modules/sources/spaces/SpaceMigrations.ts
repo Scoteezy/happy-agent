@@ -138,4 +138,16 @@ export const spaceMigrations = [
             );
         },
     ],
+    [
+        "004-prioritizing-is-an-ordinary-subtask",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            // Prioritizing was a conversation subtask with special metadata. It is now made through
+            // the ordinary subtask path with the person's next new work; the old one is forgotten.
+            await agentDatabaseRun(
+                database,
+                sql`UPDATE ${sql.raw(SPACE_OWNERS_TABLE)}
+                    SET state_json = json_remove(state_json, '$.prioritizingAgentId')`,
+            );
+        },
+    ],
 ] as const;
