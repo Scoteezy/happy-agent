@@ -357,6 +357,20 @@ the combined flow when installation setup is complete. On a fresh installation, 
 `POST /v0/onboarding/complete` finishes installation setup after the caller has saved their
 profile. Completing installation setup never lets another member skip their own profile.
 
+During agent-executed setup, including a connection to an existing team, finish the connected
+member's profile automatically using their known local name, email, and optional photo for a new
+profile. Preserve populated remote fields and photos, fill only missing fields needed for the
+authorized setup, and act only as the intended member. Use
+`PATCH /v0/profile` with the remote profile's `If-Match` version; copy photo bytes separately with
+`PUT /v0/profile/photo` and the updated version. Re-read onboarding after saving and call
+`POST /v0/onboarding/complete` only if installation onboarding is still incomplete and completing
+it is within the user's authorized task; adding a connection alone does not authorize that change.
+Require `GET /v0/bootstrap/desktop` to return `onboarding.completed: true`
+before reporting readiness. Its `steps.project.done` may still be `false`; a fake permanent
+project or a change to credentials or administrator privileges is not an onboarding prerequisite.
+See [the connection recipe](recipe/deploy-happy-team.md#5-add-the-local-connection-and-verify-it)
+for local profile reads, conflict handling, and completion checks.
+
 The new user receives `isOwner = true` only when the token's WorkOS user ID matches
 `owner_workos_user_id`. Clients cannot set or change that flag. Once the user exists, that WorkOS
 identity can use the rest of the API.

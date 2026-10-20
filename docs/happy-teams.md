@@ -41,8 +41,12 @@ Happy Cloud to invite members; local bot privileges do not grant organization pr
    client IDs from `get_happy_workos_state`.
 4. Verify that the deployed service is running correctly before registering it locally.
 5. Add it to local connections with `set_remote_connection`, using WorkOS organization
-   authentication. Run `check_remote_connection_health` and verify actual use through that
-   connection.
+   authentication. Run `check_remote_connection_health`, finish the connected member's profile
+   setup, and verify actual use through that connection. For a new profile, automatically reuse
+   the user's known local name, email, and optional photo. Preserve populated remote fields and
+   photos, filling only missing fields needed for the authorized setup.
+   Follow [the profile and Desktop checks](recipe/deploy-happy-team.md#5-add-the-local-connection-and-verify-it)
+   and require desktop bootstrap's `onboarding.completed` to be `true` before reporting completion.
 6. Only after those checks pass, ask the user which email addresses to invite. Use
    `invite_happy_team_member` for each requested recipient.
 
@@ -53,6 +57,12 @@ change its address. Use `update_happy_team` when an existing team's endpoint nee
 
 Team management runs on the standalone installation, not on the team server. These tools manage
 the connected account's organizations, not every organization in WorkOS.
+
+Adding a connection to an existing deployment uses the same current-member profile and Desktop
+checks. Ask only for genuinely missing identity information or an interactive requirement. A
+successful health check alone is insufficient, and `steps.project.done: false` does not mean
+onboarding is incomplete when `completed` is `true`. Do not create a fake permanent project or
+change team privileges or credentials to get past onboarding.
 
 ## Email invitations
 
