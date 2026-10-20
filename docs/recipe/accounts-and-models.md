@@ -25,10 +25,12 @@ Each extra account is a `[providers.<id>]` table with a `type` and optional frie
 Built-in `claude`, `codex`, and `grok` default to **Current CLI**; other accounts without a name
 use a readable version of the ID. Configuration, defaults, and pools continue to use the IDs.
 
-Choose a short name the person recognizes. Email can help: when proposing a name,
-`alex@gmail.com` can become `alex`, and `alex@acme.dev` can become `alex acme`. This is guidance for
-choosing a name. The product displays explicit names verbatim; it never shortens emails or
-appends plan names automatically.
+Use the person's explicitly requested label verbatim. When proposing a name, prefer a
+recognizable email-style label, such as `alex@example.com`, `alex@acme`, or
+`alex.work@example.com`. Keep the username and domain details that distinguish the accounts;
+avoid overly short aliases. Omit redundant vendor or plan prefixes and suffixes: provider groups
+already supply that context. This is guidance for choosing a name. The product displays explicit
+names verbatim; it never shortens emails or appends plan names automatically.
 
 | Vendor  | Settings                                | How the user gets the credential                                                                     |
 | ------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------- |
