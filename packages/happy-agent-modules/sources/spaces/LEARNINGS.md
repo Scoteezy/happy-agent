@@ -25,6 +25,10 @@ insert-if-absent on `(owner, content key)`, so concurrent or repeated seeds can 
 second row for the same work. Rows that merely share a title are different conversations and are
 never merged.
 
+A stem-cell ID reserves both its row and conversation inside one database transaction. Replays
+check ownership before creating work and return the stored task's agent; an existing ID never
+creates a second task or discloses another person's row.
+
 ## Unnamed work has no title, and untouched work can be removed
 
 The desktop labels a row "New" itself, so a task still carrying its placeholder name is served

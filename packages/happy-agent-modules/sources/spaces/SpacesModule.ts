@@ -392,9 +392,12 @@ export class SpacesModule implements AgentModule {
         },
     ): Promise<SpaceRecord> {
         return await ctx.inTx(async (txCtx) => {
-            await this.#ensureOwner(txCtx, ownerUserId);
             const existing = await querySpace(txCtx, input.spaceId);
-            if (existing !== undefined) return existing;
+            if (existing !== undefined) {
+                if (existing.ownerUserId !== ownerUserId) throw new SpaceNotFoundError();
+                return existing;
+            }
+            await this.#ensureOwner(txCtx, ownerUserId);
             if (input.sectionId !== undefined) {
                 const section = await querySection(txCtx, input.sectionId);
                 if (section === undefined || section.ownerUserId !== ownerUserId) {

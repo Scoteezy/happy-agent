@@ -6981,22 +6981,24 @@ export class ApiModule implements AgentModule {
         }
         const { mutationId } = body;
         const spaceId = body.id ?? createId();
-        const existing = await spaces.get(ctx, spaceId);
-        if (existing !== undefined) {
-            if (existing.ownerUserId !== owner) throw notFound("The space was not found.");
-            const target = existing.contents[0];
-            const task = target?.kind === "task" ? await tasks.get(ctx, target.taskId) : undefined;
-            sendJson(response, 200, {
-                space: await this.#spaceResource(ctx, existing),
-                agent: task === undefined ? null : await this.#stemCellAgent(ctx, task),
-            });
-            return true;
-        }
         const ownerUserId = this.#team.enabled ? teamUser(ctx)?.id : undefined;
         const { task, space, created } = await this.#withMutationId(
             mutationId,
             async () =>
                 await ctx.inTx(async (txCtx) => {
+                    // The database transaction reserves the ID before any task is created.
+                    // A competing retry must read the winner's row and its actual conversation.
+                    const existing = await spaces.get(txCtx, spaceId);
+                    if (existing !== undefined) {
+                        if (existing.ownerUserId !== owner)
+                            throw notFound("The space was not found.");
+                        const target = existing.contents[0];
+                        const task =
+                            target?.kind === "task"
+                                ? await tasks.get(txCtx, target.taskId)
+                                : undefined;
+                        return { task, space: existing, created: false as const };
+                    }
                     const creation = await tasks.createWithResult(
                         txCtx,
                         ownerUserId === undefined ? {} : { ownerUserId },
@@ -7009,9 +7011,16 @@ export class ApiModule implements AgentModule {
                             : { sectionId: body.sectionId }),
                         ...(mutationId === undefined ? {} : { mutationId }),
                     });
-                    return { task: creation.task, space, created: creation.created };
+                    return { task: creation.task, space, created: true as const };
                 }),
         );
+        if (!created) {
+            sendJson(response, 200, {
+                space: await this.#spaceResource(ctx, space),
+                agent: task === undefined ? null : await this.#stemCellAgent(ctx, task),
+            });
+            return true;
+        }
         // As for tasks: initial slash-command discovery belongs to the settled agent snapshot.
         if (created) await this.#slashCommands.catalog(ctx, task.agentId);
         await this.#agentEventChains.get(task.agentId);
