@@ -6120,18 +6120,20 @@ a daemon restart. `omitToolData` is applied only after this shared projection.
 The daemon emits the following presentation types from these exact tool names when their
 expected arguments are present:
 
-| Presentation   | Tool calls                                                                                                             |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `exploration`  | `Read`, `read_file`, `view_image`, `list_dir`, `Glob`, `Grep`, `grep`                                                  |
-| `exec_command` | `exec_command`, `Bash`, `run_terminal_command`                                                                         |
-| `file_diff`    | `Edit`, `Write`, `apply_patch`, `search_replace`, `write`                                                              |
-| `search`       | `bedrock_web_search`, `claude_web_search`, `codex_web_search`, `gemini_web_search`, `grok_web_search`, `grok_x_search` |
-| `agent_spawn`  | `create_agent`                                                                                                         |
-| `media`        | `codex_imagegen`, `gemini_imagegen`, `present_files`                                                                   |
-| `artifact`     | `create_artifact`, `update_artifact`                                                                                   |
+| Presentation   | Tool calls                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `exploration`  | `Read`, `read_file`, `view_image`, `list_dir`, `Glob`, `Grep`, `grep`                                                    |
+| `exec_command` | `exec_command`, `Bash`, `run_terminal_command`                                                                           |
+| `file_diff`    | `Edit`, `Write`, `apply_patch`, `search_replace`, `write`                                                                |
+| `search`       | `bedrock_web_search`, `claude_web_search`, `codex_web_search`, `gemini_web_search`, `grok_web_search`, `grok_x_search`   |
+| `agent_spawn`  | `create_agent`                                                                                                           |
+| `media`        | `codex_imagegen`, `gemini_imagegen`, `present_files`, and completed image reads by `Read`, `view_image`, `ReadMediaFile` |
+| `artifact`     | `create_artifact`, `update_artifact`                                                                                     |
 
 **`exploration`** — one normalized directory listing, file read, or code search. The daemon
-currently emits one operation per mapped tool call.
+currently emits one operation per mapped tool call. A read that shows an image to the person is
+`exploration` only while it runs: once it completes, it carries the `media` presentation described
+below instead.
 
 ```json
 {
@@ -6238,9 +6240,9 @@ raw `arguments` and `result` even when `omitToolData=true`; other presentations 
 omission behavior. Clients never need to parse these raw fields to render a recognized spawn.
 
 **`media`** — images, videos, documents, and other files the call showed the person inline in
-the chat: an image a generation tool made, or files an agent presented with `present_files`. This
-presentation is outcome-derived, so it is absent while the call is running and appears only when
-the call completes successfully.
+the chat: an image a generation tool made, an image the agent read, or files an agent presented
+with `present_files`. This presentation is outcome-derived, so it is absent while the call is
+running and appears only when the call completes successfully.
 
 ```json
 {
@@ -6284,12 +6286,125 @@ when the call ran, so later edits to or deletion of the source file never change
 shows. The presentation is recorded in the conversation of the agent that ran the call only;
 the parent or child conversations of that agent show nothing for it.
 
-`present_files` is a tool every agent has, whichever model it runs. It takes
-`{ "filepaths": ["…"] }` — one to ten paths on the agent's machine, absolute or relative to its
-working directory — and presents those files exactly as above. A path outside the agent's
-workspace follows the ordinary permission boundary for reading files. An image may be at most
-32 MiB, a video 256 MiB, and a document or other file 64 MiB, with at most 256 MiB per call; a
+`layout` is optional and says how to arrange the items. Absent, the client chooses its automatic
+layout, as older daemons always expect. It is one of:
+
+- `{ "type": "columns", "columns": 1 | 2 }` — the items in that many columns, in order. Image
+  generation tools use one column; image reads use two.
+- `{ "type": "tree", "root": [node, …] }` — an arrangement an agent wrote for `present_files`,
+  as 1–500 typed nodes. The daemon parsed and checked it; clients never receive HTML.
+
+Each node of a tree is one of:
+
+- `{ "type": "element", "tag", "style"?, "children": [node, …] }`, where `tag` is `div`,
+  `section`, `figure`, `figcaption`, `p`, `span`, `strong`, `em`, or `code`. The first five are
+  block-level and the rest inline. No tag has default margins or padding; `strong` is bold, `em`
+  italic, and `code` monospace.
+- `{ "type": "item", "index", "alt"?, "style"? }` — the item at that zero-based `index` of
+  `items`, rendered as that item's kind would be. `alt` is at most 1,000 characters.
+- `{ "type": "text", "text" }` — 1–8,000 characters of plain text, with entities already decoded
+  and runs of whitespace collapsed to one space.
+- `{ "type": "break" }` — a line break.
+
+`style` is an object whose optional fields are CSS properties under their camelCase names, each a
+normalized CSS value as a string, such as
+`{ "display": "grid", "gridTemplateColumns": "repeat(auto-fill, minmax(200px, 1fr))", "gap": "8px" }`.
+The properties and the grammar of each are a subset of CSS:
+
+- `display`: `block`, `inline`, `inline-block`, `flex`, `inline-flex`, `grid`, `inline-grid`, or
+  `none`.
+- Flexbox: `flexDirection`, `flexWrap`, `flexFlow`, `flex`, `flexGrow`, `flexShrink` (factors
+  0–100), `flexBasis`, and `order` (−100 to 100).
+- Alignment: `justifyContent`, `alignContent`, `placeContent`, `justifyItems`, `alignItems`,
+  `placeItems`, `justifySelf`, `alignSelf`, and `placeSelf`, with every CSS keyword they take,
+  including `normal`, `start`, `end`, `flex-start`, `flex-end`, `self-start`, `self-end`, the
+  `space-*` distributions, `stretch`, and `first`/`last baseline`.
+- Gaps: `gap`, `rowGap`, and `columnGap`.
+- Grid: `gridTemplateColumns` and `gridTemplateRows` (`none`, or tracks of lengths, `fr` shares,
+  `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, and
+  `repeat(N | auto-fill | auto-fit, …)`, at most 24 tracks), `gridAutoColumns`, `gridAutoRows`,
+  `gridAutoFlow`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`,
+  and `gridRowEnd` (`auto`, a line from −24 to 24 other than 0, or `span N` up to 24, with `/`
+  between start and end).
+- Sizing: `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, and `maxHeight` (a length,
+  `auto`, `min-content`, `max-content`, `fit-content`, `fit-content(length)`, and `none` for the
+  maximums), `aspectRatio` (`auto`, `N`, `N / M`, or `auto` with a ratio), and `boxSizing`.
+- Box: `padding`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `margin`,
+  `marginTop`, `marginRight`, `marginBottom`, `marginLeft` (lengths, and `auto` for margins),
+  `borderRadius` (one to four `px` radii up to 999), and `overflow`, `overflowX`, and `overflowY`
+  (`visible`, `hidden`, or `clip`).
+- Media: `objectFit` (`fill`, `contain`, `cover`, `none`, `scale-down`) and `objectPosition` (one
+  or two of `left`, `center`, `right`, `top`, `bottom`, or lengths).
+- Text: `verticalAlign`, `textAlign` (`left`, `right`, `center`, `justify`, `start`, `end`),
+  `fontWeight` (`normal`, `bold`, `bolder`, `lighter`, or 1–1,000), `fontStyle`, `lineHeight`
+  (`normal`, a number up to 10, or a length), `fontSize`, and `tone`.
+
+A length is `0` or a non-negative number with the unit `px` (at most 4,000), `%` (at most 100),
+`em`, or `rem` (at most 100). An `fr` share is above 0 and at most 100. Two fields are not CSS:
+`fontSize` is one of the theme's type steps `small`, `normal`, `large`, or `title`, and `tone` is
+`default`, `muted`, or `accent`, a theme text tone in place of a colour. No value names a colour,
+loads a resource, uses `calc()` or `var()`, or positions anything outside the layout. Values are
+lowercase, single-spaced, and written with a space after each comma and on both sides of each
+slash. `@slopus/happy-agent-client` exports the grammar as `mediaLayoutStyleValue(key, value)`,
+which returns the normalized value or `undefined`; a client checks every value with it and drops
+any it refuses, and ignores fields it does not recognize.
+
+An item without a `width` or `height`, or with `width: auto`, shows at its natural size: an
+image's `width` and `height` divided by its `scale`. It shrinks to fit its container and never
+enlarges. `width: 100%` fills the container, enlarging if needed.
+
+The daemon guarantees that a tree nests elements at most 12 deep, holds at most 500 nodes and
+8,000 characters of text and `alt` together, and places every item exactly once. A client should
+still skip an item node whose index is out of range or repeated, and show any item a tree leaves
+out after it.
+
+Clients use their automatic layout for a `layout` whose `type` or `columns` they do not recognize.
+In every layout, including the automatic one and `columns`, an image item without explicit sizing
+is shown at most at its natural size. `layout` is additive and does not increment the protocol
+version.
+
+`present_files` is a tool every agent with a machine has, whichever model it runs. It takes
+`{ "filepaths": ["…"], "layout"? }` — one to ten paths on the agent's machine, absolute or
+relative to its working directory — and presents those files exactly as above. A path outside the
+agent's workspace follows the ordinary permission boundary for reading files. An image may be at
+most 32 MiB, a video 256 MiB, and a document or other file 64 MiB, with at most 256 MiB per call; a
 directory, an empty file, or a file over its limit fails the call.
+
+Without `layout` the presentation has no `layout`. `layout` is a fragment of HTML with inline
+`style` attributes, which the daemon parses with a standards-compliant HTML parser into the
+`tree` above. A layout never fails the call. The daemon keeps what it can use and ignores the
+rest, and the call's result tells the agent in a short sentence what it ignored:
+
+- Tags: the nine element tags above, `img`, and `br`, in any letter case. An unknown tag is
+  unwrapped and its content kept. A tag that embeds, loads, or runs something — such as
+  `script`, `style`, `link`, `iframe`, `object`, `embed`, `svg`, `math`, `video`, `audio`,
+  `canvas`, `form` and its controls, `template`, and anything in `head` — is dropped with its
+  content. Comments are dropped.
+- Attributes: `style` on any tag except `br`, and `src` and `alt` on `img`. Every other attribute
+  is dropped. `src` must be exactly one of the call's `filepaths` and names that item; an `img`
+  without `src`, with any other `src`, or naming a file already placed is dropped. With a
+  non-empty `layout`, `filepaths` must not repeat a path; a repeated path fails the call.
+- `style`: each declaration whose property and value fall in the subset above is kept in
+  normalized form; any other declaration is dropped on its own. A `style` attribute containing a
+  backslash or a quote is dropped whole, so no escape, string, or `url()` reaches a client.
+  `!important`, at-rules, `position`, `z-index`, colours and backgrounds, `content`, `cursor`,
+  `pointer-events`, animations, transitions, transforms, and `var()` are never kept.
+- Limits: elements nested more than 12 deep are unwrapped, and nodes beyond 500 or text beyond
+  8,000 characters are dropped. A `layout` over 32 KiB is ignored whole.
+- A file the layout leaves out is appended to the end of the tree, and the result says so. A
+  layout that places none of the files is ignored whole and the presentation has no `layout`.
+
+An image item may carry `scale`, a number above 1 and at most 4: the file's own pixel density
+as a multiple of a CSS pixel, so its natural size is `width / scale` by `height / scale`. The
+daemon sets it to `2` or `3` when the file's PNG `pHYs` chunk, JPEG JFIF header, or EXIF
+resolution records 144 or 216 pixels per inch, within 2%, the same on both axes. Absent means 1.
+`scale` is additive and does not increment the protocol version.
+
+`Read`, `view_image`, and `ReadMediaFile` show every image they read to the person as well. The
+call snapshots the original file, not the copy the model receives, and its completed presentation
+is `media` with one image item and `{ "type": "columns", "columns": 2 }`. A read whose snapshot
+fails, such as an image the chat cannot show, still succeeds for the model and keeps its
+`exploration` presentation. Reads of other files are unchanged.
 
 **`artifact`** — an artifact the call created, changed, or took up for editing, for a client to
 show in the chat. This presentation is outcome-derived: it appears only when the call completes

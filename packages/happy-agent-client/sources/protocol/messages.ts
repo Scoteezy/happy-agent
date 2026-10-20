@@ -20,6 +20,7 @@ import {
     type Timestamp,
 } from "./common.js";
 import { artifactDisplaySchema, artifactTitleSchema, artifactTypeSchema } from "./artifacts.js";
+import { mediaLayoutStyleSchema } from "./mediaLayoutStyle.js";
 import type { UsageBreakdown } from "./usage.js";
 import { userIdSchema } from "./users.js";
 
@@ -180,6 +181,11 @@ export const mediaImageItemSchema = Type.Object({
     height: mediaItemDimensionSchema,
     /** Standard base64 encoding of a ThumbHash placeholder. */
     thumbhash: mediaItemThumbhashSchema,
+    /**
+     * Pixels per point, from the file's density: 2 for a 144 DPI Retina screenshot. Absent means
+     * 1. An image's natural size is its pixel size divided by this.
+     */
+    scale: Type.Optional(Type.Number({ exclusiveMinimum: 1, maximum: 4 })),
 });
 
 /** A decoded picture: always measured, with a ThumbHash to show until its bytes load. */
@@ -210,15 +216,83 @@ export const mediaItemSchema = Type.Union([mediaImageItemSchema, mediaFileItemSc
 /** One item a call showed inline; its bytes are served by its index. */
 export type MediaItem = Static<typeof mediaItemSchema>;
 
+/** The tags a media layout element may have. */
+export const mediaLayoutTagSchema = Type.Union([
+    Type.Literal("div"),
+    Type.Literal("section"),
+    Type.Literal("figure"),
+    Type.Literal("figcaption"),
+    Type.Literal("p"),
+    Type.Literal("span"),
+    Type.Literal("strong"),
+    Type.Literal("em"),
+    Type.Literal("code"),
+]);
+
+/** The tags a media layout element may have. */
+export type MediaLayoutTag = Static<typeof mediaLayoutTagSchema>;
+
+/**
+ * One node of an agent-authored media layout: an element with children, a presented item placed
+ * by its index in `items`, plain text, or a line break. Never HTML. An item without a `width`
+ * shows at its natural size, shrunk to fit and never enlarged.
+ */
+export const mediaLayoutNodeSchema = Type.Recursive((node) =>
+    Type.Union([
+        Type.Object({
+            type: Type.Literal("element"),
+            tag: mediaLayoutTagSchema,
+            style: Type.Optional(mediaLayoutStyleSchema),
+            children: Type.Array(node, { maxItems: 500 }),
+        }),
+        Type.Object({
+            type: Type.Literal("item"),
+            /** Zero-based index into the presentation's `items`. */
+            index: Type.Integer({ minimum: 0, maximum: 9 }),
+            alt: Type.Optional(Type.String({ maxLength: 1000 })),
+            style: Type.Optional(mediaLayoutStyleSchema),
+        }),
+        Type.Object({
+            type: Type.Literal("text"),
+            text: Type.String({ minLength: 1, maxLength: 8000 }),
+        }),
+        Type.Object({ type: Type.Literal("break") }),
+    ]),
+);
+
+/** One node of an agent-authored media layout. */
+export type MediaLayoutNode = Static<typeof mediaLayoutNodeSchema>;
+
+/**
+ * How a media presentation arranges its items: a fixed number of columns, or a layout tree an
+ * agent wrote. Absent means the client's automatic layout, and so does a layout a client does not
+ * recognize.
+ */
+export const mediaLayoutSchema = Type.Union([
+    Type.Object({
+        type: Type.Literal("columns"),
+        columns: Type.Union([Type.Literal(1), Type.Literal(2)]),
+    }),
+    Type.Object({
+        type: Type.Literal("tree"),
+        root: Type.Array(mediaLayoutNodeSchema, { minItems: 1, maxItems: 500 }),
+    }),
+]);
+
+/** How a media presentation arranges its items. */
+export type MediaLayout = Static<typeof mediaLayoutSchema>;
+
 /**
  * Images, videos, documents, and files a completed call showed the person inline: a generated
- * image or files presented with `present_files`. Each item's bytes are
+ * image, an image the agent read, or files presented with `present_files`. Each item's bytes are
  * `GET /v0/agents/:agentId/tool-calls/:toolCallId/media/:index`.
  */
 export const mediaPresentationSchema = Type.Object({
     type: Type.Literal("media"),
     /** One to ten items, in the order presented; the position is the item's media index. */
     items: Type.Array(mediaItemSchema, { minItems: 1, maxItems: 10 }),
+    /** How to arrange the items; absent on older daemons and for the automatic layout. */
+    layout: Type.Optional(mediaLayoutSchema),
 });
 
 /** Images, videos, documents, and files a completed call showed the person inline. */
@@ -256,8 +330,8 @@ export type ArtifactPresentation = Static<typeof artifactPresentationSchema>;
 /**
  * A web page a completed call asked the chat to show inline, at a URL as the agent's own machine
  * reaches it. `display` is an artifact display preference, or `null` for the client's choice.
- * Legacy history and older daemons only: new `show_page` calls create live-URL artifacts and
- * return an `artifact` presentation with `shows: "latest"`.
+ * Legacy history and older daemons only: the daemon no longer has `show_page`, and live pages are
+ * HTML artifacts with a URL, presented as `artifact` with `shows: "latest"`.
  */
 export const pagePresentationSchema = Type.Object({
     type: Type.Literal("page"),

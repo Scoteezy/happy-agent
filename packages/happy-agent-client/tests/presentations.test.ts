@@ -198,6 +198,77 @@ describe("tool presentation schemas", () => {
         ).toBe(false);
     });
 
+    it("arranges media in columns or an agent-written tree of typed nodes", () => {
+        const image = {
+            kind: "image",
+            name: "chart.png",
+            mimeType: "image/png",
+            size: 10,
+            width: 4,
+            height: 3,
+            thumbhash: "AAAA",
+            scale: 2,
+        };
+        const media = (layout: unknown) => ({ type: "media", items: [image, image], layout });
+        expect(Value.Check(mediaPresentationSchema, { type: "media", items: [image] })).toBe(true);
+        expect(
+            Value.Check(mediaPresentationSchema, {
+                type: "media",
+                items: [{ ...image, scale: 1 }],
+            }),
+        ).toBe(false);
+        expect(Value.Check(mediaPresentationSchema, media({ type: "columns", columns: 1 }))).toBe(
+            true,
+        );
+        expect(Value.Check(mediaPresentationSchema, media({ type: "columns", columns: 3 }))).toBe(
+            false,
+        );
+
+        const tree = {
+            type: "tree",
+            root: [
+                {
+                    type: "element",
+                    tag: "figure",
+                    style: { margin: "0 auto", maxWidth: "640px" },
+                    children: [
+                        { type: "item", index: 0, alt: "Revenue", style: { objectFit: "cover" } },
+                        {
+                            type: "element",
+                            tag: "figcaption",
+                            style: { tone: "muted", fontSize: "small", textAlign: "center" },
+                            children: [{ type: "text", text: "Q3 revenue" }, { type: "break" }],
+                        },
+                    ],
+                },
+                {
+                    type: "element",
+                    tag: "div",
+                    style: {
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                        gap: "8px",
+                    },
+                    children: [{ type: "item", index: 1, style: { gridColumn: "1 / -1" } }],
+                },
+            ],
+        };
+        expect(Value.Check(mediaPresentationSchema, media(tree))).toBe(true);
+        expect(Value.Check(toolPresentationSchema, media(tree))).toBe(true);
+
+        const withRoot = (root: unknown[]) => media({ type: "tree", root });
+        expect(Value.Check(mediaPresentationSchema, withRoot([]))).toBe(false);
+        for (const node of [
+            { type: "element", tag: "a", children: [] },
+            { type: "element", tag: "div", children: [{ type: "html", html: "<b>" }] },
+            { type: "item", index: 10 },
+            { type: "text", text: "" },
+            { type: "element", tag: "div", style: { tone: 1 }, children: [] },
+        ]) {
+            expect(Value.Check(mediaPresentationSchema, withRoot([node]))).toBe(false);
+        }
+    });
+
     it("reads one media item's bytes and ranges by index", async () => {
         const requests: Request[] = [];
         const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {

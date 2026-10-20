@@ -499,9 +499,18 @@ artifact — together with an exported TypeBox schema for each variant and `tool
 for the whole set.
 
 `MediaPresentation` lists the images, videos, PDF documents, and other files a completed call
-showed inline: generated images and files presented with `present_files`. Image items always carry
-displayed `width`, `height`, and a base64 `thumbhash` to show until the bytes load; render an
-unknown item kind as a file. Read an item's bytes with
+showed inline: generated images, images the agent read, and files presented with `present_files`.
+Image items always carry displayed `width`, `height`, and a base64 `thumbhash` to show until the
+bytes load, and an optional `scale` (2 or 3 for a Retina-density file) that divides them into the
+natural CSS size; render an unknown item kind as a file. Its optional `layout` arranges the items:
+`columns` with one or two columns, or a `tree` of typed `MediaLayoutNode` elements, item
+placements, text, and breaks that an agent wrote and the daemon parsed. No HTML reaches the client.
+Each `MediaLayoutStyle` field is a CSS property under its camelCase name with a normalized value
+from a closed subset of CSS; check every value with `mediaLayoutStyleValue(key, value)` and drop
+any it refuses. Use the automatic layout when `layout` is absent or unrecognized, ignore unknown
+style fields, skip out-of-range or repeated item nodes, and show items a tree leaves out after it.
+An image without explicit sizing shows at its natural size, shrunk to fit and never enlarged, in
+every layout. Read an item's bytes with
 `getToolCallMedia(agentId, toolCallId, index)`, ranges and `ifNoneMatch` included, or hand
 `toolCallMediaUrl(agentId, toolCallId, index)` to an image, video, or document element through a
 transport that adds the bearer token. The URL's content never changes. `ArtifactPresentation`
