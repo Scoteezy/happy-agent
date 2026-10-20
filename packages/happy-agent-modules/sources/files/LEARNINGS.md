@@ -44,6 +44,16 @@ change. On a loaded machine that took longer than the file search waited, so the
 missing. The read now marks the index stale during a scan, and any stale index rescans on the
 next search, whether or not its tree is watched.
 
+## FFF statuses whatever repository encloses the folder
+
+FFF finds a folder's repository with libgit2, which ignores `GIT_CEILING_DIRECTORIES`. A folder
+without its own `.git` inside a checkout is indexed with that checkout's ignore rules, and every
+scan ends with a `git status` of the whole checkout. FFF clears its scanning flag when the walk
+lands but refuses a new walk until that status finishes, so a rescan asked for in the meantime
+waits behind it while `isScanning()` reports false. Test workspaces under a `TMPDIR` inside a
+large checkout missed files for seconds this way. They are now repositories of their own, as real
+workspaces are.
+
 ## File trees must not wait for autocomplete indexing
 
 Using FFF's ignore set to filter tree branches made valid physical folders disappear and forced a

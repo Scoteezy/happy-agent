@@ -10,7 +10,7 @@ import { ProjectFilesModule, type ProjectFileRoot } from "../../sources/files/in
 import type { ProjectsModule } from "../../sources/projects/index.js";
 import { RunnersModule } from "../../sources/runners/index.js";
 import type { WorkspacesModule } from "../../sources/workspaces/index.js";
-import { gitRunner } from "../git/helpers.js";
+import { git, gitRunner } from "../git/helpers.js";
 import { temporaryTestConfig } from "../support/configModule.js";
 
 const directories = new Set<string>();
@@ -72,6 +72,7 @@ describe("ProjectFilesModule index", () => {
         await mkdir(join(root, "src"), { recursive: true });
         await mkdir(join(root, "node_modules", "dependency"), { recursive: true });
         await mkdir(join(root, "empty"));
+        await writeFile(join(root, ".gitignore"), "node_modules/\n");
         await writeFile(join(root, "src", "main.ts"), "export {};");
         await writeFile(
             join(root, "node_modules", "dependency", "index.js"),
@@ -269,5 +270,9 @@ async function fileRoot(root: string): Promise<ProjectFileRoot> {
 async function workspace(): Promise<string> {
     const directory = await mkdtemp(join(tmpdir(), "happy-workspace-file-search-"));
     directories.add(directory);
+    // Its own repository, as a workspace is. FFF finds a repository with libgit2, which ignores
+    // GIT_CEILING_DIRECTORIES, so a bare folder inside a checkout would be indexed and statused as
+    // part of that checkout, and every rescan would wait behind the checkout's whole git status.
+    await git(directory, ["init", "--quiet", "--initial-branch=main"]);
     return directory;
 }
