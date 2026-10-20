@@ -24,6 +24,7 @@ export const SPACE_ICON_SLUGS = [
     "testing",
     "build",
     "ci-fix",
+    "ci-watcher",
     "config",
     "dependencies",
     "dependency-upgrade",
