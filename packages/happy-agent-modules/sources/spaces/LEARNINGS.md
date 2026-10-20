@@ -97,3 +97,9 @@ was running. The prompt already said working rows stay shown; the daemon now enf
 or hide of a row whose work is running, or was active in the last two hours, is answered with
 "…so it stays shown. Nothing was queued.", and a queued one is dropped at apply time if the work
 came back to life meanwhile. Untouched new work has no activity, so it may still be hidden.
+
+The apply-time guard checks the composed batch, including section removal. Removing a section
+evacuates its protected shown rows to the unsectioned shown list, while quiet rows may fold into
+Older; intermediate changes cannot bypass the guard. Existing manual visibility is preserved.
+Evacuated shown rows receive fresh destination keys after Happy, preserving section and row
+order; carrying an old section's key could otherwise place protected work above Happy.

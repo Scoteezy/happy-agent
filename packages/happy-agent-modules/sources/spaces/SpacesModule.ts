@@ -890,15 +890,12 @@ export class SpacesModule implements AgentModule {
             }
             const spaces = await querySpaces(txCtx, ownerUserId);
             const sections = await querySections(txCtx, ownerUserId);
-            // Work that came back to life since the change was queued is not tucked away.
-            const tuckable: SpacePendingChange[] = [];
-            for (const change of pending) {
-                const space =
-                    change.type === "visibility" && change.visibility !== "shown"
-                        ? spaces.find((row) => row.id === change.spaceId)
-                        : undefined;
-                if (space === undefined || (await this.#recentWork(txCtx, space)) === undefined) {
-                    tuckable.push(change);
+            // Protect the final composed outcome, including indirect folds from section removal
+            // and work that came back to life after its change was queued.
+            const protectedSpaceIds = new Set<string>();
+            for (const space of spaces) {
+                if ((await this.#recentWork(txCtx, space)) !== undefined) {
+                    protectedSpaceIds.add(space.id);
                 }
             }
             const titles = new Map<string, string>();
@@ -910,7 +907,15 @@ export class SpacesModule implements AgentModule {
                 }
             }
             const now = Date.now();
-            const outcome = applySpaceChanges(ownerUserId, spaces, sections, tuckable, titles, now);
+            const outcome = applySpaceChanges(
+                ownerUserId,
+                spaces,
+                sections,
+                pending,
+                titles,
+                now,
+                protectedSpaceIds,
+            );
             for (const section of outcome.createdSections) await insertSection(txCtx, section);
             for (const { section, previousVersion } of outcome.updatedSections) {
                 await updateSection(txCtx, section, previousVersion);

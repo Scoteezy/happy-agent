@@ -40,6 +40,130 @@ function tuckEverythingAway(rows: readonly string[]) {
 }
 
 describe("a tidy", () => {
+    it("evacuates running and recently active rows from a removed section while keeping them shown", async () => {
+        let phase: "idle" | "place" | "remove" = "idle";
+        let completed = "idle";
+        let sectionId = "";
+        const ids: string[] = [];
+        const gym = await createAgentGym({
+            timeoutMs: 30_000,
+            inference(request) {
+                const last = request.messages.at(-1);
+                if (!request.instructions.includes("You are Prioritizing")) {
+                    return {
+                        delayMs: JSON.stringify(last).includes("Keep running") ? 60_000 : 0,
+                        content: [{ type: "text", text: "Done." }],
+                    };
+                }
+                if (
+                    last?.role === "user" &&
+                    JSON.stringify(last).includes("Tidy the sidebar now.")
+                ) {
+                    if (phase === "place")
+                        return {
+                            content: [
+                                {
+                                    type: "tool_call",
+                                    name: "update_section",
+                                    arguments: { name: "Work" },
+                                    callId: "make_section",
+                                },
+                            ],
+                        };
+                    if (phase === "remove")
+                        return {
+                            content: [
+                                {
+                                    type: "tool_call",
+                                    name: "remove_section",
+                                    arguments: { sectionId },
+                                    callId: "remove_section",
+                                },
+                            ],
+                        };
+                }
+                if (phase === "place" && last?.role === "tool") {
+                    const created = /Section ([a-z0-9]+) queued for creation/.exec(
+                        JSON.stringify(last),
+                    )?.[1];
+                    if (created !== undefined) {
+                        sectionId = created;
+                        return {
+                            content: ids.map((spaceId, index) => ({
+                                type: "tool_call",
+                                name: "place_space",
+                                arguments: { spaceId, sectionId },
+                                callId: `place_${index}`,
+                            })),
+                        };
+                    }
+                }
+                if (last?.role === "tool") completed = phase;
+                return { content: [{ type: "text", text: "Sidebar updated." }] };
+            },
+        });
+        running.add(gym);
+        const created = [];
+        for (let index = 0; index < 3; index++) {
+            const cell = await gym.http.ok<{ space: Space; agent: { id: string } }>(
+                "POST",
+                "/v0/spaces/stem-cells",
+                {},
+            );
+            created.push(cell);
+            ids.push(cell.space.id);
+        }
+        await gym.send("Recently active work.", { sessionId: created[0]!.agent.id });
+        await gym.http.post("/v0/spaces/attention", { state: "interacting" });
+        phase = "place";
+        await gym.http.post("/v0/spaces/tidy", {});
+        await gym.waitUntil(
+            () => (completed === "place" ? true : undefined),
+            "the queued section placements",
+        );
+        await gym.http.post("/v0/spaces/attention", { state: "calm" });
+        await gym.waitUntil(async () => {
+            const snapshot = await gym.http.ok<{ sections: { id: string }[] }>("GET", "/v0/spaces");
+            return snapshot.sections.some((section) => section.id === sectionId) ? true : undefined;
+        }, "the placed section");
+        await gym.send("Keep running while the sidebar is tidied.", {
+            sessionId: created[1]!.agent.id,
+            wait: false,
+        });
+        await gym.waitUntil(async () => {
+            const snapshot = await gym.http.ok<{ spaces: (Space & { working: boolean })[] }>(
+                "GET",
+                "/v0/spaces",
+            );
+            return snapshot.spaces.find((row) => row.id === ids[1])?.working ? true : undefined;
+        }, "the running task");
+        phase = "remove";
+        await gym.http.post("/v0/spaces/tidy", {});
+        await gym.waitUntil(
+            () => (completed === "remove" ? true : undefined),
+            "the queued section removal",
+        );
+        await gym.http.post("/v0/spaces/attention", { state: "calm" });
+        const final = await gym.waitUntil(async () => {
+            const snapshot = await gym.http.ok<{
+                spaces: (Space & { sectionId: string | null })[];
+                sections: { id: string }[];
+            }>("GET", "/v0/spaces");
+            return snapshot.sections.length === 0 ? snapshot : undefined;
+        }, "the removed section");
+        await gym.abort(created[1]!.agent.id);
+        expect(ids.map((id) => final.spaces.find((row) => row.id === id)?.visibility)).toEqual([
+            "shown",
+            "shown",
+            "folded",
+        ]);
+        expect(
+            final.spaces
+                .filter((row) => ids.includes(row.id))
+                .every((row) => row.sectionId === null),
+        ).toBe(true);
+    }, 120_000);
+
     it("never hides or folds work that is running or was active in the last two hours", async () => {
         const rows: string[] = [];
         const gym = await createAgentGym({

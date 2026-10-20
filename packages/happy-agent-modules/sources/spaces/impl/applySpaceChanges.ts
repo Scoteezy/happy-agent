@@ -37,6 +37,7 @@ export function applySpaceChanges(
     changes: readonly SpacePendingChange[],
     titles: ReadonlyMap<string, string>,
     now: number,
+    protectedSpaceIds: ReadonlySet<string> = new Set(),
 ): SpaceChangeOutcome {
     const rows = new Map(spaces.map((space) => [space.id, structuredClone(space)]));
     const shelves = new Map(sections.map((section) => [section.id, structuredClone(section)]));
@@ -113,12 +114,53 @@ export function applySpaceChanges(
         );
         if (!used) removed.add(sectionId);
     }
-    for (const sectionId of removed) {
-        for (const row of rows.values()) {
-            if (row.sectionId !== sectionId) continue;
+    const evacuated: SpaceRecord[] = [];
+    const removedSections = [...shelves.values()]
+        .filter((section) => removed.has(section.id))
+        .sort((left, right) =>
+            left.orderKey < right.orderKey
+                ? -1
+                : left.orderKey > right.orderKey
+                  ? 1
+                  : left.id.localeCompare(right.id),
+        );
+    for (const section of removedSections) {
+        for (const row of [...rows.values()]
+            .filter((row) => row.sectionId === section.id)
+            .sort(compareRows)) {
+            evacuated.push(row);
             delete row.sectionId;
             if (row.visibility === "shown") row.visibility = "folded";
         }
+    }
+
+    // Check the composed result: section removal can fold work indirectly, and an earlier
+    // visibility change may be superseded by a later placement. Preserve the person's existing
+    // visibility for protected work rather than undoing a manual fold on an unrelated batch.
+    for (const original of spaces) {
+        const next = rows.get(original.id);
+        if (
+            next !== undefined &&
+            next.visibility !== "shown" &&
+            protectedSpaceIds.has(original.id)
+        ) {
+            next.visibility = original.visibility;
+        }
+    }
+
+    // Order keys belong to one section. Re-key shown evacuees in the destination, after Happy,
+    // preserving the removed sections' display order and each section's row order.
+    const evacuatedIds = new Set(evacuated.map((row) => row.id));
+    const destination = [...rows.values()].filter(
+        (row) =>
+            row.sectionId === undefined && row.visibility === "shown" && !evacuatedIds.has(row.id),
+    );
+    let afterId = destination.find((row) => row.role === "happy")?.id ?? null;
+    for (const row of evacuated) {
+        if (row.visibility !== "shown") continue;
+        row.orderKey = rowKeyAfter(destination, afterId);
+        destination.push(row);
+        afterId = row.id;
     }
 
     const finalSections = [...shelves.values()].filter((section) => !removed.has(section.id));

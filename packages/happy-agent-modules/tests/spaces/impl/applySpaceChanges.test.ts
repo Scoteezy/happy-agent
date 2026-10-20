@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SpaceRecord, SpaceSectionRecord } from "../../../sources/spaces/index.js";
-import { applySpaceChanges } from "../../../sources/spaces/impl/applySpaceChanges.js";
+import { applySpaceChanges, compareRows } from "../../../sources/spaces/impl/applySpaceChanges.js";
 
 const OWNER = "standalone";
 const NOW = 1_000;
@@ -43,6 +43,66 @@ const titles = new Map([
 ]);
 
 describe("applySpaceChanges", () => {
+    it("gives evacuated protected rows fresh keys after Happy while preserving their section order", () => {
+        const spaces = [
+            row("happy", "1", { role: "happy" }),
+            row("existing", "2"),
+            row("rowb", "1", { sectionId: "secold" }),
+            row("quiet", "2", { sectionId: "secold" }),
+            row("rowa", "05", { sectionId: "secold" }),
+        ];
+        const outcome = applySpaceChanges(
+            OWNER,
+            spaces,
+            [section("secold", "Work", "1")],
+            [{ type: "remove_section", sectionId: "secold" }],
+            titles,
+            NOW,
+            new Set(["rowa", "rowb"]),
+        );
+        const updated = new Map(outcome.spaces.map(({ space }) => [space.id, space]));
+        const shown = spaces
+            .map((space) => updated.get(space.id) ?? space)
+            .filter((space) => space.visibility === "shown" && space.sectionId === undefined)
+            .sort(compareRows);
+        expect(shown.map((space) => space.id)).toEqual(["happy", "rowa", "rowb", "existing"]);
+        expect(updated.get("rowa")?.orderKey).not.toBe("05");
+        expect(updated.get("rowb")?.orderKey).not.toBe("1");
+        expect(updated.get("quiet")?.visibility).toBe("folded");
+        expect(outcome.changes.find((change) => change.spaceId === "rowa")?.to.index).toBe(0);
+        expect(outcome.changes.find((change) => change.spaceId === "rowb")?.to.index).toBe(1);
+    });
+
+    it("keeps protected work shown after section removal and checks the final batch outcome", () => {
+        const outcome = applySpaceChanges(
+            OWNER,
+            [row("rowa", "1", { sectionId: "secold" }), row("rowb", "2", { sectionId: "secold" })],
+            [section("secold", "Work", "1")],
+            [
+                { type: "visibility", spaceId: "rowa", visibility: "hidden" },
+                { type: "place", spaceId: "rowa", sectionId: "secold" },
+                { type: "remove_section", sectionId: "secold" },
+            ],
+            titles,
+            NOW,
+            new Set(["rowa"]),
+        );
+        expect(outcome.removedSectionIds).toEqual(["secold"]);
+        expect(
+            outcome.spaces.map(({ space }) => ({
+                id: space.id,
+                visibility: space.visibility,
+                sectionId: space.sectionId,
+            })),
+        ).toEqual([
+            { id: "rowa", visibility: "shown", sectionId: undefined },
+            { id: "rowb", visibility: "folded", sectionId: undefined },
+        ]);
+        expect(outcome.changes.find((change) => change.spaceId === "rowa")?.to.visibility).toBe(
+            "shown",
+        );
+    });
+
     it("places a pending row at the top of a new section and records where it came from", () => {
         const outcome = applySpaceChanges(
             OWNER,
