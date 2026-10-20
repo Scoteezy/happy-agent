@@ -31,7 +31,11 @@ final class PlanRowView: NSView {
         let layout = PlanColumns(columns: columns, width: bounds.width)
         let limiting = entry.limiting
         for (index, kind) in columns.enumerated() {
-            guard let window = entry.windows.first(where: { $0.kind == kind }) else { continue }
+            guard let window = entry.windows.first(where: { $0.kind == kind }) else {
+                // An account still waiting for its first reading keeps its place with empty rings.
+                if entry.isPlaceholder { drawEmptyGauge(in: layout.gauge(index)) }
+                continue
+            }
             let level = GaugeLevel(window: window, blocked: entry.isBlocking(window))
             drawGauge(window: window, level: level, in: layout.gauge(index))
         }
@@ -83,6 +87,31 @@ final class PlanRowView: NSView {
 
     /// The share left, right-aligned against its ring, so rings line up down the column and
     /// every number sits right beside its own.
+    private func drawEmptyGauge(in cell: NSRect) {
+        let diameter = MenuMetrics.gaugeDiameter
+        let track = NSBezierPath(ovalIn: NSRect(
+            x: cell.maxX - diameter,
+            y: cell.midY - diameter / 2,
+            width: diameter,
+            height: diameter
+        ).insetBy(dx: MenuMetrics.gaugeLine / 2, dy: MenuMetrics.gaugeLine / 2))
+        track.lineWidth = MenuMetrics.gaugeLine
+        NSColor.quaternaryLabelColor.setStroke()
+        track.stroke()
+        drawLine(
+            "–",
+            font: MenuMetrics.detailFont,
+            color: .tertiaryLabelColor,
+            in: NSRect(
+                x: cell.minX,
+                y: 0,
+                width: cell.width - diameter - MenuMetrics.gaugeTextGap,
+                height: bounds.height
+            ),
+            alignment: .right
+        )
+    }
+
     private func drawGauge(window: PlanWindow, level: GaugeLevel, in cell: NSRect) {
         let diameter = MenuMetrics.gaugeDiameter
         let ring = NSRect(
@@ -132,6 +161,7 @@ final class PlanRowView: NSView {
     /// Every window the vendor reported, Fable included, with its exact local reset time; a
     /// blocked account first says until when.
     static func tooltip(_ entry: PlanEntry) -> String {
+        if entry.isPlaceholder { return "Waiting for the first usage reading" }
         var lines = entry.allWindows.map { window -> String in
             let left = "\(window.kind.label): \(Int(window.remainingPercent.rounded()))% left"
             guard let reset = window.resetsAt else { return left }

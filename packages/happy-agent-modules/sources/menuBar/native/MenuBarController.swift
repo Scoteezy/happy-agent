@@ -17,7 +17,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let streamQueue = DispatchQueue(label: "com.slopus.happy.menubar.stream")
 
     private var snapshot = DaemonSnapshot()
-    private var workingSince: [String: Date] = [:]
+    private var planBook = PlanBook()
+    /// When each agent's running turn began, from run events or, for a turn already running when
+    /// the menu bar started, the agent's history. Only ever touched on the main thread.
+    private var turnStarts: [String: Date] = [:]
+    /// Agents whose history has been asked for and had no running turn, so it is not asked again
+    /// until they stop working.
+    private var turnLookups: Set<String> = []
     private var pendingRefresh: DispatchWorkItem?
     private var animation: Timer?
     private var iconAnimation = StatusIconAnimation()
@@ -69,11 +75,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// Follows the event stream for as long as it lasts, then waits and opens another one.
     private func follow() {
         while true {
-            client.streamEventTypes { [weak self] type in
-                guard let self, changesTheMenu(type) else { return }
-                self.scheduleRefresh()
+            client.streamEvents { [weak self] type, data in
+                guard let self else { return }
+                if let change = DaemonSnapshotReader.turnChange(type: type, data: data) {
+                    DispatchQueue.main.async { [weak self] in self?.apply(turn: change) }
+                }
+                if changesTheMenu(type) { self.scheduleRefresh() }
             }
-            DispatchQueue.main.async { [weak self] in self?.markDisconnected() }
+            // Run events may have been missed while the stream was down, so every turn start is
+            // read again from history once it is back.
+            DispatchQueue.main.async { [weak self] in
+                self?.turnStarts = [:]
+                self?.turnLookups = []
+                self?.markDisconnected()
+            }
             Thread.sleep(forTimeInterval: MenuBarController.reconnectDelay)
             refreshAgents()
         }
@@ -82,6 +97,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func changesTheMenu(_ type: String) -> Bool {
         if type == "provider.usage.updated" || type == "config.updated" { refreshPlans() }
         return type.hasPrefix("agent.") || type.hasPrefix("task.") || type.hasPrefix("bot.")
+            || type.hasPrefix("run.")
     }
 
     /// Coalesces the bursts of events a single turn produces into one read.
@@ -102,7 +118,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         fetchQueue.async { [weak self] in
             guard let self else { return }
             let bots = self.client.get("/v0/bots")
-            let tasks = self.client.get("/v0/tasks")
+            let tasks = self.client.get("/v0/tasks?scope=joined")
             guard let entries = DaemonSnapshotReader.work(botsBody: bots, tasksBody: tasks) else {
                 DispatchQueue.main.async { [weak self] in self?.markDisconnected() }
                 return
@@ -111,17 +127,40 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// Reads, from history, when the running turns the stream did not announce began: turns
+    /// already running when the menu bar started or reconnected. Each agent is asked once.
+    private func lookUpTurns(_ agentIds: [String]) {
+        turnLookups.formUnion(agentIds)
+        fetchQueue.async { [weak self] in
+            guard let self else { return }
+            for agentId in agentIds {
+                let history = self.client.get(
+                    "/v0/agents/\(agentId)/messages?limit=1&omitToolData=true"
+                )
+                guard let start = DaemonSnapshotReader.runningTurnStart(messagesBody: history)
+                else { continue }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.turnStarts[agentId] == nil else { return }
+                    self.turnStarts[agentId] = start
+                    if self.isMenuOpen { self.rebuildMenu() }
+                }
+            }
+        }
+    }
+
     private func refreshPlans(refreshAccounts: Bool = false) {
         fetchQueue.async { [weak self] in
             guard let self else { return }
             if refreshAccounts { self.client.refreshUsage() }
-            guard let read = DaemonSnapshotReader.plans(usageBody: self.client.get("/v0/usage"), configBody: self.client.get("/v0/config"))
-            else {
+            guard let read = DaemonSnapshotReader.plans(
+                usageBody: self.client.get("/v0/usage"),
+                configBody: self.client.get("/v0/config")
+            ) else {
                 return
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.snapshot.vendors = read.0
+                self.snapshot.vendors = self.planBook.update(read.0)
                 self.snapshot.day = read.1
                 if self.isMenuOpen { self.rebuildMenu() }
             }
@@ -133,20 +172,32 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func apply(work: [WorkEntry]) {
         snapshot.connected = true
         snapshot.work = work
-        let now = Date()
-        var running: [String: Date] = [:]
-        for entry in work where entry.isWorking {
-            running[entry.id] = workingSince[entry.id] ?? now
+        let working = Set(work.flatMap(\.workingAgentIds))
+        // An agent that stopped working forgets its turn; one that starts again gets a new one.
+        turnStarts = turnStarts.filter { working.contains($0.key) }
+        turnLookups = turnLookups.intersection(working)
+        let unknown = work.flatMap(\.workingAgentIds).filter {
+            turnStarts[$0] == nil && !turnLookups.contains($0)
         }
-        workingSince = running
+        if !unknown.isEmpty { lookUpTurns(unknown) }
         updateIcon()
         if isMenuOpen { rebuildMenu() }
+    }
+
+    private func apply(turn: (agentId: String, startedAt: Date?)) {
+        turnStarts[turn.agentId] = turn.startedAt
+        if isMenuOpen { rebuildMenu() }
+    }
+
+    /// When the turn a task or bot is busy with began: its own agent's, or else the first working
+    /// subtask whose start is known.
+    private func turnStart(_ entry: WorkEntry) -> Date? {
+        entry.workingAgentIds.lazy.compactMap { self.turnStarts[$0] }.first
     }
 
     private func markDisconnected() {
         snapshot.connected = false
         snapshot.work = []
-        workingSince = [:]
         updateIcon()
         if isMenuOpen { rebuildMenu() }
     }
@@ -202,8 +253,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func rebuildMenu() {
         let headline = MenuContent.headline(snapshot)
         headlineItem.view = headline
-        let rows = MenuContent.rows(snapshot: snapshot) { [weak self] id in
-            self?.workingSince[id]
+        let rows = MenuContent.rows(snapshot: snapshot) { [weak self] entry in
+            self?.turnStart(entry)
         }
         let resized = body.show(rows, maxHeight: bodyMaxHeight(below: headline))
         separatorItem.isHidden = body.isEmpty

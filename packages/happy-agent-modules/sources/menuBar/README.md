@@ -7,29 +7,40 @@ flashing while something is, static with the middle cell dimmed when Reduce Moti
 greyed out while the daemon is not answering. Clicking it shows a compact, read-only menu:
 
 ```text
-3 working                    1.3M tokens in 24h
-──────────────────────────────────────────────
-Fix the login redirect loop            14m 3s
-Chief of Staff                          1m 44s
-Release 0.42 preview                       5s
+7 working                    1.3M tokens in 24h
 ──────────────────────────────────────────────
 CLAUDE                  Session   Week  Resets
 Current CLI  Max 20x     64% ◔    82% ◕  3:30 AM
 Work  Max 5x             19% ◔    56% ◑  Thu
 CODEX
 Current CLI  Pro         88% ◕     9% ◔  Wed
+──────────────────────────────────────────────
+Release 0.42 preview                       5s
+Chief of Staff                          1m 44s
+Fix the login redirect loop            14m 3s
+Draft the launch post                  22m 9s
+Investigate the flaky gym test          1h 5m
++2 more
 ```
 
 - The headline counts the working tasks and bots, and carries the last 24 hours of tokens as a quiet
   aside.
-- Only tasks and bots are listed, one line each, by name, with how long they have been working.
-  A task or bot counts as working while its own agent, a subagent, or any subtask under it is
-  working. Idle ones are not listed.
-- Plan usage is grouped by vendor, one line per account: the configured account name, the plan
-  type, a small ring for the session and the week showing what is left, and when the window
-  holding the account back resets, in the Mac's local time. Rings turn yellow under 25% left and
-  red under 10% or when the account is exhausted. Claude's Fable allowance has no ring; it is in
-  the row's tooltip, and when it blocks the account the week ring and the reset turn red.
+- Plan usage comes first, then the working sessions, so the plan rows sit at the same height every
+  time the menu opens.
+- Only top-level sessions are listed: the bots and the tasks the desktop sidebar shows at its top
+  level (`/v0/tasks?scope=joined`, without the tasks an agent inside another task opened). A task
+  or bot counts as working while its own agent, a subagent, or any subtask under it is working.
+  Idle ones are not listed. The five whose turns started most recently are shown, then a quiet
+  "+N more".
+- The time beside a session is the desktop's running-turn clock: since the running run's
+  `startedAt`, from `run.started` and `run.boundary` events, or from the agent's latest history
+  page for a turn that was already running when the menu bar started.
+- Plan usage is grouped by vendor, one line per configured account that has a usage source: the
+  account name, the plan type, a small ring for the session and the week showing what is left,
+  and when the window holding the account back resets, in the Mac's local time. Rings turn
+  yellow under 25% left and red under 10% or when the account is exhausted. Claude's Fable
+  allowance has no ring; it is in the row's tooltip, and when it blocks the account the week
+  ring and the reset turn red.
 - When the lists would take more than 70% of the screen, they scroll below the headline instead
   of the menu growing.
 
@@ -37,7 +48,8 @@ Current CLI  Pro         88% ◕     9% ◔  Wed
 MenuBarModule ──spawns──> happy-menu-bar (Swift, AppKit)
       │                          │
       └── ConfigModule           └── GET /v0/bots, /v0/tasks, /v0/usage, /v0/config
-          socketPath, tokenPath      GET /v0/events/stream
+          socketPath, tokenPath      GET /v0/agents/:id/messages (a running turn's start)
+                                     GET /v0/events/stream
 ```
 
 The app is a reader. It speaks the ordinary Happy Agent HTTP API over the same private Unix socket
@@ -45,13 +57,16 @@ every other client uses, with the same bearer token, so it can show nothing the 
 already see and can change nothing at all.
 
 The event stream is used only as a signal that something changed; the snapshots the menu draws are
-always re-read. `agent.*`, `task.*`, and `bot.*` events re-read the tasks and bots;
+always re-read. `agent.*`, `task.*`, `bot.*`, and `run.*` events re-read the tasks and bots;
 `provider.usage.updated` and `config.updated` re-read plan usage. An unfamiliar or missed event
 therefore cannot leave stale state on screen.
 
 Accounts are listed in the order the desktop model picker uses: configuration order, with each
 vendor placed where its first account appears, so Claude comes first and the built-in Current CLI
-account leads its vendor. Hidden and disabled accounts are left out.
+account leads its vendor. Hidden and disabled accounts are left out. A row never moves or disappears while its account is
+waiting for a reading: before the first one it is a placeholder with empty rings, while a refresh
+is under way it keeps its last reading, and a window the daemon has dropped after its reset keeps
+its gauge at full.
 
 ## Only in a release
 
@@ -67,6 +82,10 @@ The module starts the app, restarts it if it falls over, and stops it during shu
 outlives the daemon that started it: it watches both its own standard input, which the daemon holds
 open and nothing writes to, and the parent process itself. A daemon killed outright never gets to
 stop its children, so either signal is enough to take the menu bar down with it.
+
+Before it starts the app, the module stops any menu bar app an earlier daemon left behind: one that
+launchd adopted and that runs from a `menu-bar-*` directory beside this one. Older releases watched
+only standard input and could outlive their daemon. An app whose daemon is alive is never touched.
 
 An exit code of zero means the app found no menu bar to join — a daemon running over SSH, for
 instance — and the module stops trying rather than reporting a failure.

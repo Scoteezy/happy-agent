@@ -29,9 +29,13 @@ enum MenuMetrics {
     static let menuPadding: CGFloat = 12
 }
 
-/// Builds the menu from a snapshot: a headline, then what is working, then what the plans have
-/// left. Every row is a read-only line drawn to the native menu's measurements.
+/// Builds the menu from a snapshot: a headline, then what the plans have left, then the few tasks
+/// and bots working most recently. Every row is a read-only line drawn to the native menu's
+/// measurements.
 enum MenuContent {
+    /// More than this many working tasks and bots collapse into a "+N more" line.
+    static let sessionLimit = 5
+
     /// What is working, with the last day's tokens as a quiet aside on the same line.
     static func headline(_ snapshot: DaemonSnapshot) -> MenuLineView {
         let tokens = snapshot.connected && !snapshot.day.isEmpty
@@ -41,24 +45,16 @@ enum MenuContent {
         )
     }
 
-    /// The working tasks and bots, longest-running first, then each vendor's accounts.
+    /// Each vendor's accounts, then the working tasks and bots whose current turn began most
+    /// recently. `turnStart` gives when that turn began — the same clock the desktop shows — or
+    /// `nil` while it is not yet known; those come last and show no time.
     static func rows(
         snapshot: DaemonSnapshot,
-        workingSince: (String) -> Date?
+        turnStart: (WorkEntry) -> Date?
     ) -> [NSView] {
         var rows: [NSView] = []
-        let now = Date()
-        let working = snapshot.working
-            .map { (entry: $0, since: workingSince($0.id) ?? now) }
-            .enumerated()
-            .sorted { ($0.element.since, $0.offset) < ($1.element.since, $1.offset) }
-            .map(\.element)
-        for (entry, since) in working {
-            rows.append(MenuLineView(text: entry.name, detail: duration(since: since, now: now)))
-        }
         var previousColumns: [PlanWindowKind]?
         for vendor in snapshot.vendors {
-            if previousColumns == nil && !rows.isEmpty { rows.append(MenuSeparatorView()) }
             rows.append(
                 PlanHeaderView(vendor: vendor, labelsColumns: vendor.columns != previousColumns)
             )
@@ -66,6 +62,25 @@ enum MenuContent {
             for plan in vendor.plans {
                 rows.append(PlanRowView(entry: plan, columns: vendor.columns))
             }
+        }
+        let now = Date()
+        let working = snapshot.working
+            .map { (entry: $0, since: turnStart($0)) }
+            .enumerated()
+            .sorted { left, right in
+                let a = left.element.since ?? .distantPast
+                let b = right.element.since ?? .distantPast
+                return a == b ? left.offset < right.offset : a > b
+            }
+            .map(\.element)
+        if !working.isEmpty && !rows.isEmpty { rows.append(MenuSeparatorView()) }
+        for (entry, since) in working.prefix(sessionLimit) {
+            let elapsed = since.flatMap { duration(since: $0, now: now) }
+            rows.append(MenuLineView(text: entry.name, detail: elapsed))
+        }
+        if working.count > sessionLimit {
+            let more = "+\(working.count - sessionLimit) more"
+            rows.append(MenuLineView(text: more, detail: nil, quiet: true))
         }
         return rows
     }
@@ -82,10 +97,9 @@ enum MenuContent {
         return "\(count)"
     }
 
-    /// Elapsed working time, once it has been running long enough to be worth reading.
+    /// Elapsed turn time, written exactly as the desktop writes its running-turn clock.
     private static func duration(since: Date, now: Date) -> String? {
-        let seconds = Int(now.timeIntervalSince(since))
-        guard seconds >= 2 else { return nil }
+        let seconds = max(0, Int(now.timeIntervalSince(since)))
         if seconds < 60 { return "\(seconds)s" }
         let minutes = seconds / 60
         if minutes < 60 { return "\(minutes)m \(seconds % 60)s" }
@@ -148,10 +162,13 @@ final class MenuBody {
 final class MenuLineView: NSView {
     private let text: String
     private let detail: String?
+    private let quiet: Bool
 
-    init(text: String, detail: String?) {
+    /// A `quiet` line is secondary text, for an aside such as how many more rows there are.
+    init(text: String, detail: String?, quiet: Bool = false) {
         self.text = text
         self.detail = detail
+        self.quiet = quiet
         super.init(
             frame: NSRect(x: 0, y: 0, width: MenuMetrics.width, height: MenuMetrics.rowHeight)
         )
@@ -182,7 +199,7 @@ final class MenuLineView: NSView {
         drawLine(
             text,
             font: MenuMetrics.font,
-            color: .labelColor,
+            color: quiet ? .secondaryLabelColor : .labelColor,
             in: NSRect(
                 x: MenuMetrics.inset,
                 y: 0,

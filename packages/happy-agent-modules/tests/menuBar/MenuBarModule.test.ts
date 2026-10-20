@@ -14,6 +14,10 @@ vi.mock("../../sources/menuBar/impl/resolveMenuBarApp.js", () => ({
     resolveMenuBarApp: mocks.resolveMenuBarApp,
 }));
 
+vi.mock("../../sources/menuBar/impl/reapOrphanedMenuBarApps.js", () => ({
+    reapOrphanedMenuBarApps: async () => [],
+}));
+
 vi.mock("../../sources/menuBar/impl/MenuBarApp.js", () => ({
     MenuBarApp: class {
         constructor(executable: string, args: string[]) {

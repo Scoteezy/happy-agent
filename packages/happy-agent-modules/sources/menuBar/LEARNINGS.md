@@ -52,13 +52,27 @@ their own view below the headline, because NSMenu only scrolls at the screen edg
 replaced in place while the menu is open, so the once-a-second elapsed-time tick keeps the scroll
 position.
 
-## What the menu shows: tasks and bots
+## What the menu shows: plans, then a few top-level sessions
 
-Tasks and bots are the core primitives, so they are the only things listed, by task or bot name,
-with no grouping by project. Subtasks and subagents are never rows of their own; a task or bot
-counts as working while its own agent, a running subagent, or any subtask under it is working.
-The elapsed time sits right-aligned on the same line; the granular "Responding"/"Thinking" text is
-gone. Idle tasks and bots are not listed at all, and the headline reads "3 working" or "All idle".
+The order is headline, plan usage, sessions. With sessions on top, every turn that started or
+ended moved the plan rows, so plans come first and stay put.
+
+Tasks and bots are the core primitives, so they are the only things listed, by name, with no
+grouping by project. The menu once listed every task in the installation, including the ones an
+agent opened from inside another task, and the person found it far too much. It now lists what
+the desktop sidebar shows at its top level: bots, and joined tasks (`/v0/tasks?scope=joined`)
+except those whose `creatorAgentId` belongs to another task's tree. Tasks a bot opened stay.
+Subtasks and subagents are never rows of their own; a task or bot counts as working while its own
+agent, a running subagent, or any subtask under it is working. Only the five most recently started
+are shown, followed by a quiet "+N more". Idle ones are not listed, and the headline reads
+"3 working" or "All idle".
+
+The time on a session is the desktop's running-turn clock, not one of the menu bar's own. The
+helper used to start a timer when it first noticed work, so a restart or a reconnect reset it
+and it disagreed with the desktop. It now uses the running run's `startedAt`: from `run.started`,
+from `run.boundary` when a turn hands over to the next, and, for a turn already running when the
+helper started or reconnected, from the agent's latest history page. It is formatted like the
+desktop's, from zero seconds.
 
 ## Plan usage: what is left, as a ring per window
 
@@ -92,6 +106,15 @@ preference.
 Accounts follow the desktop model picker: configuration order, which is the order of `/v0/usage`
 `providers`, with each vendor placed where its first account appears. Hidden accounts are left
 out there, so they are left out here.
+
+Rows must never jump. They used to: the daemon starts every account with `usage: null` and reads
+them one at a time, and the menu skipped accounts without a reading, so rows appeared one by one
+and pushed each other down, and a vendor section landed wherever its first read account was. The
+daemon also drops a window once its reset passes, and columns were derived from the windows of
+the moment, so gauges and columns came and went. The helper now keeps a plan book: every readable
+account has its row from the start, as a placeholder with empty rings until its first reading; a
+row keeps its last reading and name while a refresh is under way or configuration cannot be read;
+a dropped window keeps its gauge, full again after its reset; and a vendor's columns only grow.
 
 ## The glyph is Happy's H, drawn at full strength
 
@@ -137,6 +160,17 @@ Both apps use the ordinary HTTP API over the daemon's private socket with its be
 macOS remains read-only and uses events as refresh hints. Windows uses the existing shutdown
 endpoint for its explicit Stop action; if shutdown stalls, Force stop terminates the retained
 parent process and its tree. No new server endpoint, public listener, or token exposure is needed.
+
+## A new daemon stops the apps old ones left behind
+
+The person saw an old flashing icon still going after the work ended, and sometimes a second
+icon. Releases before the parent-process watch relied on standard input alone, so an app whose
+daemon was gone could live on, adopted by launchd, still showing the last state it read. Before it
+starts its app, the module now lists this user's processes and stops every `happy-menu-bar` that
+launchd adopted and that runs from a `menu-bar-*` directory beside its own, which is where every
+release materializes its copy. An app with a live parent belongs to a running daemon and is never
+chosen, and a failed listing only means nothing is stopped. Running a development build of the
+app against a test daemon also puts a real second icon in the menu bar; stop it when done.
 
 ## Supervision waits for exit, not for the streams to close
 

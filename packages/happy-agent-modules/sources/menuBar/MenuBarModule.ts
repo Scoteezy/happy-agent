@@ -3,6 +3,7 @@ import { detach, type Context } from "@steve.kite/stdlib";
 
 import { ConfigModule } from "../config/index.js";
 import { MenuBarApp } from "./impl/MenuBarApp.js";
+import { reapOrphanedMenuBarApps } from "./impl/reapOrphanedMenuBarApps.js";
 import { resolveMenuBarApp } from "./impl/resolveMenuBarApp.js";
 
 /**
@@ -36,16 +37,23 @@ export class MenuBarModule implements AgentModule {
         const executable = resolveMenuBarApp();
         if (executable === undefined) return;
         const paths = this.#config.configuration.paths;
-        this.#app = new MenuBarApp(executable, [
+        const app = new MenuBarApp(executable, [
             "--socket",
             paths.socketPath,
             "--token-file",
             paths.tokenPath,
             ...(process.platform === "win32" ? ["--parent-pid", String(process.pid)] : []),
         ]);
+        this.#app = app;
         // The app outlives the call that starts it, so it gets a lifetime of its own rather than
-        // borrowing the startup pass's.
-        this.#supervising = this.#app.supervise(detach(ctx).named("menu-bar"));
+        // borrowing the startup pass's. An app an earlier daemon left behind is stopped first, so
+        // the menu bar never shows two.
+        const appCtx = detach(ctx).named("menu-bar");
+        this.#supervising = (async () => {
+            const reaped = await reapOrphanedMenuBarApps(executable);
+            if (reaped.length > 0) appCtx.log.warn(`menu-bar:reaped pids=${reaped.join(",")}`);
+            return await app.supervise(appCtx);
+        })();
     };
 
     /** Starts status-app shutdown while preserving the Windows stop control until finalization. */

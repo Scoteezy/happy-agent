@@ -43,11 +43,11 @@ final class DaemonClient {
         return try? JSONSerialization.jsonObject(with: body)
     }
 
-    /// Follows the daemon's event stream, reporting the type of every event until it ends.
+    /// Follows the daemon's event stream, reporting every event's type and data until it ends.
     ///
-    /// The menu bar only needs to know that something changed, so the payloads are skipped and
-    /// the caller re-reads the snapshots it cares about.
-    func streamEventTypes(_ onEvent: (String) -> Void) {
+    /// The menu bar mostly needs to know only that something changed and re-reads the snapshots it
+    /// cares about; run events are the exception, since they carry when each turn started.
+    func streamEvents(_ onEvent: (_ type: String, _ data: String) -> Void) {
         guard let token = try? String(contentsOfFile: tokenPath, encoding: .utf8) else { return }
         guard let socket = try? DaemonSocket(path: socketPath, timeout: 120) else { return }
         let request = """
@@ -61,8 +61,19 @@ final class DaemonClient {
         guard (try? socket.write(request)) != nil else { return }
         guard let head = try? readHead(socket), head.status == 200 else { return }
         let lines = head.chunked ? chunkedLines(socket) : plainLines(socket)
-        for line in lines where line.hasPrefix("event:") {
-            onEvent(String(line.dropFirst("event:".count)).trimmingCharacters(in: .whitespaces))
+        var type: String?
+        var data: [String] = []
+        for line in lines {
+            if line.hasPrefix("event:") {
+                type = String(line.dropFirst("event:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("data:") {
+                data.append(String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces))
+            } else if line.isEmpty {
+                // A blank line ends one event.
+                if let type { onEvent(type, data.joined(separator: "\n")) }
+                type = nil
+                data = []
+            }
         }
     }
 
