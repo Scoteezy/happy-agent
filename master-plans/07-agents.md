@@ -77,6 +77,20 @@ existing agent can probably be allowed, but using it that way is discouraged —
 even though for people it is, of course, much more convenient to switch between
 models.
 
+## Later: orchestration through scripts
+
+Keep an `agent_options` tool: the harnesses, accounts, and models an agent can
+be created with or updated to. Tool definitions stay frozen; when the options
+change, the agent gets the fresh options as a system notice instead.
+
+Later, take the Prime Agent route: let the model write a script against the
+Happy Agent API instead of using one tool per action. We will need that anyway.
+This is the entire Happy Agent API, scoped to the agent invoking it, so the
+agent can call itself from within itself. These calls bypass the network
+stack, but from the script's standpoint it is just calling itself. Every call
+is checked against the permissions of the agent that issued the script. Monty
+is a candidate runtime.
+
 ## What done looks like
 
 - Any agent, including a finished subagent, accepts a follow-up message and
