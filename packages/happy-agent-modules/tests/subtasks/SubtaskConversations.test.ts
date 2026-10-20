@@ -94,7 +94,7 @@ describe("conversation subtasks", () => {
             { title: "Patch login", text: "Fix it.", model: "test-model", effort: "high" },
             "delegated",
             undefined,
-            "codex",
+            { provider: "codex", model: undefined },
         );
 
         const conversation = await hooks.instructions!(ctx, {

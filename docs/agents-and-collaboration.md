@@ -119,6 +119,15 @@ preserved:
 child's effort for the continued work; `read_only` changes its permission mode.
 Codex uses `followup_task` and Grok uses `followup_subagent` for the same thing.
 
+## Collaborators on other harnesses
+
+`create_agent` and `create_subtask` take a `harness` beside `provider` and `model`: who runs the
+new agent's loop, Happy's own or a foreign agent such as Antigravity. Omitted, it is the creator's
+own harness when that serves the model. `agent_options` lists what the agent can choose, with the
+quota Antigravity reports; tool definitions never list models, and an agent that has read the
+options is told on its next turn when they change. Which harnesses an agent reaches is set per
+harness; see [Harnesses](recipe/harnesses.md#sub-agents).
+
 ## Talking to any agent: `agent_me`, `agent_info`, `agent_send`
 
 Subagent tools only reach your own children. To reach _any_ agent in the system —

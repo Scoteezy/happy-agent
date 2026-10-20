@@ -142,6 +142,13 @@ pair into a route; the registry sends a model with a foreign prefix to that rout
 agents are the one exception to the curated list: each reports its own models when the daemon
 starts (`impl/foreignAgentModels.ts`), cached per route, with the built-in list until it answers.
 
+`harnessAllowsSubagents` decides which harnesses an agent on one harness may start sub-agents on:
+its own; else the creator's `subagent_harnesses`; else, for `happy`, only `antigravity` (models
+Happy cannot run itself); else, for a foreign harness, every harness but `happy`. Collaboration's
+`agent_options` tool and the `harness` input of `create_agent` and `create_subtask` read it.
+`harnessUsage` reads Antigravity's quota from `agy -p /usage` (`impl/harnessUsage.ts`), at most
+every five minutes per account, for `agent_options` to show.
+
 After startup, configuration renews enabled Codex and Grok session logins in the background,
 then repeats three hours after each completed pass. Hidden enabled accounts are included;
 disabled accounts, static API keys, smart routing aliases, Bedrock, and Claude are skipped.

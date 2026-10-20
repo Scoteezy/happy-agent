@@ -112,10 +112,46 @@ Happy's loop and a foreign agent starts a fresh context with a handoff.
 
 ## Sub-agents
 
-A Happy agent on any harness can create Happy sub-agents with Happy's `create_agent` tool, on any
-available provider and model. A sub-agent created on a foreign harness is an ordinary Happy agent
-with its own foreign session. The foreign agent's own sub-agents (Claude Code's Task tool, Codex's
-agents) stay inside it; Happy shows each as one tool call.
+Any Happy agent creates sub-agents with `create_agent` and subtasks with `create_subtask`, on any
+harness its own harness reaches. Both take `harness`, `provider`, `model`, and `effort`; an
+omitted `harness` or `provider` is the creator's own when that serves the model, or the only one
+that does. `agent_options` lists the harnesses, accounts, models, and efforts the agent can use,
+and the quota Antigravity reports for its account. The tool definitions never list models, so a
+model or account change does not restart the agent or cost its prompt cache: an agent that has
+called `agent_options` gets the fresh list as a hidden system notice on its next turn.
+
+By default Happy's own loop reaches only foreign harnesses whose models it cannot run itself,
+which today is `antigravity`; Claude Code, Codex CLI, and OpenCode run models Happy already runs.
+A foreign harness reaches every other foreign harness but not Happy's loop. Each harness always
+reaches itself. `subagent_harnesses` replaces the default for one harness:
+
+```toml
+[harnesses.happy]
+subagent_harnesses = ["antigravity", "claude_code"]   # Happy may also start Claude Code agents
+
+[harnesses.antigravity]
+subagent_harnesses = []                               # Antigravity agents start only Antigravity
+```
+
+A sub-agent on a foreign harness is an ordinary Happy agent with its own foreign session. The
+foreign agent's own sub-agents (Claude Code's Task tool, Codex's agents) stay inside it; Happy
+shows each as one tool call.
+
+## Antigravity from Happy
+
+To let a Happy agent start Antigravity sessions on the user's Google account:
+
+1. On the machine, install Antigravity's `agy`, Bun, and Node's `npx`. Have the user run `agy`
+   once and sign in; Happy never handles the Google login.
+2. Add `[harnesses.antigravity]` and [reload the daemon](../configuration.md#applying-configuration-changes).
+   The `Antigravity` account appears in the picker with its models, such as
+   `antigravity/gemini-3.8-flash`.
+3. From any Happy session, ask for an Antigravity sub-agent or subtask. The agent calls
+   `agent_options`, sees the Antigravity models and the quota left in each window (from
+   `agy -p /usage`, read at most every five minutes), and starts it with
+   `model = "antigravity/gemini-3.8-flash"`.
+
+The quota is shown to agents only; the app's usage panel does not show Antigravity yet.
 
 ## Generic ACP agents
 
@@ -131,3 +167,5 @@ without asking follows its own settings, so set those to match what the user exp
 2. Ask it to create a file with its own tools and then call a Happy tool, such as listing
    projects. Confirm both happen.
 3. Send a second message while it runs a long command and confirm it steers.
+4. From a Happy session, ask it to call `agent_options` and confirm the new harness is listed
+   when Happy reaches it, then to create a sub-agent on it.

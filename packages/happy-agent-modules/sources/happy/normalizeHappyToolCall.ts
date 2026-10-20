@@ -381,6 +381,8 @@ function exactToolDescription(
             return targetDescription("Stopping background command", args.task_id);
         case "create_agent":
             return namedDescription("Starting collaborator", args.title);
+        case "agent_options":
+            return "Listing sub-agent options";
         case "send_agent_message":
             return targetDescription("Sending a message to", args.toAgentId);
         case "interrupt_agent":

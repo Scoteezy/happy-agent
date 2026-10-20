@@ -156,28 +156,23 @@ describe("bot settings reach", () => {
 
             await tree.botSettings.write(tree.ctx, "botagent", RESTRICTED);
             await expect(
-                module.create(
-                    tree.ctx,
-                    "botagent",
-                    inWorkspace,
-                    "workspacechild",
-                    "workspaceone",
-                    "codex",
-                ),
+                module.create(tree.ctx, "botagent", inWorkspace, "workspacechild", "workspaceone", {
+                    provider: "codex",
+                    model: undefined,
+                }),
             ).rejects.toThrow(SubtaskInputError);
             await expect(
-                module.create(
-                    tree.ctx,
-                    "botagent",
-                    inWorkspace,
-                    "workspacechild",
-                    "workspaceone",
-                    "codex",
-                ),
+                module.create(tree.ctx, "botagent", inWorkspace, "workspacechild", "workspaceone", {
+                    provider: "codex",
+                    model: undefined,
+                }),
             ).rejects.toThrow("keep its subtasks in the bot's own folder");
             expect(createWorkspace).not.toHaveBeenCalled();
             // A subtask that shares the bot's folder is still the bot's own work.
-            await module.create(tree.ctx, "botagent", task, "folderchild", undefined, "codex");
+            await module.create(tree.ctx, "botagent", task, "folderchild", undefined, {
+                provider: "codex",
+                model: undefined,
+            });
             expect(tree.parents.get("folderchild")).toBe("botagent");
             // So is an exported bot's guest conversation, which the bot's settings then govern.
             await module.createConversation(
@@ -202,14 +197,10 @@ describe("bot settings reach", () => {
             // Without the restriction, the same request goes on to make the workspace.
             await tree.botSettings.write(tree.ctx, "botagent", DEFAULT_BOT_SETTINGS);
             await expect(
-                module.create(
-                    tree.ctx,
-                    "botagent",
-                    inWorkspace,
-                    "workspacechild",
-                    "workspaceone",
-                    "codex",
-                ),
+                module.create(tree.ctx, "botagent", inWorkspace, "workspacechild", "workspaceone", {
+                    provider: "codex",
+                    model: undefined,
+                }),
             ).rejects.toThrow("The subtask's project was not found.");
             expect(createWorkspace).toHaveBeenCalledOnce();
         } finally {

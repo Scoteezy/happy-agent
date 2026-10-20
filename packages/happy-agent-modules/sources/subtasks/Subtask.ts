@@ -21,6 +21,8 @@ export const createSubtaskInputSchema = Type.Object(
             Type.Literal("xhigh"),
             Type.Literal("max"),
         ]),
+        /** Who runs the subtask's loop: Happy's own or a foreign agent's, by harness ID. */
+        harness: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
         provider: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
         serviceTier: Type.Optional(Type.Literal("priority")),
         workspace: Type.Optional(

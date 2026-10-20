@@ -9,6 +9,10 @@ import {
 } from "@slopus/happy-agent-base";
 import { parseHappyFileLink } from "@slopus/happy-agent-client";
 import { createRootContext, type Context } from "@steve.kite/stdlib";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { AbortModule } from "../../sources/abort/index.js";
@@ -266,7 +270,12 @@ describe("collaboration", () => {
             effort: TASK.effort,
             provider: "codex",
         });
-        expect(module.selectModel({ ...TASK, model: "opus-5" }, "claude")).toMatchObject({
+        expect(
+            module.selectModel(
+                { ...TASK, model: "opus-5" },
+                { provider: "claude", model: undefined },
+            ),
+        ).toMatchObject({
             provider: "claude",
         });
         expect(() => module.selectModel({ ...TASK, model: "opus-5" })).toThrow(
@@ -882,12 +891,16 @@ describe("collaboration", () => {
         const tools = await hooks.tools!(ctx, {
             agent: { id: "parent", provider: "claude" },
         } as never);
-        const create = tools.find((tool) => tool.name === "create_agent");
-        if (create === undefined) throw new Error("The create_agent tool was not offered.");
+        const listed = (
+            await module.agentOptions({ provider: "claude", model: undefined })
+        ).harnesses
+            .flatMap((harness) => harness.providers)
+            .map((provider) => `${provider.id}: ${provider.models.map((m) => m.id).join(" ")}`);
 
-        expect(create.description).toContain("claude + opus-5");
-        expect(create.description).not.toContain("codex + gpt-5.6-sol");
-        expect(create.description).not.toContain("bedrock + opus-5");
+        expect(listed).toContain("claude: opus-5");
+        expect(listed.join("\n")).not.toContain("gpt-5.6-sol");
+        expect(listed.join("\n")).not.toContain("bedrock");
+        expect(tools.some((tool) => tool.name === "agent_options")).toBe(true);
         await expect(module.createAgent(ctx, "parent", TASK, "blockedchild")).rejects.toThrow(
             'Model "gpt-5.6-sol" is not available for collaborators.',
         );
@@ -1599,19 +1612,21 @@ describe("collaboration", () => {
         ).rejects.toThrow("parent inbox unavailable");
     });
 
-    it("exposes the fixed four-tool surface with the intended durability and review policy", async () => {
+    it("exposes the fixed five-tool surface with the intended durability and review policy", async () => {
         const collection = new Collection();
         const { module, hooks, ctx } = await started(collection);
         const tools = await hooks.tools!(ctx, { agent: { id: "parent" } } as never);
 
         expect(tools.map((tool) => tool.name)).toEqual([
             "create_agent",
+            "agent_options",
             "send_agent_message",
             "interrupt_agent",
             "archive_agent",
         ]);
-        expect(tools.map((tool) => tool.durable)).toEqual([true, true, false, true]);
+        expect(tools.map((tool) => tool.durable)).toEqual([true, false, true, false, true]);
         expect(tools.map((tool) => tool.requiresAutoOrFullAccess)).toEqual([
+            undefined,
             undefined,
             undefined,
             undefined,
@@ -1652,12 +1667,16 @@ describe("collaboration", () => {
             new HistoryModule(),
             computeModule(),
         );
-        const create = createAgentTool(module, "parent", "codex", MODELS, 5, 3);
-        const empty = createAgentTool(module, "parent", "codex", [], 5, 3);
-
-        expect(create.description).toContain("codex + gpt-5.6-sol");
-        expect(create.description).toContain("claude + opus-5");
-        expect(create.description).toContain("tiers: priority");
+        const create = createAgentTool(
+            module,
+            "parent",
+            { provider: "codex", model: undefined },
+            5,
+            3,
+        );
+        // Models are listed by agent_options, never in the description, so it stays fixed.
+        expect(create.description).not.toContain("gpt-5.6-sol");
+        expect(create.description).toContain("agent_options");
         expect(create.description).toContain("at most 5 ordinary collaborators");
         expect(create.description).toContain("maximum depth is 3 agents including the root");
         expect(create.description).toContain(
@@ -1669,13 +1688,18 @@ describe("collaboration", () => {
         expect(create.description).toContain(
             "Usually create second-level subtasks only on explicit user request.",
         );
-        expect(empty.description).not.toContain("Available model/provider pairs:");
     });
 
     it("keeps send and create routine while interrupt remains reviewable", async () => {
         const collection = new Collection();
         const { module, hooks, ctx } = await started(collection);
-        const create = createAgentTool(module, "parent", "codex", MODELS, 5, 3);
+        const create = createAgentTool(
+            module,
+            "parent",
+            { provider: "codex", model: undefined },
+            5,
+            3,
+        );
         const send = sendMessageTool(module, "parent", false);
         const interrupt = interruptAgentTool(module, "parent");
 
@@ -1691,7 +1715,13 @@ describe("collaboration", () => {
     it("routes tool execution through the public operations and renders complete model results", async () => {
         const collection = new Collection();
         const { module, hooks, ctx } = await started(collection);
-        const create = createAgentTool(module, "parent", "codex", MODELS, 5, 3);
+        const create = createAgentTool(
+            module,
+            "parent",
+            { provider: "codex", model: undefined },
+            5,
+            3,
+        );
         const send = sendMessageTool(module, "parent", false);
         const interrupt = interruptAgentTool(module, "parent");
 
@@ -1763,5 +1793,287 @@ describe("collaboration", () => {
         await expect(module.createAgent(ctx, "parent", TASK, "child")).rejects.toThrow(
             "has not been started yet",
         );
+    });
+});
+
+const FOREIGN_MODELS: readonly AgentModel[] = [
+    {
+        providerId: "claude",
+        id: "opus-5",
+        name: "Opus 5",
+        effortLevels: ["medium", "high"],
+        defaultEffort: "medium",
+    },
+    {
+        providerId: "claude",
+        id: "claude-code/sonnet",
+        name: "Sonnet",
+        effortLevels: ["high"],
+        defaultEffort: "high",
+    },
+    {
+        providerId: "antigravity",
+        id: "antigravity/gemini-3.8-flash",
+        name: "Gemini 3.8 Flash",
+        effortLevels: ["high"],
+        defaultEffort: "high",
+    },
+];
+
+class ForeignCollection extends Collection {
+    override models: readonly AgentModel[] = FOREIGN_MODELS;
+}
+
+const HARNESSES_TOML = [
+    "[providers.claude]",
+    "enabled = true",
+    "[harnesses.claude_code]",
+    "[harnesses.antigravity]",
+].join("\n");
+
+/**
+ * Configuration with the harnesses above and a stand-in `agy` that reports Antigravity's quota,
+ * so no test reaches the machine's own Antigravity.
+ */
+async function harnessConfig(extra = "") {
+    const bin = await mkdtemp(join(tmpdir(), "fake-agy-"));
+    const agy = join(bin, "agy");
+    await writeFile(
+        agy,
+        "#!/bin/sh\nprintf 'Gemini Models\\tWeekly Limit Remaining\\t95%%\\t2026-10-27T00:00:00Z\\n'\n",
+        { mode: 0o755 },
+    );
+    return await temporaryTestConfig(`${HARNESSES_TOML}\nenv = { AGY_BIN = "${agy}" }\n${extra}`);
+}
+
+const ON_HAPPY = { provider: "claude", model: "opus-5" } as const;
+const ON_ANTIGRAVITY = { provider: "antigravity", model: "antigravity/gemini-3.8-flash" } as const;
+
+/** A stand-in for the agent's own store, which is all the change notice keeps. */
+function kvScope(agent: { readonly provider: string; readonly model: string }) {
+    const values = new Map<string, unknown>();
+    return {
+        values,
+        scope: {
+            agent: { id: "parent", ...agent },
+            kv: {
+                read: async (_ctx: Context, key: string) => values.get(key),
+                write: async (_ctx: Context, key: string, value: unknown) => {
+                    values.set(key, value);
+                },
+                update: async (
+                    _ctx: Context,
+                    key: string,
+                    updater: (current: unknown) => unknown,
+                ) => {
+                    const next = await updater(values.get(key));
+                    values.set(key, next);
+                    return next;
+                },
+                delete: async (_ctx: Context, key: string) => {
+                    values.delete(key);
+                },
+            },
+        } as never,
+    };
+}
+
+/** The notice reads nothing from the turn itself. */
+const TURN = {} as never;
+
+function harnessesOf(options: { readonly harnesses: readonly { readonly id: string }[] }) {
+    return options.harnesses.map((harness) => harness.id);
+}
+
+describe("sub-agent harnesses", () => {
+    it("lets Happy reach only the foreign harnesses whose models it cannot run itself", async () => {
+        const collection = new ForeignCollection();
+        const { module, ctx } = await started(collection, await harnessConfig());
+
+        expect(harnessesOf(await module.agentOptions(ON_HAPPY))).toEqual(["happy", "antigravity"]);
+        await expect(
+            module.createToolAgent(
+                ctx,
+                "parent",
+                { ...TASK, model: "antigravity/gemini-3.8-flash" },
+                "geminichild",
+                ON_HAPPY,
+            ),
+        ).resolves.toEqual({ agentId: "geminichild" });
+        expect(collection.delivered[0]!.options).toMatchObject({
+            model: "antigravity/gemini-3.8-flash",
+            provider: "antigravity",
+        });
+        await expect(
+            module.createToolAgent(
+                ctx,
+                "parent",
+                { ...TASK, model: "claude-code/sonnet" },
+                "sonnetchild",
+                ON_HAPPY,
+            ),
+        ).rejects.toThrow(
+            'An agent on harness "happy" cannot create sub-agents on harness "claude_code". It can use: happy, antigravity. Call agent_options',
+        );
+    });
+
+    it("lets a foreign harness reach every other foreign harness but not Happy", async () => {
+        const collection = new ForeignCollection();
+        const { module, ctx } = await started(collection, await harnessConfig());
+
+        expect(harnessesOf(await module.agentOptions(ON_ANTIGRAVITY))).toEqual([
+            "claude_code",
+            "antigravity",
+        ]);
+        await expect(
+            module.createToolAgent(
+                ctx,
+                "parent",
+                { ...TASK, model: "claude-code/sonnet" },
+                "sonnetchild",
+                ON_ANTIGRAVITY,
+            ),
+        ).resolves.toEqual({ agentId: "sonnetchild" });
+        await expect(
+            module.createToolAgent(
+                ctx,
+                "parent",
+                { ...TASK, model: "opus-5", effort: "medium" },
+                "opuschild",
+                ON_ANTIGRAVITY,
+            ),
+        ).rejects.toThrow('cannot create sub-agents on harness "happy"');
+    });
+
+    it("lets a harness's foreign sub-agents replace the default reach", async () => {
+        const collection = new ForeignCollection();
+        const config = await harnessConfig(
+            '[harnesses.happy]\nsubagent_harnesses = ["claude_code"]',
+        );
+        const { module } = await started(collection, config);
+
+        expect(harnessesOf(await module.agentOptions(ON_HAPPY))).toEqual(["happy", "claude_code"]);
+    });
+
+    it("refuses a harness that does not run the model", async () => {
+        const collection = new ForeignCollection();
+        const { module, ctx } = await started(collection, await harnessConfig());
+
+        await expect(
+            module.createToolAgent(
+                ctx,
+                "parent",
+                { ...TASK, model: "antigravity/gemini-3.8-flash", harness: "claude_code" },
+                "child",
+                ON_HAPPY,
+            ),
+        ).rejects.toThrow(
+            'Model "antigravity/gemini-3.8-flash" does not run on harness "claude_code"; it runs on antigravity.',
+        );
+        expect(collection.created).toHaveLength(0);
+    });
+
+    it("lists options by harness and account with a version that follows only the choices", async () => {
+        const collection = new ForeignCollection();
+        const { module } = await started(collection, await harnessConfig());
+
+        const options = await module.agentOptions(ON_HAPPY);
+        expect(options).toMatchObject({
+            current: { harness: "happy", provider: "claude" },
+            harnesses: [
+                {
+                    id: "happy",
+                    name: "Happy",
+                    providers: [{ id: "claude", models: [{ id: "opus-5" }] }],
+                },
+                {
+                    id: "antigravity",
+                    name: "Antigravity",
+                    providers: [
+                        {
+                            id: "antigravity",
+                            models: [{ id: "antigravity/gemini-3.8-flash" }],
+                            usage: [
+                                {
+                                    scope: "Gemini Models",
+                                    window: "Weekly Limit Remaining",
+                                    remainingPercent: 95,
+                                    resetsAt: "2026-10-27T00:00:00Z",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        });
+        expect((await module.agentOptions(ON_HAPPY)).version).toBe(options.version);
+        expect(
+            harnessesOf(await module.agentOptions(ON_HAPPY, { harness: "antigravity" })),
+        ).toEqual(["antigravity"]);
+
+        collection.models = FOREIGN_MODELS.slice(0, 2);
+        expect((await module.agentOptions(ON_HAPPY)).version).not.toBe(options.version);
+    });
+
+    it("keeps tool definitions byte-identical when the options change", async () => {
+        const collection = new ForeignCollection();
+        const { hooks, ctx } = await started(collection, await harnessConfig());
+        const { scope } = kvScope(ON_HAPPY);
+        const definitions = async () =>
+            JSON.stringify(
+                (await hooks.tools!(ctx, scope)).map((tool) => [
+                    tool.name,
+                    tool.description,
+                    tool.parameters,
+                ]),
+            );
+
+        const before = await definitions();
+        collection.models = FOREIGN_MODELS.slice(0, 1);
+        expect(await definitions()).toBe(before);
+        expect(before).not.toContain("gemini");
+    });
+
+    it("tells an agent that has seen its options once each time they change", async () => {
+        const collection = new ForeignCollection();
+        const { hooks, ctx } = await started(collection, await harnessConfig());
+        const { scope, values } = kvScope(ON_HAPPY);
+        const options = (await hooks.tools!(ctx, scope)).find(
+            (tool) => tool.name === "agent_options",
+        )!;
+
+        // An agent that never asked hears nothing.
+        expect(await hooks.beforeTurn!(ctx, scope, TURN)).toBeUndefined();
+        const listed = (await options.execute(ctx, {}, toolCall("options"))) as { text: string };
+        expect(listed.text).toContain("antigravity/gemini-3.8-flash");
+        expect(await hooks.beforeTurn!(ctx, scope, TURN)).toBeUndefined();
+
+        collection.models = FOREIGN_MODELS.slice(0, 1);
+        const [notice] = (await hooks.beforeTurn!(ctx, scope, TURN))! as never as [
+            {
+                type: string;
+                id: string;
+                message: { role: string; content: [{ text: string }] };
+                metadata: Record<string, unknown>;
+            },
+        ];
+        expect(notice).toMatchObject({
+            type: "steer",
+            message: { role: "system" },
+            metadata: { hideFromUser: true },
+        });
+        expect(notice.message.content[0].text).toContain("Your sub-agent options changed.");
+        expect(notice.message.content[0].text).not.toContain("gemini");
+        // Until the notice is in history, every turn offers the same notice again.
+        const [again] = (await hooks.beforeTurn!(ctx, scope, TURN))! as never as [{ id: string }];
+        expect(again.id).toBe(notice.id);
+
+        await hooks.messageAcceptedTransact!(ctx, scope, {
+            id: notice.id,
+            kind: "steering",
+            metadata: notice.metadata,
+        } as never);
+        expect(await hooks.beforeTurn!(ctx, scope, TURN)).toBeUndefined();
+        expect(values.has("agentOptionsPending")).toBe(false);
     });
 });

@@ -1,6 +1,7 @@
 import {
     agentConfig,
     DEFAULT_AGENT_PERMISSION_MODE,
+    type AgentBaseAcceptedMessage,
     type AgentBasePersistedEvent,
     type AgentBaseSettlement,
     type AgentBaseTurn,
@@ -8,11 +9,13 @@ import {
     type AgentMetadata,
     type AgentModel,
     type AgentModule,
+    type AgentModuleAction,
     type AgentModuleHooks,
     type AgentModuleScope,
     type AgentSystemRef,
     type AnyAgentTool,
 } from "@slopus/happy-agent-base";
+import { createId } from "@paralleldrive/cuid2";
 import { Type, type TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { afterCommit, type Context } from "@steve.kite/stdlib";
@@ -32,8 +35,11 @@ import {
     type CollaborationCreateInput,
     type CollaborationCreateOptions,
     type CollaborationCreateResult,
+    type CollaborationCreator,
     type CollaborationSendInput,
 } from "./CollaborationAgent.js";
+import { buildAgentOptions, formatAgentOptions, type AgentOptions } from "./impl/agentOptions.js";
+import { agentOptionsTool } from "./tools/agent_options.js";
 import { collaborationMigrations } from "./CollaborationMigrations.js";
 import { archiveAgentTool } from "./tools/archive_agent.js";
 import { createAgentTool } from "./tools/create_agent.js";
@@ -105,12 +111,63 @@ export class CollaborationModule implements AgentModule {
         return { collaboration: { reportToCreator: false } };
     }
 
+    /**
+     * The harnesses, accounts, and models `creator` can create sub-agents with, optionally
+     * narrowed to one harness or account, with the quota each account's agent reports.
+     */
+    async agentOptions(
+        creator: CollaborationCreator,
+        filter: { readonly harness?: string; readonly provider?: string } = {},
+    ): Promise<AgentOptions> {
+        const options = this.#agentOptions(creator);
+        const harnesses = await Promise.all(
+            options.harnesses
+                .filter((harness) => filter.harness === undefined || harness.id === filter.harness)
+                .map(async (harness) => ({
+                    ...harness,
+                    providers: await Promise.all(
+                        harness.providers
+                            .filter(
+                                (provider) =>
+                                    filter.provider === undefined ||
+                                    provider.id === filter.provider,
+                            )
+                            .map(async (provider) => {
+                                const usage = await this.#config.harnessUsage(provider.id);
+                                return usage === undefined ? provider : { ...provider, usage };
+                            }),
+                    ),
+                })),
+        );
+        return { ...options, harnesses: harnesses.filter((h) => h.providers.length > 0) };
+    }
+
+    #agentOptions(creator: CollaborationCreator): AgentOptions {
+        const harness = this.#config.harnessOf(creator.provider, creator.model);
+        const models = this.#availableModels().filter((model) =>
+            this.#config.harnessAllowsSubagents(
+                harness,
+                this.#config.harnessOf(model.providerId, model.id),
+            ),
+        );
+        return buildAgentOptions(
+            models,
+            { harness, provider: creator.provider },
+            {
+                harnessOf: (providerId, modelId) => this.#config.harnessOf(providerId, modelId),
+                harnessName: (id) => this.#config.harnessName(id),
+                providerName: (id) => this.#config.providerName(id),
+            },
+        );
+    }
+
     selectModel(
         input: CollaborationCreateInput,
-        currentProviderId?: string,
+        creator?: CollaborationCreator,
     ): CollaborationAgentSelection & { readonly provider: string } {
         this.#assert(collaborationCreateInputSchema, input, "create agent");
-        const models = this.#availableModels();
+        const models = this.#onHarness(this.#availableModels(), input, creator);
+        const currentProviderId = creator?.provider;
         const provider =
             input.provider ??
             (models.some(
@@ -164,6 +221,7 @@ export class CollaborationModule implements AgentModule {
         actingAgentId: string,
         input: CollaborationCreateInput,
         agentId: string,
+        creator?: CollaborationCreator,
     ): Promise<CollaborationCreateResult> {
         this.#assert(collaborationAgentIdSchema, actingAgentId, "acting agent ID");
         this.#assert(collaborationAgentIdSchema, agentId, "collaborator ID");
@@ -173,7 +231,7 @@ export class CollaborationModule implements AgentModule {
         if (retained?.model !== undefined && retained.model.modelId !== input.model) {
             throw new Error("The spawning tool call already selected another model.");
         }
-        const models = this.#availableModels();
+        const models = this.#onHarness(this.#availableModels(), input, creator);
         const selection = this.#validateSelection(
             models,
             retained?.model === undefined
@@ -383,6 +441,66 @@ export class CollaborationModule implements AgentModule {
         },
 
         /**
+         * Tell an agent that has seen its sub-agent options when they change: the harnesses,
+         * accounts, and models it can create agents with, as a hidden system notice. Tool
+         * definitions never carry the options, so a change costs no prompt cache and no new
+         * provider session. An agent that never asked hears nothing.
+         */
+        beforeTurn: async (
+            ctx: Context,
+            scope: AgentModuleScope,
+        ): Promise<readonly AgentModuleAction[] | undefined> => {
+            const seen = await scope.kv.read(ctx, AGENT_OPTIONS_SEEN_KEY);
+            if (typeof seen !== "string") return undefined;
+            const options = this.#agentOptions({
+                provider: scope.agent.provider,
+                model: scope.agent.model,
+            });
+            if (options.version === seen) return undefined;
+            const pending = await scope.kv.update(ctx, AGENT_OPTIONS_PENDING_KEY, (current) =>
+                Value.Check(agentOptionsPendingSchema, current) &&
+                current.version === options.version
+                    ? current
+                    : { id: createId(), version: options.version },
+            );
+            return [
+                {
+                    type: "steer",
+                    id: pending.id,
+                    message: {
+                        role: "system",
+                        content: [
+                            {
+                                type: "text",
+                                text: `Your sub-agent options changed. They replace any you saw before.\n\n${formatAgentOptions(options)}`,
+                            },
+                        ],
+                    },
+                    metadata: {
+                        hideFromUser: true,
+                        [AGENT_OPTIONS_METADATA_KEY]: { version: options.version },
+                    },
+                },
+            ];
+        },
+
+        /** A change notice counts as seen once it is durably in the agent's history. */
+        messageAcceptedTransact: async (
+            ctx: Context,
+            scope: AgentModuleScope,
+            accepted: AgentBaseAcceptedMessage,
+        ): Promise<void> => {
+            const notice = accepted.metadata?.[AGENT_OPTIONS_METADATA_KEY];
+            if (typeof notice !== "object" || notice === null) return;
+            const pending = await scope.kv.read(ctx, AGENT_OPTIONS_PENDING_KEY);
+            if (!Value.Check(agentOptionsPendingSchema, pending) || pending.id !== accepted.id) {
+                return;
+            }
+            await scope.kv.write(ctx, AGENT_OPTIONS_SEEN_KEY, pending.version);
+            await scope.kv.delete(ctx, AGENT_OPTIONS_PENDING_KEY);
+        },
+
+        /**
          * Keep the last thing the model said, for as long as the run that said it. The run store is
          * the right place: it exists only while the agent is working, a crash mid-run leaves a note
          * the resumed run can still read, and a finished run leaves nothing behind.
@@ -420,15 +538,18 @@ export class CollaborationModule implements AgentModule {
          */
         tools: async (ctx: Context, scope: AgentModuleScope): Promise<readonly AnyAgentTool[]> => {
             const settings = this.#config.configuration.values.settings;
+            const creator = { provider: scope.agent.provider, model: scope.agent.model };
             return [
                 createAgentTool(
                     this,
                     scope.agent.id,
-                    scope.agent.provider,
-                    this.#availableModels(),
+                    creator,
                     settings.maxCollaborators,
                     settings.maxCollaborationDepth,
                 ),
+                agentOptionsTool(this, creator, async (toolCtx, version) => {
+                    await scope.kv.write(toolCtx, AGENT_OPTIONS_SEEN_KEY, version);
+                }),
                 sendMessageTool(
                     this,
                     scope.agent.id,
@@ -723,6 +844,55 @@ export class CollaborationModule implements AgentModule {
         }
     }
 
+    /**
+     * The models a request may resolve to once its harness is settled: the harness it names, or
+     * the creator's own when that serves the model, or the only one that does. A creator reaches
+     * only the harnesses its own allows.
+     */
+    #onHarness(
+        models: readonly AgentModel[],
+        input: CollaborationCreateInput,
+        creator: CollaborationCreator | undefined,
+    ): readonly AgentModel[] {
+        const harnessOf = (model: AgentModel) => this.#config.harnessOf(model.providerId, model.id);
+        const serving = models.filter((model) => model.id === input.model);
+        // An unknown model is reported, with the same hint, by the selection that follows.
+        if (serving.length === 0) return models;
+        const harnesses = [...new Set(serving.map(harnessOf))];
+        const own =
+            creator === undefined
+                ? undefined
+                : this.#config.harnessOf(creator.provider, creator.model);
+        let harness = input.harness;
+        if (harness === undefined) {
+            harness =
+                own !== undefined && harnesses.includes(own)
+                    ? own
+                    : harnesses.length === 1
+                      ? harnesses[0]!
+                      : undefined;
+            if (harness === undefined) {
+                throw new Error(
+                    `Harness is required because model "${input.model}" runs on more than one harness: ${harnesses.join(", ")}.`,
+                );
+            }
+        } else if (!harnesses.includes(harness)) {
+            throw new Error(
+                `Model "${input.model}" does not run on harness "${harness}"; it runs on ${harnesses.join(", ")}. ${OPTIONS_HINT}`,
+            );
+        }
+        if (own !== undefined && !this.#config.harnessAllowsSubagents(own, harness)) {
+            const allowed = this.#agentOptions(creator!).harnesses.map((h) => h.id);
+            throw new Error(
+                `An agent on harness "${own}" cannot create sub-agents on harness "${harness}". It can use: ${
+                    allowed.join(", ") || "none"
+                }. ${OPTIONS_HINT}`,
+            );
+        }
+        const chosen = harness;
+        return models.filter((model) => model.id !== input.model || harnessOf(model) === chosen);
+    }
+
     /** Reject a model, effort, provider, or tier the collection does not actually offer. */
     #validateSelection(
         models: readonly AgentModel[],
@@ -745,9 +915,11 @@ export class CollaborationModule implements AgentModule {
         );
         if (candidates.length === 0) {
             throw new Error(
-                input.provider === undefined
-                    ? `Model "${input.model}" is not available for collaborators.`
-                    : `Model "${input.model}" is not available from provider "${input.provider}".`,
+                `${
+                    input.provider === undefined
+                        ? `Model "${input.model}" is not available for collaborators.`
+                        : `Model "${input.model}" is not available from provider "${input.provider}".`
+                } ${OPTIONS_HINT}`,
             );
         }
         const byEffort = candidates.filter((model) => model.effortLevels.includes(input.effort));
@@ -793,6 +965,16 @@ export class CollaborationModule implements AgentModule {
         if (!Value.Check(schema, value)) throw new Error(`Invalid collaboration ${label}.`);
     }
 }
+
+/** Points a model that chose wrong at the one place listing what it can choose. */
+const OPTIONS_HINT = "Call agent_options for the harnesses, providers, and models you can use.";
+
+/** The options version this agent last saw, through agent_options or a change notice. */
+const AGENT_OPTIONS_SEEN_KEY = "agentOptionsSeen";
+/** A change notice queued for this agent and not yet accepted. */
+const AGENT_OPTIONS_PENDING_KEY = "agentOptionsPending";
+const AGENT_OPTIONS_METADATA_KEY = "agentOptions";
+const agentOptionsPendingSchema = Type.Object({ id: Type.String(), version: Type.String() });
 
 /** Where a run keeps the last thing its model said, until the run ends. */
 const LAST_TEXT_KEY = "lastText";

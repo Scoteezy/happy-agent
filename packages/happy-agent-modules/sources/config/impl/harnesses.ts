@@ -59,6 +59,7 @@ export const harnessInputSchema = Type.Object(
         include_models: Type.Optional(stringArraySchema),
         name: Type.Optional(nameSchema),
         providers: Type.Optional(stringArraySchema),
+        subagent_harnesses: Type.Optional(stringArraySchema),
         type: Type.Optional(typeSchema),
     },
     { additionalProperties: false },
@@ -77,6 +78,7 @@ export const harnessSchema = Type.Object(
         includeModels: Type.Optional(stringArraySchema),
         name: Type.Optional(nameSchema),
         providers: Type.Optional(stringArraySchema),
+        subagentHarnesses: Type.Optional(stringArraySchema),
         type: typeSchema,
     },
     { additionalProperties: false },
@@ -146,6 +148,9 @@ export function mergeHarnesses(
             ...(input.include_models === undefined ? {} : { includeModels: input.include_models }),
             ...(input.name === undefined ? {} : { name: input.name }),
             ...(input.providers === undefined ? {} : { providers: input.providers }),
+            ...(input.subagent_harnesses === undefined
+                ? {}
+                : { subagentHarnesses: input.subagent_harnesses }),
             // Writing a harness table turns it on; `enabled = false` keeps it configured but off.
             enabled: input.enabled ?? previous?.enabled ?? true,
             type,
@@ -169,6 +174,11 @@ export function validateHarnesses(
     providers: Readonly<Record<string, ProviderView>>,
 ): void {
     for (const [id, harness] of Object.entries(harnesses)) {
+        for (const target of harness.subagentHarnesses ?? []) {
+            if (harnesses[target] === undefined) {
+                throw new Error(`Harness "${id}" lists unknown sub-agent harness "${target}".`);
+            }
+        }
         if (harness.type === "acp" && harness.command === undefined) {
             throw new Error(`Harness "${id}" is an ACP agent and must set command.`);
         }
@@ -222,6 +232,36 @@ export function harnessAcceptsProvider(
         return provider.type === ATTACHED_HARNESS_PROVIDER_TYPES[harness.type];
     }
     return false;
+}
+
+/**
+ * Foreign harnesses Happy's own loop reaches for by default: those whose models Happy cannot run
+ * itself. Happy already runs Claude, GPT, and the rest across providers, so Claude Code, Codex CLI,
+ * OpenCode, and unknown ACP agents are opt-in.
+ */
+const HAPPY_DEFAULT_SUBAGENT_TYPES: readonly HarnessType[] = ["antigravity"];
+
+/**
+ * Whether an agent on harness `creatorId` may create sub-agents on harness `targetId`. Its own
+ * harness always; otherwise the creator's `subagent_harnesses` when set. By default Happy reaches
+ * the foreign harnesses it has no counterpart for, and a foreign harness reaches every other
+ * foreign harness but not Happy: someone on a native harness has chosen not to use Happy's loop.
+ */
+export function harnessAllowsSubagents(
+    harnesses: Readonly<Record<string, Harness>>,
+    creatorId: string,
+    targetId: string,
+): boolean {
+    const target = harnesses[targetId];
+    if (target === undefined || !target.enabled) return false;
+    if (creatorId === targetId) return true;
+    const creator = harnesses[creatorId];
+    if (creator === undefined) return false;
+    if (creator.subagentHarnesses !== undefined) {
+        return creator.subagentHarnesses.includes(targetId);
+    }
+    if (creator.type === "happy") return HAPPY_DEFAULT_SUBAGENT_TYPES.includes(target.type);
+    return target.type !== "happy";
 }
 
 /** Order `models` by `include`, drop those in `exclude`; models the agent does not list stay out. */

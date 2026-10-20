@@ -57,6 +57,7 @@ import {
 } from "./impl/agentCatalog.js";
 import {
     DEFAULT_HARNESSES,
+    harnessAllowsSubagents,
     harnessInputSchema,
     harnessSchema,
     isOwnLoginHarness,
@@ -64,8 +65,13 @@ import {
     readHarnesses,
     validateHarnesses,
 } from "./impl/harnesses.js";
-import { foreignAgentRoutes } from "./impl/createForeignAgentProvider.js";
+import {
+    foreignAgentRouteForModel,
+    foreignAgentRoutes,
+    foreignAgentStart,
+} from "./impl/createForeignAgentProvider.js";
 import { refreshForeignAgentModels } from "./impl/foreignAgentModels.js";
+import { readAntigravityUsage, type HarnessUsageWindow } from "./impl/harnessUsage.js";
 import {
     hasConfiguredProviderUsageSource,
     loadConfiguredProviderUsage,
@@ -1655,6 +1661,13 @@ export class ConfigModule implements AgentModule {
 
     readonly #scripted: ConfigInferenceOverride | ConfigInferenceFactory | undefined;
     readonly #environment: Readonly<NodeJS.ProcessEnv>;
+    readonly #harnessUsage = new Map<
+        string,
+        {
+            readonly at: number;
+            readonly reading: Promise<readonly HarnessUsageWindow[] | undefined>;
+        }
+    >();
     readonly #providerLifetime = new AbortController();
     #credentialRefreshStarted = false;
     readonly #serviceTierListeners = new Set<() => void>();
@@ -2525,6 +2538,53 @@ export class ConfigModule implements AgentModule {
                 .replaceAll(/[_-]+/gu, " ")
                 .replaceAll(/\b\w/gu, (character) => character.toUpperCase())
         );
+    }
+
+    /** The harness running `modelId` on `providerId`: a foreign agent's, or Happy's own loop. */
+    harnessOf(providerId: string, modelId: string | undefined): string {
+        return (
+            foreignAgentRouteForModel(this.configuration, providerId, modelId)?.harnessId ?? "happy"
+        );
+    }
+
+    /** What a harness is called: its table's `name`, the built-in name, or its ID. */
+    harnessName(harnessId: string): string {
+        return (
+            this.configuration.values.harnesses[harnessId]?.name ??
+            BUILT_IN_HARNESS_NAMES[harnessId] ??
+            harnessId
+        );
+    }
+
+    /**
+     * The quota a foreign agent with its own login reports for its account, read at most every
+     * few minutes and only when an agent asks for its options. Only Antigravity reports one;
+     * undefined means no reading.
+     */
+    async harnessUsage(providerId: string): Promise<readonly HarnessUsageWindow[] | undefined> {
+        const harness = this.configuration.values.harnesses[providerId];
+        if (harness?.type !== "antigravity" || !this.isProviderEnabled(providerId))
+            return undefined;
+        const cached = this.#harnessUsage.get(providerId);
+        if (cached !== undefined && Date.now() - cached.at < HARNESS_USAGE_MAX_AGE_MS) {
+            return await cached.reading;
+        }
+        const route = foreignAgentRoutes(this.configuration).find(
+            (candidate) => candidate.providerId === providerId,
+        );
+        if (route === undefined) return undefined;
+        // The account the agent itself signs in with: the machine's environment and its harness's.
+        const reading = readAntigravityUsage({
+            ...process.env,
+            ...foreignAgentStart(route).env,
+        }).catch(() => undefined);
+        this.#harnessUsage.set(providerId, { at: Date.now(), reading });
+        return await reading;
+    }
+
+    /** Whether an agent on harness `creatorId` may create sub-agents on harness `targetId`. */
+    harnessAllowsSubagents(creatorId: string, targetId: string): boolean {
+        return harnessAllowsSubagents(this.configuration.values.harnesses, creatorId, targetId);
     }
 
     /** The enabled models a picker offers, which leaves out hidden providers. */
@@ -3886,8 +3946,14 @@ function resolveHappyHome(input: HappyAgentConfigurationInput): string {
     return resolve(input);
 }
 
+/** How long one foreign agent's quota reading answers before it is read again. */
+const HARNESS_USAGE_MAX_AGE_MS = 5 * 60_000;
+
 /** What the built-in agents with their own login are called when their table names nothing. */
 const BUILT_IN_HARNESS_NAMES: Readonly<Record<string, string>> = {
+    happy: "Happy",
+    claude_code: "Claude Code",
+    codex_cli: "Codex CLI",
     antigravity: "Antigravity",
     opencode: "OpenCode",
 };

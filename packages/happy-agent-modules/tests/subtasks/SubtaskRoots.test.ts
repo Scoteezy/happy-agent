@@ -73,38 +73,62 @@ function fixture() {
 describe("subtask roots", () => {
     it("lets a task create subtasks two levels deep, like a bot", async () => {
         const { ctx, module, parents, configs, durableFunctions } = fixture();
-        await module.create(ctx, "taskagent", input, "first", undefined, "codex");
-        await module.create(ctx, "first", input, "second", undefined, "codex");
+        await module.create(ctx, "taskagent", input, "first", undefined, {
+            provider: "codex",
+            model: undefined,
+        });
+        await module.create(ctx, "first", input, "second", undefined, {
+            provider: "codex",
+            model: undefined,
+        });
         expect(parents.get("first")).toBe("taskagent");
         expect(parents.get("second")).toBe("first");
         expect(module.isSubtask(configs.get("first"))).toBe(true);
         expect(durableFunctions.invoke).toHaveBeenCalledTimes(2);
         await expect(
-            module.create(ctx, "second", input, "third", undefined, "codex"),
+            module.create(ctx, "second", input, "third", undefined, {
+                provider: "codex",
+                model: undefined,
+            }),
         ).rejects.toThrow("Subtasks are limited to two levels below a bot or a task.");
 
-        await module.create(ctx, "botagent", input, "botchild", undefined, "codex");
+        await module.create(ctx, "botagent", input, "botchild", undefined, {
+            provider: "codex",
+            model: undefined,
+        });
         expect(parents.get("botchild")).toBe("botagent");
     });
 
     it("refuses ordinary roots and archived tasks", async () => {
         const { ctx, module, taskStatus, configs } = fixture();
         await expect(
-            module.create(ctx, "plainroot", input, "orphan", undefined, "codex"),
+            module.create(ctx, "plainroot", input, "orphan", undefined, {
+                provider: "codex",
+                model: undefined,
+            }),
         ).rejects.toThrow(SubtaskInputError);
         taskStatus.current = "archived";
         await expect(
-            module.create(ctx, "taskagent", input, "late", undefined, "codex"),
+            module.create(ctx, "taskagent", input, "late", undefined, {
+                provider: "codex",
+                model: undefined,
+            }),
         ).rejects.toThrow("Only a bot, a task, or another subtask can create a subtask.");
         configs.set("taskagent", { metadata: { version: 2, archivedAt: 1 } } as AgentConfig);
         await expect(
-            module.create(ctx, "taskagent", input, "later", undefined, "codex"),
+            module.create(ctx, "taskagent", input, "later", undefined, {
+                provider: "codex",
+                model: undefined,
+            }),
         ).rejects.toThrow("An archived agent cannot create subtasks.");
     });
 
     it("lets a task archive its direct subtask and guides it as a coordinator", async () => {
         const { ctx, module, hooks, configs } = fixture();
-        await module.create(ctx, "taskagent", input, "child", undefined, "codex");
+        await module.create(ctx, "taskagent", input, "child", undefined, {
+            provider: "codex",
+            model: undefined,
+        });
         await expect(module.archive(ctx, "plainroot", "child")).rejects.toThrow(
             "Only a subtask's direct coordinating bot, task, or subtask may archive it.",
         );

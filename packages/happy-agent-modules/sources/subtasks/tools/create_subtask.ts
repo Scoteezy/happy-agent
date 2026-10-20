@@ -3,9 +3,14 @@ import { defineAgentTool } from "@slopus/happy-agent-base";
 import { formatHappyReferenceTag } from "@slopus/happy-agent-client";
 
 import { createSubtaskInputSchema, subtaskResultSchema } from "../Subtask.js";
+import type { CollaborationCreator } from "../../collaboration/index.js";
 import type { SubtasksModule } from "../SubtasksModule.js";
 
-export function createSubtaskTool(subtasks: SubtasksModule, agentId: string, providerId: string) {
+export function createSubtaskTool(
+    subtasks: SubtasksModule,
+    agentId: string,
+    creator: CollaborationCreator,
+) {
     return defineAgentTool({
         name: "create_subtask",
         defer: true,
@@ -20,8 +25,7 @@ export function createSubtaskTool(subtasks: SubtasksModule, agentId: string, pro
             "Omit workspace to share your filesystem, or supply workspace with projectId and a short name for a new workspace. Work starts after setup.",
             "Returns the agent ID without waiting. Coordinate via send_agent_message and archive direct subtasks with archive_subtask. Users can message or archive them. There is no wait tool.",
             "Keep delegated work in the subtask. Ask its agent through send_agent_message for progress, findings, diffs, verification, or follow-up changes. Do not directly inspect or modify its files or run commands in its workspace. Direct access to another workspace often requires elevated permissions and review by the reviewer model; talking to its agent avoids unnecessary permission reviews.",
-            "Choose a model and effort. Omitting provider uses your current provider when it offers that model.",
-            subtasks.modelDescription(),
+            "Call agent_options for the harnesses, providers, and models you can use, then choose a model and effort. Omitting harness or provider uses your own when it serves that model; otherwise each is optional only when the model settles it.",
         ].join("\n\n"),
         parameters: createSubtaskInputSchema,
         returnType: subtaskResultSchema,
@@ -36,7 +40,7 @@ export function createSubtaskTool(subtasks: SubtasksModule, agentId: string, pro
                 input.workspace === undefined
                     ? undefined
                     : await call.kv.getOrCreate(ctx, "workspaceId", () => createId()),
-                providerId,
+                creator,
             ),
         toLLM: (result) => [
             {

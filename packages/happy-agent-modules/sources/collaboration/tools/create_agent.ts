@@ -5,14 +5,14 @@ import {
     collaborationCreateInputSchema,
     collaborationCreateResultSchema,
     type CollaborationCreateInput,
+    type CollaborationCreator,
 } from "../CollaborationAgent.js";
 
 /** Create a collaborator and hand it its opening task. */
 export function createAgentTool(
     collaboration: CollaborationModule,
     thisAgentId: string,
-    currentProviderId: string,
-    models: readonly AgentModel[],
+    creator: CollaborationCreator,
     maxCollaborators: number,
     maxCollaborationDepth: number,
 ) {
@@ -21,7 +21,7 @@ export function createAgentTool(
         defer: true,
         capabilities: ["Create, message, and coordinate coding subagents."],
         searchKeywords: ["spawn subagent", "delegate work", "parallel collaborator"],
-        description: createAgentDescription(models, maxCollaborators, maxCollaborationDepth),
+        description: createAgentDescription(maxCollaborators, maxCollaborationDepth),
         parameters: collaborationCreateInputSchema,
         returnType: collaborationCreateResultSchema,
         durable: true,
@@ -30,8 +30,9 @@ export function createAgentTool(
             await collaboration.createToolAgent(
                 ctx,
                 thisAgentId,
-                withCurrentProvider(input, currentProviderId, models),
+                withCurrentProvider(input, creator.provider, collaboration.availableModels()),
                 call.id,
+                creator,
             ),
         toLLM: ({ agentId }) => [
             {
@@ -56,26 +57,16 @@ function withCurrentProvider(
 }
 
 /**
- * The description is built once from the collection's models, so a model sees the same tool on
- * every turn and provider prompt caching still applies.
+ * The description never lists models: it stays the same while accounts and models come and go,
+ * so provider prompt caching holds and no provider session is replaced. `agent_options` lists
+ * them, and a change reaches an agent that has seen them as a notice.
  */
-function createAgentDescription(
-    models: readonly AgentModel[],
-    maxCollaborators: number,
-    maxCollaborationDepth: number,
-): string {
-    const available = models.map(
-        (model) =>
-            `- ${model.providerId} + ${model.id} (${model.name}; effort: ${model.effortLevels.join(", ")}${
-                model.serviceTiers === undefined ? "" : `; tiers: ${model.serviceTiers.join(", ")}`
-            })`,
-    );
+function createAgentDescription(maxCollaborators: number, maxCollaborationDepth: number): string {
     return [
         "Create a hidden collaborator for internal work, such as research. Bots, tasks, and subtasks use create_subtask only for substantial, distinct workstreams (e.g. changes across projects) or explicit subtask requests, within eligibility and depth limits. Handle small steps inline. Usually create second-level subtasks only on explicit user request.",
         "",
         "The collaborator works on its own. This call returns as soon as the task is delivered, and anything the collaborator has to say arrives later as a message — nothing here waits for it.",
         `One root agent tree may contain at most ${maxCollaborators} ordinary collaborators. Reuse one with send_agent_message after reaching the limit, or archive one that can no longer work (for example, its provider fails) with archive_agent to free its place. The maximum depth is ${maxCollaborationDepth} agents including the root. Subtasks belong to the tree but count toward neither limit; collaborators they create do count.`,
-        "Choose an exact model and effort. Omitting provider uses your current provider when it serves that model; otherwise provider is optional only when the model ID is unambiguous. This is the only chance to choose: a collaborator's model, effort, and permissions cannot be changed afterwards.",
-        ...(available.length === 0 ? [] : ["Available model/provider pairs:", ...available]),
+        "Call agent_options for the harnesses, providers, and models you can use, then choose an exact model and effort. A harness is who runs the collaborator's loop: happy is Happy's own; others are foreign agents such as Antigravity or Claude Code. Omitting harness or provider uses your own when it serves that model; otherwise each is optional only when the model settles it. This is the only chance to choose: a collaborator's model, effort, and permissions cannot be changed afterwards.",
     ].join("\n");
 }

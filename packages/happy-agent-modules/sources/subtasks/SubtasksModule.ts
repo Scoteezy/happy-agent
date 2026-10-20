@@ -13,7 +13,7 @@ import { backoff, type Context } from "@steve.kite/stdlib";
 import { BotsModule } from "../bots/index.js";
 import { AbortModule } from "../abort/index.js";
 import type { BotSettingsModule } from "../botSettings/index.js";
-import { CollaborationModule } from "../collaboration/index.js";
+import { CollaborationModule, type CollaborationCreator } from "../collaboration/index.js";
 import { ComputeModule } from "../compute/index.js";
 import { DurableFunctionsModule } from "../durableFunctions/index.js";
 import { TasksModule } from "../tasks/index.js";
@@ -249,23 +249,13 @@ export class SubtasksModule implements AgentModule {
         });
     }
 
-    modelDescription(): string {
-        return this.#collaboration
-            .availableModels()
-            .map(
-                (model) =>
-                    `- ${model.providerId} + ${model.id} (${model.name}; effort: ${model.effortLevels.join(", ")}${model.serviceTiers === undefined ? "" : `; tiers: ${model.serviceTiers.join(", ")}`})`,
-            )
-            .join("\n");
-    }
-
     async create(
         ctx: Context,
         parentAgentId: string,
         input: CreateSubtaskInput,
         agentId: string,
         workspaceId?: string,
-        currentProviderId?: string,
+        creator?: CollaborationCreator,
     ): Promise<SubtaskResult> {
         if (
             !Value.Check(createSubtaskInputSchema, input) ||
@@ -302,7 +292,7 @@ export class SubtasksModule implements AgentModule {
                     "This bot's settings keep its subtasks in the bot's own folder, so a subtask cannot work in a project workspace.",
                 );
             }
-            const selection = this.#collaboration.selectModel(task, currentProviderId);
+            const selection = this.#collaboration.selectModel(task, creator);
             const resolvedInput = { ...input, ...selection };
             const workspace =
                 requestedWorkspace === undefined
@@ -567,7 +557,10 @@ export class SubtasksModule implements AgentModule {
                 }
             },
             tools: (_toolCtx, scope) => [
-                createSubtaskTool(this, scope.agent.id, scope.agent.provider),
+                createSubtaskTool(this, scope.agent.id, {
+                    provider: scope.agent.provider,
+                    model: scope.agent.model,
+                }),
                 archiveSubtaskTool(this, scope.agent.id),
             ],
             instructions: async (ctx, scope) => {

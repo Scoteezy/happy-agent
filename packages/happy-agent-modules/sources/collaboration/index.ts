@@ -4,3 +4,4 @@ export * from "./tools/archive_agent.js";
 export * from "./tools/create_agent.js";
 export * from "./tools/interrupt_agent.js";
 export * from "./tools/send_message.js";
+export * from "./tools/agent_options.js";

@@ -49,6 +49,8 @@ export const collaborationCreateInputSchema = Type.Object(
         title: Type.String({ minLength: 1, maxLength: 256 }),
         model: Type.String({ minLength: 1, maxLength: 256 }),
         effort: collaborationEffortSchema,
+        /** Who runs the collaborator's loop: Happy's own or a foreign agent's, by harness ID. */
+        harness: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
         provider: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
         serviceTier: Type.Optional(collaborationServiceTierSchema),
         text: collaborationMessageTextSchema,
@@ -104,6 +106,12 @@ export const collaborationCreateResultSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+
+/** The agent asking for a collaborator: its account and model decide its harness. */
+export interface CollaborationCreator {
+    readonly provider: string;
+    readonly model: string | undefined;
+}
 
 export type CollaborationAgentId = Static<typeof collaborationAgentIdSchema>;
 export type CollaborationEffort = Static<typeof collaborationEffortSchema>;
