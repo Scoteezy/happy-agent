@@ -30,6 +30,7 @@ import {
     insertEvent,
     loadActiveRun,
     loadActiveRuns,
+    loadEventPayloads,
     loadEventState,
     loadLatestAgentEvent,
     loadPreviousEventCursor,
@@ -123,6 +124,13 @@ export class EventsModule implements AgentModule<AnyAgentTool> {
     readonly #buffer: AgentEvent[] = [];
     #head = 0;
     /**
+     * The newest event the window was started with. Those events are retained without their
+     * payloads, which a replay reads from the database the first time it asks; until then, every
+     * retained event at or before this one has an undefined payload.
+     */
+    #unreadThrough: string | undefined;
+    #reading: Promise<void> | undefined;
+    /**
      * Where each retained event sits, counted from the first event this process ever held, so a
      * cursor lookup does not scan a window of ten thousand events on every append and replay.
      */
@@ -174,6 +182,7 @@ export class EventsModule implements AgentModule<AnyAgentTool> {
             async (txCtx) => await loadEventState(txCtx.db, this.capacity()),
         );
         for (const event of loaded.events) this.#retain(freezeEvent(event));
+        this.#unreadThrough = loaded.events.at(-1)?.id;
         this.#occurredAt = this.#last()?.occurredAt ?? 0;
         this.#originCursor = loaded.originCursor ?? this.#originCursor;
         const highWater = this.#last()?.id ?? this.#originCursor;
@@ -316,10 +325,15 @@ export class EventsModule implements AgentModule<AnyAgentTool> {
         });
     }
 
-    replay(after?: string, limit = this.capacity()): EventReplay | undefined {
+    async replay(
+        ctx: Context,
+        after?: string,
+        limit = this.capacity(),
+    ): Promise<EventReplay | undefined> {
         if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.capacity()) {
             throw new Error(`The event replay limit must be between 1 and ${this.capacity()}.`);
         }
+        await this.#payloadsRead(ctx);
         const latestCursor = this.cursor();
         if (after === undefined) return { cursor: latestCursor, events: [], latestCursor };
         if (after === this.#originCursor) {
@@ -356,7 +370,12 @@ export class EventsModule implements AgentModule<AnyAgentTool> {
         return () => this.#listeners.delete(listener);
     }
 
-    messageCursor(agentId: string, messageId: string): string | undefined {
+    async messageCursor(
+        ctx: Context,
+        agentId: string,
+        messageId: string,
+    ): Promise<string | undefined> {
+        await this.#payloadsRead(ctx);
         for (let index = this.#buffer.length - 1; index >= this.#head; index -= 1) {
             const event = this.#buffer[index]!;
             if (
@@ -852,6 +871,46 @@ export class EventsModule implements AgentModule<AnyAgentTool> {
             else high = middle;
         }
         return low === 0 ? undefined : ids[low - 1];
+    }
+
+    /** Reads the payloads the window was started without, once, for every reader at once. */
+    async #payloadsRead(ctx: Context): Promise<void> {
+        while (this.#unreadThrough !== undefined) {
+            this.#reading ??= this.#payloadsLoad(ctx).finally(() => {
+                this.#reading = undefined;
+            });
+            await this.#reading;
+        }
+    }
+
+    async #payloadsLoad(ctx: Context): Promise<void> {
+        const through = this.#unreadThrough;
+        const first = this.#buffer[this.#head];
+        if (through === undefined) return;
+        if (first === undefined || first.id > through) {
+            this.#unreadThrough = undefined;
+            return;
+        }
+        const events = await ctx.inTx(
+            async (txCtx) => await loadEventPayloads(txCtx.db, first.id, through),
+        );
+        // The front may have been trimmed while they were read; what is still retained is
+        // still durable, so every unread event that remains is among them.
+        const read = new Set<string>();
+        for (const event of events) {
+            const index = this.#indexOf(event.id);
+            if (index < 0) continue;
+            this.#buffer[this.#head + index] = freezeEvent(event);
+            read.add(event.id);
+        }
+        for (let index = this.#head; index < this.#buffer.length; index += 1) {
+            const id = this.#buffer[index]!.id;
+            if (id > through) break;
+            if (!read.has(id)) {
+                throw new Error("A retained agent event is missing from the database.");
+            }
+        }
+        this.#unreadThrough = undefined;
     }
 
     #retain(event: AgentEvent): void {

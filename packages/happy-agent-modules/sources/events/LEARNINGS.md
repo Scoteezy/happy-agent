@@ -38,3 +38,14 @@ ten thousand rows with window functions to find the cut took about nine millisec
 was the largest single cost inside the stalls. The cut is now read by key order: an offset for the
 count bound and a short oldest-first walk for the byte bound. In-memory cursor lookups use a
 position index instead of scanning the window.
+
+## The window starts without its payloads
+
+Starting the journal read every retained payload: about 15 MB for a full window of a long-lived
+installation, 180 ms of a 1.4 s start, and memory held for the life of the process. Nothing in the
+daemon reads a restored payload; only `replay` and `messageCursor` can, and neither runs on the
+start path. The window now starts with each event's identity, agent, time, and type, plus the
+stored size SQLite reports without reading the text, so an oversized row still stops the start.
+The first replay reads the payloads of whatever restored events are still retained, once, for
+every caller waiting on it. A malformed payload is therefore found by that replay rather than at
+start, and one trimmed before anything asked is never read at all.

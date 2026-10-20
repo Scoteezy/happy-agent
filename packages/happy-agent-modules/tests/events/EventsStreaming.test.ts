@@ -96,9 +96,8 @@ describe("EventsModule streaming", () => {
 
             // The durable end carries everything the fragments said.
             await hooks.onEvent?.(database.context, scope, { type: "text_end" });
-            const end = events
-                .replay(events.originCursor())
-                ?.events.filter((event) => event.type === "provider.event")
+            const end = (await events.replay(database.context, events.originCursor()))?.events
+                .filter((event) => event.type === "provider.event")
                 .at(-1);
             expect(end?.payload).toMatchObject({
                 event: { type: "text_end" },

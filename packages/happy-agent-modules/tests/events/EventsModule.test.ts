@@ -64,11 +64,13 @@ describe("EventsModule", () => {
                     (await events.record(database.context, { type: "test.large", payload })).id,
                 );
             }
-            expect(events.replay(origin)).toBeUndefined();
+            expect(await events.replay(database.context, origin)).toBeUndefined();
             expect(events.originCursor()).toBe(ids[0]);
-            expect(events.replay(events.originCursor())?.events.map((event) => event.id)).toEqual(
-                ids.slice(1),
-            );
+            expect(
+                (await events.replay(database.context, events.originCursor()))?.events.map(
+                    (event) => event.id,
+                ),
+            ).toEqual(ids.slice(1));
             const head = events.cursor();
             await expect(
                 database.context.inTx(async (ctx) => {
@@ -98,7 +100,9 @@ describe("EventsModule", () => {
             expect(restarted.cursor()).toBe(head);
             expect(restarted.originCursor()).toBe(ids[0]);
             expect(
-                restarted.replay(restarted.originCursor())?.events.map((event) => event.id),
+                (await restarted.replay(database.context, restarted.originCursor()))?.events.map(
+                    (event) => event.id,
+                ),
             ).toEqual(ids.slice(1));
         } finally {
             database.close();
@@ -131,11 +135,13 @@ describe("EventsModule", () => {
                 await migrate(database.context, database.database);
             }
             await events.beforeStart(database.context);
-            expect(events.replay(origin)).toBeUndefined();
+            expect(await events.replay(database.context, origin)).toBeUndefined();
             expect(events.originCursor()).toBe(ids[0]);
-            expect(events.replay(events.originCursor())?.events.map((event) => event.id)).toEqual(
-                ids.slice(1),
-            );
+            expect(
+                (await events.replay(database.context, events.originCursor()))?.events.map(
+                    (event) => event.id,
+                ),
+            ).toEqual(ids.slice(1));
             expect(events.cursor()).toBe(ids.at(-1));
         } finally {
             database.close();
@@ -151,12 +157,12 @@ describe("EventsModule", () => {
             const origin = events.originCursor();
 
             expect(events.cursor()).toBe(origin);
-            expect(events.replay()).toEqual({
+            expect(await events.replay(database.context)).toEqual({
                 cursor: origin,
                 events: [],
                 latestCursor: origin,
             });
-            expect(events.replay(origin)).toEqual({
+            expect(await events.replay(database.context, origin)).toEqual({
                 cursor: origin,
                 events: [],
                 latestCursor: origin,
@@ -175,33 +181,43 @@ describe("EventsModule", () => {
                 type: "test.third",
             });
 
-            expect(events.replay(origin, 2)).toEqual({
+            expect(await events.replay(database.context, origin, 2)).toEqual({
                 cursor: second.id,
                 events: [first, second],
                 latestCursor: third.id,
             });
-            expect(events.replay(first.id, 2)).toEqual({
+            expect(await events.replay(database.context, first.id, 2)).toEqual({
                 cursor: third.id,
                 events: [second, third],
                 latestCursor: third.id,
             });
-            expect(events.replay(third.id)).toEqual({
+            expect(await events.replay(database.context, third.id)).toEqual({
                 cursor: third.id,
                 events: [],
                 latestCursor: third.id,
             });
-            expect(events.replay("00000000-0000-7000-8000-000000000000")).toBeUndefined();
+            expect(
+                await events.replay(database.context, "00000000-0000-7000-8000-000000000000"),
+            ).toBeUndefined();
         } finally {
             database.close();
         }
     });
 
-    it("keeps one fixed window size no caller can widen", () => {
-        expect(new EventsModule().capacity()).toBe(EVENTS_CAPACITY);
-        expect(new EventsModule().replay(undefined, EVENTS_CAPACITY)).toBeDefined();
-        expect(() => new EventsModule().replay(undefined, EVENTS_CAPACITY + 1)).toThrow(
-            `The event replay limit must be between 1 and ${EVENTS_CAPACITY}.`,
-        );
+    it("keeps one fixed window size no caller can widen", async () => {
+        const events = new EventsModule();
+        const database = moduleDatabase(events.migrations, "events-fixed-window");
+        await database.ready;
+        try {
+            await events.beforeStart(database.context);
+            expect(events.capacity()).toBe(EVENTS_CAPACITY);
+            expect(await events.replay(database.context, undefined, EVENTS_CAPACITY)).toBeDefined();
+            await expect(
+                events.replay(database.context, undefined, EVENTS_CAPACITY + 1),
+            ).rejects.toThrow(`The event replay limit must be between 1 and ${EVENTS_CAPACITY}.`);
+        } finally {
+            database.close();
+        }
     });
 
     it("rejects replay limits past its window and invalid append envelopes", async () => {
@@ -210,10 +226,10 @@ describe("EventsModule", () => {
         await database.ready;
         try {
             await events.beforeStart?.(database.context);
-            expect(() => events.replay(events.originCursor(), 0)).toThrow(
+            await expect(events.replay(database.context, events.originCursor(), 0)).rejects.toThrow(
                 "The event replay limit must be between 1 and 2.",
             );
-            expect(() => events.replay(events.originCursor(), 3)).toThrow(
+            await expect(events.replay(database.context, events.originCursor(), 3)).rejects.toThrow(
                 "The event replay limit must be between 1 and 2.",
             );
 
@@ -249,7 +265,62 @@ describe("EventsModule", () => {
                     type: "test.trailing.",
                 }),
             ).rejects.toThrow("The event input is invalid.");
-            expect(events.replay(events.originCursor())?.events).toEqual([]);
+            expect((await events.replay(database.context, events.originCursor()))?.events).toEqual(
+                [],
+            );
+        } finally {
+            database.close();
+        }
+    });
+
+    it("starts without reading payloads and reads them once when a replay first asks", async () => {
+        const first = new EventsModule();
+        const database = moduleDatabase(first.migrations, "events-unread-payloads-test");
+        await database.ready;
+        try {
+            await first.beforeStart(database.context);
+            const recorded = [];
+            for (const value of ["one", "two", "three"]) {
+                recorded.push(
+                    await first.record(database.context, {
+                        agentId: "agent-1",
+                        payload: { value },
+                        type: "test.recorded",
+                    }),
+                );
+            }
+            const accepted = await first.record(database.context, {
+                agentId: "agent-1",
+                payload: { id: "message-1" },
+                type: "message.accepted",
+            });
+
+            // A payload no one reads again cannot stop the journal starting.
+            await agentDatabaseRun(
+                database.database,
+                sql`UPDATE happy_agent_events SET payload_json = ${"not json"}
+                    WHERE event_id = ${recorded[0]!.id}`,
+            );
+            const restarted = new EventsModule();
+            await restarted.beforeStart(database.context);
+            expect(restarted.cursor()).toBe(accepted.id);
+            expect(restarted.latestCursor("agent-1")).toBe(accepted.id);
+
+            // The unreadable front leaves and a new event arrives before anything asks for a payload.
+            await restarted.trim(database.context, recorded[0]!.id);
+            const later = await restarted.record(database.context, {
+                agentId: "agent-1",
+                payload: { value: "later" },
+                type: "test.recorded",
+            });
+            const [replayed, again, cursor] = await Promise.all([
+                restarted.replay(database.context, recorded[0]!.id),
+                restarted.replay(database.context, recorded[1]!.id),
+                restarted.messageCursor(database.context, "agent-1", "message-1"),
+            ]);
+            expect(replayed?.events).toEqual([recorded[1], recorded[2], accepted, later]);
+            expect(again?.events).toEqual([recorded[2], accepted, later]);
+            expect(cursor).toBe(accepted.id);
         } finally {
             database.close();
         }
@@ -268,14 +339,18 @@ describe("EventsModule", () => {
             });
 
             expect(first.latestCursor("agent-1")).toBe(recorded.id);
-            expect(first.replay(first.originCursor())?.events).toEqual([recorded]);
+            expect((await first.replay(database.context, first.originCursor()))?.events).toEqual([
+                recorded,
+            ]);
 
             const restarted = new EventsModule();
             await restarted.beforeStart?.(database.context);
 
             expect(restarted.cursor()).toBe(recorded.id);
             expect(restarted.latestCursor("agent-1")).toBe(recorded.id);
-            expect(restarted.replay(restarted.originCursor())?.events).toEqual([recorded]);
+            expect(
+                (await restarted.replay(database.context, restarted.originCursor()))?.events,
+            ).toEqual([recorded]);
         } finally {
             database.close();
         }
@@ -335,15 +410,17 @@ describe("EventsModule", () => {
 
             expect(first.originCursor()).toBe(firstEvent.id);
             expect(first.cursor()).toBe(thirdEvent.id);
-            expect(first.replay(first.originCursor())?.events).toEqual([secondEvent, thirdEvent]);
+            expect((await first.replay(database.context, first.originCursor()))?.events).toEqual([
+                secondEvent,
+                thirdEvent,
+            ]);
 
             const restarted = new SmallWindowEventsModule(2);
             await restarted.beforeStart?.(database.context);
             expect(restarted.originCursor()).toBe(firstEvent.id);
-            expect(restarted.replay(restarted.originCursor())?.events).toEqual([
-                secondEvent,
-                thirdEvent,
-            ]);
+            expect(
+                (await restarted.replay(database.context, restarted.originCursor()))?.events,
+            ).toEqual([secondEvent, thirdEvent]);
         } finally {
             database.close();
         }
@@ -367,22 +444,37 @@ describe("EventsModule", () => {
                 const window = recorded.slice(-5);
                 expect(events.cursor()).toBe(recorded.at(-1)!.id);
                 expect(events.originCursor()).toBe(recorded.at(-6)?.id ?? events.originCursor());
-                expect(events.replay(events.originCursor())?.events.map((e) => e.id)).toEqual(
-                    window.map((e) => e.id),
-                );
+                expect(
+                    (await events.replay(database.context, events.originCursor()))?.events.map(
+                        (e) => e.id,
+                    ),
+                ).toEqual(window.map((e) => e.id));
                 // Every retained cursor resumes right after itself, a dropped one is a gap.
                 for (const [offset, event] of window.entries()) {
-                    expect(events.replay(event.id, 2)?.events.map((e) => e.id)).toEqual(
-                        window.slice(offset + 1, offset + 3).map((e) => e.id),
-                    );
+                    expect(
+                        (await events.replay(database.context, event.id, 2))?.events.map(
+                            (e) => e.id,
+                        ),
+                    ).toEqual(window.slice(offset + 1, offset + 3).map((e) => e.id));
                 }
-                if (recorded.length > 6) expect(events.replay(recorded.at(-7)!.id)).toBeUndefined();
-                expect(events.messageCursor("agent-a", `message-${String(index)}`)).toBe(
-                    recorded.at(-1)!.id,
-                );
+                if (recorded.length > 6)
+                    expect(
+                        await events.replay(database.context, recorded.at(-7)!.id),
+                    ).toBeUndefined();
+                expect(
+                    await events.messageCursor(
+                        database.context,
+                        "agent-a",
+                        `message-${String(index)}`,
+                    ),
+                ).toBe(recorded.at(-1)!.id);
                 if (index >= 5) {
                     expect(
-                        events.messageCursor("agent-a", `message-${String(index - 5)}`),
+                        await events.messageCursor(
+                            database.context,
+                            "agent-a",
+                            `message-${String(index - 5)}`,
+                        ),
                     ).toBeUndefined();
                 }
             }
@@ -412,7 +504,9 @@ describe("EventsModule", () => {
             const restarted = new SmallWindowEventsModule(2);
             await restarted.beforeStart?.(database.context);
             expect(restarted.originCursor()).toBe(recorded[2]?.id);
-            expect(restarted.replay(restarted.originCursor())?.events).toEqual(recorded.slice(3));
+            expect(
+                (await restarted.replay(database.context, restarted.originCursor()))?.events,
+            ).toEqual(recorded.slice(3));
         } finally {
             database.close();
         }
@@ -435,13 +529,17 @@ describe("EventsModule", () => {
                 type: "test.retained",
             });
 
-            expect(events.messageCursor("agent-1", "message-1")).toBe(accepted.id);
+            expect(await events.messageCursor(database.context, "agent-1", "message-1")).toBe(
+                accepted.id,
+            );
             await expect(events.trim(database.context, accepted.id)).resolves.toEqual({
                 through: accepted.id,
                 trimmed: 1,
             });
             expect(events.originCursor()).toBe(accepted.id);
-            expect(events.replay(accepted.id)?.events).toEqual([retained]);
+            expect((await events.replay(database.context, accepted.id))?.events).toEqual([
+                retained,
+            ]);
         } finally {
             database.close();
         }
@@ -465,7 +563,10 @@ describe("EventsModule", () => {
             await expect(
                 events.trim(database.context, "00000000-0000-7000-8000-000000000000"),
             ).resolves.toBeUndefined();
-            expect(events.replay(events.originCursor())?.events).toEqual([first, second]);
+            expect((await events.replay(database.context, events.originCursor()))?.events).toEqual([
+                first,
+                second,
+            ]);
 
             await expect(events.trim(database.context, second.id)).resolves.toEqual({
                 through: second.id,
@@ -473,7 +574,7 @@ describe("EventsModule", () => {
             });
             expect(events.cursor()).toBe(second.id);
             expect(events.originCursor()).toBe(second.id);
-            expect(events.replay(second.id)).toEqual({
+            expect(await events.replay(database.context, second.id)).toEqual({
                 cursor: second.id,
                 events: [],
                 latestCursor: second.id,
@@ -510,7 +611,10 @@ describe("EventsModule", () => {
             ).rejects.toThrow("trim rollback");
 
             expect(events.originCursor()).not.toBe(first.id);
-            expect(events.replay(events.originCursor())?.events).toEqual([first, second]);
+            expect((await events.replay(database.context, events.originCursor()))?.events).toEqual([
+                first,
+                second,
+            ]);
             const rows = await agentDatabaseRows<{ event_id: string }>(
                 database.database,
                 sql`SELECT event_id FROM happy_agent_events ORDER BY event_id`,
@@ -544,7 +648,9 @@ describe("EventsModule", () => {
             ).rejects.toThrow("rollback");
 
             expect(received).toEqual([]);
-            expect(events.replay(events.originCursor())?.events).toEqual([]);
+            expect((await events.replay(database.context, events.originCursor()))?.events).toEqual(
+                [],
+            );
             const rows = await agentDatabaseRows<{ event_id: string }>(
                 database.database,
                 sql`SELECT event_id FROM happy_agent_events`,
@@ -621,7 +727,9 @@ describe("EventsModule", () => {
                 }),
             ).resolves.toMatchObject({ type: "test.observer-failure" });
             expect(ordinary).toEqual(["test.observer-failure"]);
-            expect(events.replay(events.originCursor())?.events).toHaveLength(1);
+            expect(
+                (await events.replay(database.context, events.originCursor()))?.events,
+            ).toHaveLength(1);
         } finally {
             database.close();
         }
@@ -647,7 +755,9 @@ describe("EventsModule", () => {
                     type: "test.transactional-failure",
                 }),
             ).rejects.toThrow("transactional observer failed");
-            expect(events.replay(events.originCursor())?.events).toEqual([]);
+            expect((await events.replay(database.context, events.originCursor()))?.events).toEqual(
+                [],
+            );
             const rows = await agentDatabaseRows<{ event_id: string }>(
                 database.database,
                 sql`SELECT event_id FROM happy_agent_events`,
@@ -678,7 +788,9 @@ describe("EventsModule", () => {
                     type: "test.oversized",
                 }),
             ).rejects.toThrow("exceeds the 5 MiB durable limit");
-            expect(events.replay(events.originCursor())?.events).toEqual([]);
+            expect((await events.replay(database.context, events.originCursor()))?.events).toEqual(
+                [],
+            );
         } finally {
             database.close();
         }
@@ -772,7 +884,7 @@ describe("EventsModule", () => {
                 settlementId: "settlement-hooks",
             } as never);
 
-            const replay = events.replay(events.originCursor());
+            const replay = await events.replay(database.context, events.originCursor());
             expect(eventTypes(replay?.events ?? [])).toEqual([
                 "agent.created",
                 "message.accepted",
@@ -785,7 +897,9 @@ describe("EventsModule", () => {
                 "turn.completed",
                 "loop.settled",
             ]);
-            expect(events.messageCursor("agent-hooks", "message-hooks")).toBeDefined();
+            expect(
+                await events.messageCursor(database.context, "agent-hooks", "message-hooks"),
+            ).toBeDefined();
             const activeRuns = await agentDatabaseRows<{ agent_id: string }>(
                 database.database,
                 sql`SELECT agent_id FROM happy_agent_active_runs`,
@@ -833,7 +947,7 @@ describe("EventsModule", () => {
                 isError: true,
             });
 
-            const recorded = events.replay(events.originCursor())!.events;
+            const recorded = (await events.replay(database.context, events.originCursor()))!.events;
             expect(recorded.find((event) => event.type === "tool.started")?.payload).toMatchObject({
                 runId: "message-oversized-tool",
                 rigEvent: {
@@ -899,7 +1013,7 @@ describe("EventsModule", () => {
                 tokens: { input: 1, output: 1 },
             } as never);
 
-            const replay = events.replay(events.originCursor());
+            const replay = await events.replay(database.context, events.originCursor());
             const completion = replay?.events.find((event) => event.type === "tool.completed");
             expect(completion?.payload).toMatchObject({
                 callId: "call-tool-result",
@@ -985,9 +1099,9 @@ describe("EventsModule", () => {
                 }),
             ).rejects.toThrow("roll back the result");
             expect(
-                events
-                    .replay(events.originCursor())
-                    ?.events.some((event) => event.type === "tool.completed"),
+                (await events.replay(database.context, events.originCursor()))?.events.some(
+                    (event) => event.type === "tool.completed",
+                ),
             ).toBe(false);
 
             const restarted = new EventsModule();
@@ -999,9 +1113,9 @@ describe("EventsModule", () => {
                 tokens: { input: 1, output: 1 },
             } as never);
             expect(
-                restarted
-                    .replay(restarted.originCursor())
-                    ?.events.find((event) => event.type === "inference.completed")?.payload,
+                (await restarted.replay(database.context, restarted.originCursor()))?.events.find(
+                    (event) => event.type === "inference.completed",
+                )?.payload,
             ).toMatchObject({
                 blocks: [
                     {
@@ -1042,7 +1156,11 @@ describe("EventsModule", () => {
                 metadata: { title: "New" },
             });
 
-            expect(eventTypes(events.replay(events.originCursor())?.events ?? [])).toEqual([
+            expect(
+                eventTypes(
+                    (await events.replay(database.context, events.originCursor()))?.events ?? [],
+                ),
+            ).toEqual([
                 "agent.restored",
                 "agent.archived",
                 "agent.permission-changed",
@@ -1075,9 +1193,8 @@ describe("EventsModule", () => {
                 });
             });
 
-            const accepted = events
-                .replay(events.originCursor())
-                ?.events.filter((event) => event.type === "message.accepted")
+            const accepted = (await events.replay(database.context, events.originCursor()))?.events
+                .filter((event) => event.type === "message.accepted")
                 .map((event) => event.payload as { runId: string });
             expect(accepted?.[1]?.runId).toBe(accepted?.[0]?.runId);
         } finally {
@@ -1106,9 +1223,8 @@ describe("EventsModule", () => {
                 profile: null,
             });
 
-            const accepted = events
-                .replay(events.originCursor())
-                ?.events.filter((event) => event.type === "message.accepted")
+            const accepted = (await events.replay(database.context, events.originCursor()))?.events
+                .filter((event) => event.type === "message.accepted")
                 .map((event) => event.payload as { runId: string });
             expect(accepted?.map((event) => event.runId)).toEqual([
                 "message-first",
@@ -1192,7 +1308,9 @@ describe("EventsModule", () => {
                 payload: {},
                 type: "test.other",
             });
-            expect(events.replay(events.originCursor())?.events).toHaveLength(1);
+            expect(
+                (await events.replay(database.context, events.originCursor()))?.events,
+            ).toHaveLength(1);
             expect(await events.latestAgentEvent(database.context, "quiet-agent")).toEqual({
                 cursor: first.id,
                 occurredAt: first.occurredAt,
@@ -1312,9 +1430,9 @@ describe("EventsModule", () => {
             });
 
             const providerEvents =
-                events
-                    .replay(events.originCursor())
-                    ?.events.filter((event) => event.type === "provider.event") ?? [];
+                (await events.replay(database.context, events.originCursor()))?.events.filter(
+                    (event) => event.type === "provider.event",
+                ) ?? [];
             // Streamed reasoning and tool-argument fragments are not journaled.
             expect(providerEvents).toHaveLength(14);
             expect(providerEvents[0]?.payload).toMatchObject({
@@ -1401,9 +1519,9 @@ describe("EventsModule", () => {
                 settlementId: "settlement-retry-state",
             } as never);
 
-            const settled = events
-                .replay(events.originCursor())
-                ?.events.find((event) => event.type === "loop.settled");
+            const settled = (
+                await events.replay(database.context, events.originCursor())
+            )?.events.find((event) => event.type === "loop.settled");
             expect(settled?.payload).not.toHaveProperty("errorMessage");
             expect(settled?.payload).toMatchObject({ stopReason: "stop" });
         } finally {
@@ -1437,9 +1555,10 @@ describe("EventsModule", () => {
                 metadata: undefined,
             });
 
-            const recovered = restarted
-                .replay(restarted.originCursor())
-                ?.events.filter((event) => event.type === "provider.event")
+            const recovered = (
+                await restarted.replay(database.context, restarted.originCursor())
+            )?.events
+                .filter((event) => event.type === "provider.event")
                 .at(-1);
             expect(recovered?.payload).toMatchObject({
                 event: { type: "block_reset" },
@@ -1463,7 +1582,9 @@ describe("EventsModule", () => {
                     delta: "orphan",
                 }),
             ).rejects.toThrow("without a start event");
-            expect(events.replay(events.originCursor())?.events).toEqual([]);
+            expect((await events.replay(database.context, events.originCursor()))?.events).toEqual(
+                [],
+            );
         } finally {
             database.close();
         }
@@ -1486,7 +1607,8 @@ describe("EventsModule", () => {
                         ),
                     ),
             );
-            const replayed = events.replay(events.originCursor())?.events ?? [];
+            const replayed =
+                (await events.replay(database.context, events.originCursor()))?.events ?? [];
             expect(replayed).toHaveLength(20);
             expect(replayed.map((event) => event.id)).toEqual(
                 [...replayed]
@@ -1701,7 +1823,9 @@ describe("EventsModule", () => {
 
             const restarted = new EventsModule();
             await restarted.beforeStart?.(database.context);
-            const reloadedPayload = restarted.replay(restarted.originCursor())?.events[0]?.payload;
+            const reloadedPayload = (
+                await restarted.replay(database.context, restarted.originCursor())
+            )?.events[0]?.payload;
             expect(reloadedPayload).toEqual(recorded.payload);
             expect(
                 Object.prototype.hasOwnProperty.call(

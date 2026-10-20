@@ -39,6 +39,17 @@ const eventRowSchema = Type.Object(
 );
 type EventRow = Static<typeof eventRowSchema>;
 
+const eventHeadingRowSchema = Type.Object(
+    {
+        agent_id: Type.Union([Type.String(), Type.Null()]),
+        event_id: Type.String(),
+        occurred_at: Type.Integer(),
+        payload_bytes: Type.Integer(),
+        type: Type.String(),
+    },
+    { additionalProperties: false },
+);
+
 const stateRowSchema = Type.Object(
     {
         key: Type.String(),
@@ -159,6 +170,12 @@ export const eventsMigrations: readonly AgentModuleMigration[] = [
     ],
 ];
 
+/**
+ * The retained window as it stood when the daemon stopped, without its payloads. Reading ten
+ * thousand payloads is most of what starting the journal costs, and nothing needs them until a
+ * replay asks; `loadEventPayloads` reads them then. Each event is returned with an undefined
+ * payload.
+ */
 export async function loadEventState(
     database: AgentDatabase,
     capacity: number,
@@ -167,9 +184,10 @@ export async function loadEventState(
     readonly originCursor?: string;
 }> {
     const boundary = await eventRetentionBoundary(database, capacity);
-    const rows = await agentDatabaseRows<EventRow>(
+    const rows = await agentDatabaseRows<unknown>(
         database,
-        sql`SELECT event_id, agent_id, occurred_at, type, payload_json
+        sql`SELECT event_id, agent_id, occurred_at, type,
+                octet_length(payload_json) AS payload_bytes
             FROM happy_agent_events WHERE event_id > ${boundary ?? ""}
             ORDER BY event_id DESC LIMIT ${capacity}`,
     );
@@ -181,7 +199,7 @@ export async function loadEventState(
     if (storedOrigin !== undefined && !Value.Check(eventIdSchema, storedOrigin)) {
         throw new Error("The durable agent event origin cursor is invalid.");
     }
-    const events = [...rows].reverse().map(eventFromRow);
+    const events = [...rows].reverse().map(eventHeadingFromRow);
     let previousOccurredAt = 0;
     for (const event of events) {
         if (event.occurredAt < previousOccurredAt) {
@@ -208,6 +226,21 @@ export async function loadEventState(
         throw new Error("The durable agent event origin cursor is inside the retained window.");
     }
     return { events, originCursor };
+}
+
+/** Every durable event from `from` through `through`, payloads included, oldest first. */
+export async function loadEventPayloads(
+    database: AgentDatabase,
+    from: string,
+    through: string,
+): Promise<readonly AgentEvent[]> {
+    const rows = await agentDatabaseRows<EventRow>(
+        database,
+        sql`SELECT event_id, agent_id, occurred_at, type, payload_json
+            FROM happy_agent_events WHERE event_id >= ${from} AND event_id <= ${through}
+            ORDER BY event_id`,
+    );
+    return rows.map(eventFromRow);
 }
 
 export async function loadActiveRuns<State>(
@@ -457,6 +490,25 @@ export async function deleteActiveRun(database: AgentDatabase, agentId: string):
         database,
         sql`DELETE FROM happy_agent_active_runs WHERE agent_id = ${agentId}`,
     );
+}
+
+function eventHeadingFromRow(input: unknown): AgentEvent {
+    if (!Value.Check(eventHeadingRowSchema, input)) {
+        throw new Error("A durable agent event is invalid.");
+    }
+    // Measured by SQLite from the stored text, without reading it.
+    if (input.payload_bytes > MAX_EVENT_PAYLOAD_BYTES) {
+        throw new Error("The agent event payload exceeds the 5 MiB durable limit.");
+    }
+    const event = {
+        ...(input.agent_id === null ? {} : { agentId: input.agent_id }),
+        id: input.event_id,
+        occurredAt: input.occurred_at,
+        payload: undefined,
+        type: input.type,
+    };
+    if (!Value.Check(eventSchema, event)) throw new Error("A durable agent event is invalid.");
+    return event;
 }
 
 function eventFromRow(input: unknown): AgentEvent {

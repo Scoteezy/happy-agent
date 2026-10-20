@@ -166,12 +166,12 @@ describe("SlashCommandsModule", () => {
             expect(image?.mediaType).toBe("image/png");
             expect([...((image?.blob ?? new Uint8Array()) as Uint8Array)]).toEqual([1, 2, 3]);
             expect(image?.etag).toMatch(/^"[a-f0-9]{64}"$/u);
-            expect(events.replay(origin)?.events.map((event) => event.type)).toEqual([
-                "slash_commands.updated",
-            ]);
+            expect(
+                (await events.replay(database.context, origin))?.events.map((event) => event.type),
+            ).toEqual(["slash_commands.updated"]);
 
             await commands.refresh(database.context, "agent-1");
-            expect(events.replay(origin)?.events).toHaveLength(1);
+            expect((await events.replay(database.context, origin))?.events).toHaveLength(1);
 
             await commands.invoke(database.context, "agent-1", "review", {
                 ...invocation,
@@ -193,7 +193,7 @@ describe("SlashCommandsModule", () => {
                 },
             };
             await commands.refresh(database.context, "agent-1");
-            expect(events.replay(origin)?.events).toHaveLength(2);
+            expect((await events.replay(database.context, origin))?.events).toHaveLength(2);
 
             owner.definitions[0] = {
                 ...owner.definitions[0]!,
@@ -203,18 +203,18 @@ describe("SlashCommandsModule", () => {
                 },
             };
             await commands.refresh(database.context, "agent-1");
-            expect(events.replay(origin)?.events).toHaveLength(3);
+            expect((await events.replay(database.context, origin))?.events).toHaveLength(3);
 
             // A restarted process compares with the last announcement instead of announcing again.
             const restarted = new SlashCommandsModule(events, owner);
             await restarted.beforeStart?.(database.context, agents);
             await restarted.refresh(database.context, "agent-1");
-            expect(events.replay(origin)?.events).toHaveLength(3);
+            expect((await events.replay(database.context, origin))?.events).toHaveLength(3);
             owner.definitions[0] = { ...owner.definitions[0]!, description: "Review it all." };
             const changed = new SlashCommandsModule(events, owner);
             await changed.beforeStart?.(database.context, agents);
             await changed.refresh(database.context, "agent-1");
-            expect(events.replay(origin)?.events).toHaveLength(4);
+            expect((await events.replay(database.context, origin))?.events).toHaveLength(4);
         } finally {
             database.close();
         }

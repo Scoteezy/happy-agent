@@ -58,7 +58,9 @@ describe("EventsModule startup consistency", () => {
 
         expect(fixture.wasInterleaved()).toBe(true);
         expect(events.originCursor()).toBe(ORIGIN);
-        expect(events.replay(events.originCursor())?.events).toHaveLength(2);
+        expect((await events.replay(fixture.context, events.originCursor()))?.events).toHaveLength(
+            2,
+        );
     });
 });
 

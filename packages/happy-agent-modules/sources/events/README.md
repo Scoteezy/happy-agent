@@ -19,13 +19,13 @@ is independent. The module reads the wall clock itself.
 
 - `record(ctx, input: { type, payload, agentId? }): Promise<AgentEvent>` — append a raw event.
   The module assigns `id` (UUIDv7) and `occurredAt`.
-- `replay(after?, limit?)` — returns `{ cursor, events, latestCursor }` for the slice after the
-  provided cursor, up to `limit`. Passing the module's `originCursor()` replays from the start of
-  the window.
+- `replay(ctx, after?, limit?)` — resolves `{ cursor, events, latestCursor }` for the slice after
+  the provided cursor, up to `limit`. Passing the module's `originCursor()` replays from the start
+  of the window. The window is started without its payloads; the first replay reads them.
 - `trim(ctx, through)` — removes the durable prefix through an exact cursor.
 - `latestCursor(agentId)` — newest cursor for one agent.
 - `activeAgentIds()` — identities whose runs have started and have not reached a terminal event.
-- `messageCursor(agentId, messageId)` — durable cursor assigned to one accepted message.
+- `messageCursor(ctx, agentId, messageId)` — durable cursor assigned to one accepted message.
 - `subscribe(listener)` — register a post-commit observer. Returns an unsubscribe function.
 - `observe(listener)` — register the single `{ onEventTransactional?, onEvent? }` projection
   listener. The transactional callback runs inside the mutation transaction, so its own writes

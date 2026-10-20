@@ -797,9 +797,10 @@ describe("HistoryModule run history", () => {
                 toolCalls: 2,
                 toolResults: 2,
             });
-            const liveMessageId = world.events
-                .replay(world.events.originCursor())
-                ?.events.filter((event) => event.type === "provider.event")
+            const liveMessageId = (
+                await world.events.replay(world.database.context, world.events.originCursor())
+            )?.events
+                .filter((event) => event.type === "provider.event")
                 .map(
                     (event) =>
                         (
@@ -946,9 +947,9 @@ describe("HistoryModule run history", () => {
             expect(page.runs[0]?.id).toBe("message-image");
             expect(page.runs[0]?.messages[0]?.runId).toBe("message-image");
 
-            const acceptance = world.events
-                .replay(world.events.originCursor())
-                ?.events.find((event) => event.type === "message.accepted");
+            const acceptance = (
+                await world.events.replay(world.database.context, world.events.originCursor())
+            )?.events.find((event) => event.type === "message.accepted");
             expect(acceptance?.payload).toEqual({
                 id: "message-image",
                 kind: "send",
