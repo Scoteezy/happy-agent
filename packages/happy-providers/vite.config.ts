@@ -16,6 +16,7 @@ export default defineConfig({
         // Each Windows worker loads all vendor SDKs; limit contention so protocol
         // timing assertions measure the transport, not worker startup starvation.
         ...(process.platform === "win32" ? { maxWorkers: 2, minWorkers: 1 } : {}),
+        setupFiles: ["tests/setup/machineCodex.ts"],
         include: ["tests/**/*.test.ts", "tests/vendors/captureGrok.ts"],
         exclude: ["tests/**/*.live.test.ts"],
     },

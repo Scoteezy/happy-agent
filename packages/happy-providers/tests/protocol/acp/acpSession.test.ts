@@ -106,6 +106,7 @@ function harness(options: { steerable?: boolean; profile?: AcpAgentProfile } = {
             session: AcpSession,
             signal?: AbortSignal,
             steered?: AbortSignal,
+            onEvent?: (event: SessionEvent) => void,
         ): Promise<SessionEvent[]> {
             const events: SessionEvent[] = [];
             const accumulator = new SessionAssistantMessageAccumulator();
@@ -120,6 +121,7 @@ function harness(options: { steerable?: boolean; profile?: AcpAgentProfile } = {
             })) {
                 events.push(event);
                 accumulator.add(event);
+                onEvent?.(event);
                 if (event.type === "done") break;
             }
             const message = accumulator.message();
@@ -251,12 +253,16 @@ describe("AcpSession", () => {
         const session = await h.session();
         h.user("throttled hello");
         const stop = new AbortController();
-        const started = Date.now();
-        const running = h.run(session, stop.signal);
-        setTimeout(() => stop.abort(), 500);
-        const events = await running;
+        // Stop once the wait has begun, however long the agent took to refuse.
+        let waiting = 0;
+        const events = await h.run(session, stop.signal, undefined, (event) => {
+            if (event.type !== "retrying") return;
+            waiting = Date.now();
+            stop.abort();
+        });
         expect(done(events)).toMatchObject({ state: "cancelled" });
-        expect(Date.now() - started).toBeLessThan(2_500);
+        // The first retry waits seconds; stopping ends it at once.
+        expect(Date.now() - waiting).toBeLessThan(1_500);
         expect(h.log().filter((entry) => entry.method === "prompt")).toHaveLength(1);
     }, 30_000);
 
@@ -265,10 +271,15 @@ describe("AcpSession", () => {
         const session = await h.session();
         h.user("throttled first");
         const steer = new AbortController();
-        setTimeout(() => steer.abort(), 500);
-        const started = Date.now();
-        const first = await h.run(session, undefined, steer.signal);
-        expect(Date.now() - started).toBeLessThan(2_500);
+        // Steer once the wait has begun, however long the agent took to refuse.
+        let waiting = 0;
+        const first = await h.run(session, undefined, steer.signal, (event) => {
+            if (event.type !== "retrying") return;
+            waiting = Date.now();
+            steer.abort();
+        });
+        // The first retry waits seconds; steering ends it at once.
+        expect(Date.now() - waiting).toBeLessThan(1_500);
         expect(done(first)).toMatchObject({ state: "normal" });
         expect(h.log().filter((entry) => entry.method === "prompt")).toHaveLength(1);
 
