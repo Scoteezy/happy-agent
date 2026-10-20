@@ -4436,6 +4436,52 @@ profile of its own and never moves the old profile, its cookies, or its storage 
 closes every connection opened through its network's tunnels and answers later requests on them
 with `502`. The daemon never opens such a tunnel in another network.
 
+### `CONNECT /v0/artifacts/:artifactId/proxy`
+
+A destination-restricted HTTP tunnel into a live artifact's recorded `live.networkId`. It uses
+the same authentication, streaming, connection timeout, and network-failure behavior as the
+network proxy above. The outer `CONNECT` is refused with `404 not_found` when the artifact is
+missing, deleted, or not live; otherwise it has the same refusals as the network proxy.
+
+The daemon owns one destination-policy boundary for every nested `CONNECT` and proxied HTTP
+request on this tunnel. The client supplies only the artifact ID, never a network or an
+allowlist. Before opening each destination connection, the daemon reads the artifact's current
+`live.url` and resolves the requested host on the recorded network's machine:
+
+- The destination is allowed when every resolved address is public.
+- The only exception is for a recorded URL whose host is itself loopback, determined from the
+  URL alone: `localhost` or a literal loopback IP in `127.0.0.0/8` or `::1`, including mapped
+  forms. The requested hostname must equal the recorded hostname, case-insensitively as written,
+  and the port must equal the URL's effective port (`80` for HTTP or `443` for HTTPS when omitted).
+  Every resolved address must then be loopback. Equality is of hostnames, not resolved addresses;
+  a different spelling or hostname resolving to the same address gets no exception.
+- Everything else is refused before connecting. Private LAN addresses, including `10.0.0.0/8`,
+  `172.16.0.0/12`, `192.168.0.0/16`, and `fc00::/7`, are never allowed, even as the recorded URL.
+  Link-local addresses (`169.254.0.0/16` and `fe80::/10`) are never allowed either.
+
+Public means a publicly routable unicast address; loopback, private, link-local, unspecified,
+multicast, and reserved addresses are not public. IPv4-mapped and IPv4-translated IPv6 addresses
+are classified as their embedded IPv4 address. `0.0.0.0` and `::` are non-public and are not
+loopback exceptions. Numeric hostname spellings such as `2130706433` are classified as the IP
+addresses they represent, not treated as public DNS names. An empty or failed resolution never
+permits a connection. The daemon connects to exactly an address it checked, without a second
+lookup. A policy refusal answers the nested request with `403`; resolution and connection
+failures follow the network proxy's existing failure behavior.
+
+A public recorded hostname gets no loopback exception: rebinding `attacker.com` to loopback
+cannot authorize it, even when `attacker.com` is the recorded URL's host. Mixed public/non-public
+DNS answers are refused.
+
+There is no version selector. The current URL supplies the policy for every new destination
+connection, even when a client is displaying a pinned artifact version. A URL update applies to
+the next connection; a deleted or non-live artifact refuses further connections. Already-open
+destination connections are not torn down by those changes.
+
+Clients must use this route for live-URL artifacts and must not use the unrestricted network,
+workspace, or agent proxy routes for them. If this additive route is unavailable on an older
+daemon, the client shows the live page as unavailable rather than falling back. The existing
+network and workspace proxy routes, including agent browser tabs using them, are unchanged.
+
 ### Local bridges
 
 A bridge connects something on the person's own computer — a USB device, a Bluetooth adapter, or a
@@ -9331,8 +9377,11 @@ access. An artifact write never needs or grants Full access to the agent's machi
 
 Creating or updating a live-URL artifact is always reviewed in Auto, even when the acting agent
 created it. The review discloses the effective URL, title, and recorded network, and that the
-client will load the page and run its scripts through that network. This review does not itself
-grant Full access. Other permission-mode and ownership rules above still apply.
+client will load the page and run its scripts through that network. For a loopback URL it states
+the exposure plainly, such as "exposes localhost:5173 on the agent's machine to the page".
+For a private or link-local URL it identifies the address as non-public and explains that the
+artifact proxy will refuse it. This review does not itself grant Full access. Other
+permission-mode and ownership rules above still apply.
 
 An agent mentions an artifact in its replies with the reference tag
 `<happy-artifact id="…"/>`, which clients show as a link labeled with the artifact's live title;
@@ -9363,9 +9412,11 @@ is the creating agent's network, resolved as for
 never changes for that artifact, even if another agent updates it or the creator later changes
 machines. A URL update keeps that network. `localhost` therefore means the original agent's
 network, not the viewer's machine. Failure to resolve the network fails creation without a
-partial artifact. A client opens the URL through `CONNECT /v0/networks/:networkId/proxy` on the
-artifact's daemon or connection. If that network is unavailable, it shows an unavailable page;
-it must not fall back to the viewer's network or the creator's current network. It may resolve
+partial artifact. A client opens the URL through `CONNECT /v0/artifacts/:artifactId/proxy` on the
+artifact's daemon or connection, subject to that route's destination policy. It must not use
+`CONNECT /v0/networks/:networkId/proxy` for live artifacts. If the artifact proxy or its recorded
+network is unavailable, it shows an unavailable page; it must not fall back to an unrestricted
+proxy, the viewer's network, or the creator's current network. It may resolve
 the creator's network again to restore the recorded route after a daemon restart, but may use
 the result only if its ID still equals the recorded `networkId`.
 

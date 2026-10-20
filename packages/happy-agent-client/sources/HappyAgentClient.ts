@@ -2273,6 +2273,15 @@ export class HappyAgentClient {
     }
 
     /**
+     * The URL of `CONNECT /v0/artifacts/:artifactId/proxy`. The daemon enforces the live
+     * artifact's current destination policy on its recorded network. Fetch cannot open this
+     * tunnel; the caller's transport supplies authentication. Never fall back to a network proxy.
+     */
+    artifactProxyUrl(artifactId: Cuid2): string {
+        return endpointUrl(this.#endpoint, `v0/artifacts/${encodeURIComponent(artifactId)}/proxy`);
+    }
+
+    /**
      * `POST /v0/artifact-uploads` — one file's bytes for a later creation or update, up to
      * 256 MiB. The file's name and media type come from the path it is placed at.
      */

@@ -210,8 +210,8 @@ describe("artifacts protocol", () => {
         await expect(client.getArtifactVersion(artifact.id, 1)).resolves.toEqual({
             version: liveVersion,
         });
-        expect(client.networkProxyUrl(live.networkId)).toBe(
-            "http://daemon/v0/networks/r-build-box/proxy",
+        expect(client.artifactProxyUrl(artifact.id)).toBe(
+            "http://daemon/v0/artifacts/artifact1/proxy",
         );
         expect(
             Value.Check(createArtifactRequestSchema, {
@@ -220,6 +220,28 @@ describe("artifacts protocol", () => {
                 url: live.url,
             }),
         ).toBe(false);
+    });
+
+    it("addresses the artifact proxy through the same daemon or connection without opening it", () => {
+        const client = new HappyAgentClient({
+            endpoint: "http://daemon/prefix?transport=key",
+            token: "daemon-credential",
+            fetch: async () => {
+                throw new Error("A proxy URL must not make a fetch request.");
+            },
+        });
+        const direct = new URL(client.artifactProxyUrl(artifact.id));
+        expect(direct.pathname).toBe("/prefix/v0/artifacts/artifact1/proxy");
+        expect(direct.searchParams.get("transport")).toBe("key");
+        expect(direct.href).not.toContain("daemon-credential");
+        const connected = new URL(client.connection("build-box").artifactProxyUrl(artifact.id));
+        expect(connected.pathname).toBe(
+            "/prefix/v0/connections/build-box/api/v0/artifacts/artifact1/proxy",
+        );
+        expect(connected.searchParams.get("transport")).toBe("key");
+        expect(new URL(client.artifactProxyUrl("artifact/id?value#part")).pathname).toBe(
+            "/prefix/v0/artifacts/artifact%2Fid%3Fvalue%23part/proxy",
+        );
     });
 
     it("validates artifacts with extensible sources and authors, versions, and uploads", () => {

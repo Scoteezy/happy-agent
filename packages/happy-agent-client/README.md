@@ -405,10 +405,20 @@ colour sets it, `null` clears it, and omitting it keeps the latest version's.
 
 HTML artifacts can carry `live: { url, networkId }` on the artifact, its versions, and
 `artifact.updated` changes. `null` or absence means file content. When present, open `live.url`
-through `networkProxyUrl(live.networkId)` on the same daemon or connection, not through the file
-entry. The network is frozen at creation: if unavailable, show an unavailable page rather than
-using another network. The required `entry` remains an inert HTML notice for older clients.
-Versions pin the URL and metadata, not the external server's changing contents.
+through `artifactProxyUrl(artifactId)` on the same daemon or connection, not through the file
+entry or `networkProxyUrl`. This helper only builds the address; the caller opens the raw
+`CONNECT` tunnel with its transport and supplies the daemon bearer token. The network is frozen
+at creation: if the artifact route or network is unavailable, show an unavailable page rather
+than using an unrestricted proxy or another network. The required `entry` remains an inert HTML
+notice for older clients. Versions pin the URL and metadata, not the external server's changing
+contents.
+
+The daemon checks every destination connection against the artifact's current URL, including
+when showing a pinned version. Public destinations are allowed. The only non-public exception
+is the exact host and effective port of a recorded `localhost` or literal loopback URL, with
+every resolved address loopback. Private LAN and link-local destinations are always refused.
+The daemon resolves on the recorded network's machine and connects to the checked address without
+a second lookup. URL updates govern subsequent connections; already-open connections remain.
 
 Use a browser profile scoped to the artifact ID on its daemon or connection, shared by that
 artifact's versions and views but never by other artifacts or the workspace browser. Never send
