@@ -1570,6 +1570,40 @@ describe("EventsModule", () => {
         }
     });
 
+    it("asks to restore at start only the agents the last process left with an open run", async () => {
+        const first = new EventsModule();
+        const database = moduleDatabase(first.migrations ?? [], "events-restore-demand-test");
+        await database.ready;
+        try {
+            const firstHooks = await resolveModuleHooks(database.context, first);
+            for (const agentId of ["agent-open", "agent-settled"]) {
+                await firstHooks.messageAcceptedTransact?.(database.context, scopeFor(agentId), {
+                    id: `message-${agentId}`,
+                    kind: "send",
+                    message: { role: "user", content: [{ type: "text", text: "Answer." }] },
+                    profile: null,
+                });
+                await firstHooks.onEvent?.(database.context, scopeFor(agentId), {
+                    type: "text_start",
+                });
+            }
+            await database.context.inTx(async (txCtx) => {
+                await firstHooks.afterAgentSettledTransact?.(txCtx, scopeFor("agent-settled"), {
+                    loopId: "loop-settled",
+                    settlementId: "settlement-settled",
+                } as never);
+            });
+
+            const restarted = new EventsModule();
+            const restartedHooks = await resolveModuleHooks(database.context, restarted);
+            expect(await restartedHooks.agentsToRestoreTransact?.(database.context)).toEqual([
+                "agent-open",
+            ]);
+        } finally {
+            database.close();
+        }
+    });
+
     it("rejects provider deltas without a matching start and leaves no partial event", async () => {
         const events = new EventsModule();
         const database = moduleDatabase(events.migrations ?? [], "events-provider-validation-test");

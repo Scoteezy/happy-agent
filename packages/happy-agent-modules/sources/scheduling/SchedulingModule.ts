@@ -170,6 +170,11 @@ export class SchedulingModule implements AgentModule {
             }
             return tools;
         },
+        // An agent left holding a waiting row is restored as the collection starts, even when it
+        // owes no work: an orphaned row must stop reporting its interval then, not whenever
+        // something next uses the agent.
+        agentsToRestoreTransact: async (ctx: Context): Promise<readonly string[]> =>
+            await this.#store.listWaitingAgents(ctx),
         // A message this agent has taken into its conversation is the plainest possible proof that
         // it is no longer idle, so any wait it is still holding ends here.
         // Restoration runs before any restored agent's loop starts, so no call in this process

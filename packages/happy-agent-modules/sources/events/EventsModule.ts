@@ -402,6 +402,10 @@ export class EventsModule implements AgentModule<AnyAgentTool> {
             });
         },
 
+        // A run the last process left open is reset as the collection starts, even for an agent
+        // that owes no work, so no client goes on showing a response block nobody is writing.
+        agentsToRestoreTransact: (): readonly string[] => this.activeAgentIds(),
+
         agentRestoredTransact: async (
             ctx: Context,
             scope: AgentModuleSystemScope,

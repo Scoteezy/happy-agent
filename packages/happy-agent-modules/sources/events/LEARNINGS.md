@@ -31,6 +31,17 @@ restart forgets them, and the next durable event is newer than any of them. A lo
 behind the bounded tail answers with the durable predecessor, which a client sees as a version gap
 and repairs by refetching.
 
+## Restoration is recorded on first use, and open runs are reset at start
+
+Every restart used to record `agent.restored` for every agent. The API answers that event with an
+`agent.updated`, so a restart of a thousand idle agents moved every agent's version, `updatedAt`,
+and cursor without anything having changed, and journaled a thousand events before ready. Agent
+Base now restores at start only the agents with work and the rest on first use, so the event is
+recorded once per process for each agent the process uses. No client reads `agent.restored`
+itself. An open run is still reset at start: the module names the agents in its active-run
+projection through `agentsToRestoreTransact`, so a client never keeps showing a block that nobody
+is writing until someone happens to use that agent.
+
 ## Retention must not rank the whole window on every append
 
 A full window is the steady state, so the retention check runs on nearly every append. Ranking all

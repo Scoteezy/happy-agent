@@ -50,6 +50,10 @@ export const schedulingStoreSchema = Type.Object(
             [schedulingContextSchema, schedulingAgentIdSchema],
             Type.Promise(Type.Union([schedulingWaitingRecordSchema, Type.Undefined()])),
         ),
+        listWaitingAgents: Type.Function(
+            [schedulingContextSchema],
+            Type.Promise(Type.Array(schedulingAgentIdSchema)),
+        ),
         readSchedule: Type.Function(
             [schedulingContextSchema, schedulingMessageIdSchema],
             Type.Promise(Type.Union([schedulingScheduledMessageSchema, Type.Undefined()])),

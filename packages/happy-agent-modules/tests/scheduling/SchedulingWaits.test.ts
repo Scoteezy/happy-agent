@@ -402,10 +402,13 @@ describe("Scheduling waits", () => {
                 listener: recordIntervals(intervals),
             });
             try {
-                // The new process restores every agent before any of them runs, so nothing in it
-                // holds either wait yet and neither is live.
+                // Both agents left a waiting row, so the new process restores both as it starts,
+                // whether or not they owe work, before any of them runs. Nothing in it holds
+                // either wait yet and neither is live.
+                expect(await agentsToRestore(second)).toEqual([agentId, "agentb"].sort());
                 await restoreAgent(second, agentId);
                 await restoreAgent(second, "agentb");
+                expect(await agentsToRestore(second)).toEqual([]);
                 expect(
                     await second.module.readActiveWait(second.database.context, agentId),
                 ).toBeNull();
@@ -532,6 +535,13 @@ function daemonProcess(ctx: Context): { readonly ctx: Context; readonly shutDown
         ctx: withShutdown(ctx, coordinator),
         shutDown: () => void coordinator.shutdown(),
     };
+}
+
+/** The agents scheduling asks the agent system to restore as it starts. */
+async function agentsToRestore(harness: SchedulingHarness): Promise<readonly string[] | undefined> {
+    return await harness.database.context.inTx(
+        async (txCtx) => await harness.hooks.agentsToRestoreTransact?.(txCtx),
+    );
 }
 
 /** Restore one agent the way the agent system does at start, inside its restoration transaction. */

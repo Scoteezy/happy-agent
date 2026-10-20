@@ -33,6 +33,12 @@ interval, and an orphan whose call never returns stays out of the projection. Re
 `agentRestoredTransact` rather than `beforeStart` because modules start concurrently, and the
 interval change it announces must not reach the API before the event journal has loaded.
 
+Agent Base now restores at start only the agents that owe work, and the rest on first use. A
+reloadable wait left by shutdown leaves its agent owing work, but an orphan does not, and would
+have kept reporting its interval until something next used the agent. Scheduling therefore names
+every agent holding a `waiting` row through `agentsToRestoreTransact`, from the active-wait index,
+so recovery still runs at start for exactly those agents.
+
 ## A bot's reach is checked when a message is scheduled and again when it is due
 
 A scheduled message is a promise to reach another agent later, so it is a way around a bot that

@@ -14,6 +14,13 @@ at a time behind the daemon becoming ready; a catalog read, an invocation, or a 
 still waiting loads it immediately through the same coalesced refresh, so no reader sees less than
 before.
 
+Agent Base now restores an agent that owes no work on its first use rather than at start, so a
+catalog is loaded when its agent is restored, at start or on first use, and no longer for every
+agent right after a restart. A catalog read still loads one not yet loaded, and a turn or
+invocation still refreshes first. What changes is that a skill added while the daemon was down
+announces `agent.slash_commands.updated` for an untouched agent when that agent is next used or
+read, the same as a skill added while the daemon runs.
+
 ## Loading latency needs stage-level traces
 
 Restoring hundreds of agents can spend seconds rebuilding command catalogs. A single hook duration

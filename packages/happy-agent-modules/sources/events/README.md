@@ -81,6 +81,9 @@ one `runId`, and a loop that never accepts a message is bracketed by its own loo
 The module owns migrations for its event journal, origin cursor, and active provider-run
 projection. It reloads the retained window before agents restore. If a process dies during a
 provider block, restoration emits a durable `block_reset` and continues the same run identity.
+Agent Base restores at start only the agents that owe work and those a module names, and every
+other agent on its first use, so `agent.restored` is recorded once per process for each agent
+that process uses. The module names every agent with an open run, so its block is reset at start.
 
 The bounded journal deletes its oldest durable prefix once either capacity is reached;
 `originCursor()` advances to the last removed identifier so replays can express “from the

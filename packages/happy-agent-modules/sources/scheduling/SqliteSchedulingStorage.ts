@@ -175,6 +175,16 @@ export function createSqliteSchedulingStorage<
         }
         return wait as SchedulingWaitingRecord;
     };
+    const listWaitingAgents = async (ctx: Context): Promise<string[]> => {
+        const rows = await agentDatabaseRows<{ agent_id: string }>(
+            dbFor(ctx),
+            sql`SELECT DISTINCT agent_id
+            FROM happy_scheduling_waits
+            WHERE json_extract(record_json, '$.status') = 'waiting'
+            ORDER BY agent_id`,
+        );
+        return rows.map(({ agent_id }) => agent_id);
+    };
     const readSchedule = async (
         ctx: Context,
         id: string,
@@ -260,6 +270,7 @@ export function createSqliteSchedulingStorage<
         readWait,
         writeWait,
         readActiveWait,
+        listWaitingAgents,
         readSchedule,
         writeSchedule,
         listSchedules,
