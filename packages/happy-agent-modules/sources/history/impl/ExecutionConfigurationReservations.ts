@@ -18,6 +18,7 @@ type Preparation = {
     baseline: MessageMode | null;
     beforeMessageId: string | null;
     processed: number;
+    flushed: number;
     invalid: boolean;
     streamed: boolean;
     readonly records: HistoryMessage[];
@@ -58,6 +59,7 @@ export class ExecutionConfigurationReservations {
             beforeMessageId,
             startedAt: this.now(),
             processed: 0,
+            flushed: 0,
             invalid: false,
             streamed: false,
             records: [],
@@ -101,6 +103,64 @@ export class ExecutionConfigurationReservations {
         return staged.records.slice(start);
     }
 
+    flushBeforeAssistant(
+        agentId: string,
+        operationId: string,
+        finalized: readonly ProviderExecutionAttempt[] | undefined,
+        current: () => CurrentProviderExecutionAttempt | undefined,
+    ):
+        | {
+              readonly records: readonly HistoryMessage[];
+              readonly baseline: MessageMode | null;
+              readonly commit: () => void;
+          }
+        | undefined {
+        const entry = this.#entry(agentId, operationId);
+        if (entry === undefined) return undefined;
+        if (finalized !== undefined && finalized.length > MAX_EXECUTION_CONFIGURATION_ATTEMPTS) {
+            this.end(agentId, operationId);
+            return undefined;
+        }
+        if (!entry.invalid && !entry.streamed) {
+            let active: CurrentProviderExecutionAttempt | undefined;
+            try {
+                active = current();
+            } catch {
+                entry.invalid = true;
+            }
+            if (!entry.invalid) {
+                if (active !== undefined && finalized !== undefined) {
+                    if (active.ordinal > MAX_EXECUTION_CONFIGURATION_ATTEMPTS) {
+                        this.end(agentId, operationId);
+                        return undefined;
+                    }
+                    const staged = { ...entry, records: [...entry.records] };
+                    this.#allocateFinalized(staged, finalized);
+                    this.#allocate(staged, active.ordinal, active.attempt);
+                    if (staged.invalid) {
+                        this.end(agentId, operationId);
+                        return undefined;
+                    }
+                    entry.baseline = staged.baseline;
+                    entry.beforeMessageId = staged.beforeMessageId;
+                    entry.processed = staged.processed;
+                    entry.records.splice(0, entry.records.length, ...staged.records);
+                } else if (finalized !== undefined) {
+                    this.#allocateFinalized(entry, finalized);
+                }
+            }
+        }
+        const records = entry.records.slice(entry.flushed);
+        const target = entry.records.length;
+        return {
+            records,
+            baseline: entry.baseline,
+            commit: () => {
+                entry.flushed = Math.max(entry.flushed, target);
+            },
+        };
+    }
+
     complete(
         agentId: string,
         operationId: string,
@@ -116,7 +176,7 @@ export class ExecutionConfigurationReservations {
         }
         if (!entry.invalid && !entry.streamed && finalized !== undefined)
             this.#allocateFinalized(entry, finalized);
-        return { records: [...entry.records], baseline: entry.baseline };
+        return { records: entry.records.slice(entry.flushed), baseline: entry.baseline };
     }
 
     invalidate(agentId: string, operationId: string): void {

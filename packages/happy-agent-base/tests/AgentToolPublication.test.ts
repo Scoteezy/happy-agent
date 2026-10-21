@@ -253,6 +253,60 @@ describe("Agent tool discovery metadata", () => {
 });
 
 describe("Agent tool publication policy", () => {
+    it("delivers completed provider-local tool calls and results to transactional history hooks by default", async () => {
+        const ctx = createRootContext().named("published-server-tool-test");
+        const persistence = new InMemoryPersistence();
+        const raw: SessionEvent[] = [];
+        const history: AgentBasePersistedEvent[] = [];
+        const provider = new ScriptedProvider([serverTurn()]);
+        const agent = await AgentBase.create(ctx, {
+            id: "published-server-agent",
+            providers: providersOf(provider),
+            provider: "scripted",
+            persistence,
+            hooks: {
+                onEvent: (_hookCtx, event) => raw.push(event),
+                onEventTransact: (_hookCtx, event) => void history.push(event),
+            },
+        });
+
+        await agent.send(ctx, user("search"));
+        await agent.waitForIdle();
+        await agent.close();
+
+        const rawCall = raw.find(
+            (event): event is Extract<SessionEvent, { readonly type: "toolcall_start" }> =>
+                event.type === "toolcall_start",
+        );
+        expect(rawCall).toBeDefined();
+        expect(history).toEqual([
+            {
+                type: "toolcall_end",
+                callId: rawCall!.callId,
+                arguments: '{"query":"weather"}',
+                block: {
+                    type: "tool_call",
+                    callId: rawCall!.callId,
+                    name: "web_search",
+                    namespace: "search",
+                    arguments: '{"query":"weather"}',
+                    server: true,
+                },
+            },
+            {
+                type: "toolcall_result_end",
+                callId: rawCall!.callId,
+                content: [{ type: "text", text: "sunny" }],
+                block: {
+                    type: "tool_result",
+                    callId: rawCall!.callId,
+                    content: [{ type: "text", text: "sunny" }],
+                },
+            },
+            { type: "text_end", block: { type: "text", text: "Found it." } },
+        ]);
+    });
+
     it("keeps a context-only server lifecycle private while preserving it across restart", async () => {
         const ctx = createRootContext().named("context-only-server-tool-test");
         const persistence = new InMemoryPersistence();

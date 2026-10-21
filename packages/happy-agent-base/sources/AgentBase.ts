@@ -5108,6 +5108,7 @@ export class AgentBase {
             call: SessionToolCallBlock,
             callEvent: AgentBasePersistedEvent | undefined,
             result: SessionToolResultBlock,
+            resultEvent: AgentBasePersistedEvent | undefined,
         ): Promise<void> => {
             const callRecord = assistantContextRecord(call, this.#providerToolIds);
             const resultRecord = assistantContextRecord(result, this.#providerToolIds);
@@ -5118,6 +5119,11 @@ export class AgentBase {
                     if (callEvent !== undefined) {
                         await this.#withTransactionalContext(txCtx, (hookCtx) =>
                             this.#hooks.onEventTransact?.(hookCtx, callEvent),
+                        );
+                    }
+                    if (resultEvent !== undefined) {
+                        await this.#withTransactionalContext(txCtx, (hookCtx) =>
+                            this.#hooks.onEventTransact?.(hookCtx, resultEvent),
                         );
                     }
                 }),
@@ -5333,6 +5339,11 @@ export class AgentBase {
                                 : { incomplete: event.incomplete }),
                         };
                         content[resultIndex] = finished;
+                        const { vendor: _vendor, ...publicBlock } = finished;
+                        const persistedEvent = {
+                            ...event,
+                            block: publicBlock,
+                        } as const;
                         const policy = toolPolicies.get(event.callId);
                         if (policy?.persistWithResult === true) {
                             const deferred = deferredToolCalls.get(event.callId);
@@ -5345,10 +5356,14 @@ export class AgentBase {
                                 deferred.block,
                                 policy.persistInHistory ? deferred.event : undefined,
                                 finished,
+                                policy.persistInHistory ? persistedEvent : undefined,
                             );
                             deferredToolCalls.delete(event.callId);
                         } else {
-                            await persist(finished, undefined);
+                            await persist(
+                                finished,
+                                policy?.persistInHistory === false ? undefined : persistedEvent,
+                            );
                         }
                         break;
                     }

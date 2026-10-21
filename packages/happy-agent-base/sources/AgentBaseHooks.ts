@@ -9,6 +9,7 @@ import type {
     SessionTextBlock,
     SessionTokens,
     SessionToolCallBlock,
+    SessionToolResultBlock,
     SessionToolResultMessage,
 } from "@slopus/happy-providers";
 import type { Context } from "@steve.kite/stdlib";
@@ -49,6 +50,9 @@ export type AgentBasePersistedEvent =
       })
     | (Extract<SessionEvent, { readonly type: "toolcall_end" }> & {
           readonly block: SessionToolCallBlock;
+      })
+    | (Extract<SessionEvent, { readonly type: "toolcall_result_end" }> & {
+          readonly block: SessionToolResultBlock;
       });
 
 /** What the `modelChanged` hook sees when a request changes the model or resets its context. */

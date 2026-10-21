@@ -127,13 +127,17 @@ tool calls, and tool results), let the model size what it did and did not see wi
   from appends. The API uses the same message projection as history reads.
 
 The module also implements the `AgentModule` lifecycle hooks that do the recording:
-`beforeInferenceTransact` (retains the inference identity until its message commits),
-`onEventTransact` (buffers each completed text/thinking/tool-call block), `messageAcceptedTransact`
-(records an accepted user message), `beforeToolCallTransact`/`afterToolCallTransact` (record one
-tool result per call on the message containing that call, including its one-line display summary),
-`afterInferenceTransact` (writes the finished response and, if inference failed, a separate
-`role: "error"` message), `afterAgentActivatedTransact` (reconciles response blocks left pending
-when Base restores interrupted work), and
+`beforeInferenceTransact` (retains the inference identity for the active assistant message),
+`onEventTransact` and `onEvent` (progressively materialize each completed text/thinking/tool-call
+block into the durable assistant message, roll over to a continuation assistant message when
+`MAX_HISTORY_BLOCKS_PER_MESSAGE` or message byte bounds would be exceeded, and idempotently record
+provider-executed `toolcall_result_end` blocks on the message owning that call),
+`messageAcceptedTransact` (records an accepted user message),
+`beforeToolCallTransact`/`afterToolCallTransact` (record one tool result per local call on the
+message containing that call, including its one-line display summary),
+`afterInferenceTransact` (flushes any remaining buffered blocks or configuration records and, if
+inference failed, writes a separate `role: "error"` message), `afterAgentActivatedTransact`
+(reconciles any response blocks left in `pending_blocks` when Base restores interrupted work), and
 `afterAgentSettledTransact` (flushes any response blocks still pending after an interruption).
 These are not meant to be called directly.
 
@@ -146,13 +150,15 @@ not a module-owned replay signal. Agent Base owns durable tool retry and complet
 `HistoryRecord.position` is the original, stable position at which a message was written; cursors
 are positions rather than offsets.
 
-In-flight work — the part of a response not yet durable — is kept in the top-level `scope.runKV`,
-the run-scoped Agent KV that Agent Base lends the module, under these keys:
+In-flight work uses the top-level `scope.runKV`, the run-scoped Agent KV that Agent Base lends the
+module, under these keys:
 
-- `pending_blocks` — the array of `HistoryBlock`s (text, thinking, tool calls) accumulated by
-  `onEventTransact` since the last flush, up to `MAX_HISTORY_PENDING_BLOCKS` (2,048) entries.
-- `pending_inference_id` — the stable inference ID that becomes the next assistant message ID;
-  retained until the pending blocks commit or settlement flushes them after interruption.
+- `pending_inference_id` — the stable inference ID (or rolled-over CUID2 continuation ID) for the
+  active assistant message being materialized during `onEventTransact`; cleared when the inference
+  completes or settles.
+- `pending_blocks` — fallback buffer of `HistoryBlock`s (up to `MAX_HISTORY_PENDING_BLOCKS`, 2,048)
+  used only when a block arrives without an active `pending_inference_id` or is recovered from an
+  interrupted run before `afterInferenceTransact` or `afterAgentSettledTransact` flushes it.
 
 Per-call presentation state uses that call's scoped `scope.runKV` instead: `tool_name` is written by
 `beforeToolCallTransact`, and `tool_presentation` — a bounded `file_diff`, `media`, or `artifact`

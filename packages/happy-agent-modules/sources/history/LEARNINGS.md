@@ -66,26 +66,38 @@ and accepted History records. Public projections return that field unchanged and
 into daemon-owned provenance metadata. A repeated send with the same message ID reads the original
 pending or accepted record, so later payloads cannot replace its client metadata.
 
-## Assistant history is append-only by inference
+## Assistant history is append-only by inference and materializes completed blocks live
 
-Each completed provider inference creates its own durable assistant message under the inference's
-stable ID. A later inference never appends blocks to an earlier message, even when both belong to
-the same run. This preserves the exact order of service messages such as automatic compaction
-across reload and event reconciliation.
+Each provider inference creates its own durable assistant message under the inference's stable ID,
+and a later inference never appends blocks to an earlier message even when both belong to the same
+run. Buffering completed blocks in `runKV` until `afterInferenceTransact` hid mid-turn text,
+thinking, and tool calls from transcript readers while a long or foreign-harness turn was still
+running, and left bridged MCP tool calls without an indexed durable assistant row when they ran
+inside the provider request.
 
-Tool completion is the narrow mutation exception. The tool-call index resolves Agent Base's
-generated CUID2 to the inference message that owns it, and the result and permission review update
-only that message. This keeps a call and its result together without turning the whole run into one
-mutable history row.
+History now materializes each completed block into the active inference's durable assistant row inside
+`onEventTransact`, flushing any reserved execution configuration records ahead of the first block
+and indexing tool calls immediately so mid-turn transcript reads and bridged tool results find the
+call before the provider request finishes. When a single inference turn exceeds `MAX_HISTORY_BLOCKS_PER_MESSAGE` (keeping one slot reserved per
+unanswered tool call for its result) or the per-message byte ceiling, History allocates a fresh CUID2
+continuation assistant message ID in `pending_inference_id` and continues appending in the same run
+rather than failing the turn. Because each in-place block or tool-result update rewrites the active
+row's `message_json` in SQLite (up to the 64 MiB per-message ceiling), append notifications are sent
+when a row is first created, when a tool result is attached, when a full chunk rolls over to a
+continuation, and when the inference or settlement finishes, avoiding $O(N^2)$ notification payloads
+across intermediate blocks.
 
-When Agent Base reconstructs a tool call after a process interruption, its completed response
-blocks may still be in the run KV because inference completion was a later transaction. The
-reconstructed batch still lacks a durable History row. When Base transactionally reactivates the
-interrupted inference, History flushes the pending blocks before the recovered batch can run. The
-call index therefore exists before the recovered result can commit. Recovery follows Agent Base's
-durability rules; it never re-executes a tool merely to repair the history projection.
-Base retires the interrupted inference ID once a completed response block exists, so any provider
-request after recovered tool results receives a fresh identity and remains a separate history row.
+Tool completion is the narrow mutation on an existing assistant row. The tool-call index resolves
+each call ID to the assistant message that owns it, and permission review, spawn identity, and tool
+results update only that message. Provider-executed native tool results (`toolcall_result_end`),
+which bypass `beforeToolCallTransact` and `afterToolCallTransact`, record their `tool_result` block
+idempotently on the indexed assistant message from both `onEventTransact` and `onEvent`, so foreign
+and provider-local calls settle to `completed` or `failed` instead of remaining stuck on `running`.
+
+When Agent Base reconstructs a tool call after a process interruption from an older `pending_blocks`
+buffer, History still reconciles any buffered blocks on activation or settlement before recovered
+tool results commit, and Base retires the interrupted inference ID so the subsequent provider
+request receives a fresh identity.
 
 ## Run lifecycle belongs to History
 

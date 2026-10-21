@@ -13,6 +13,7 @@ import type {
     AnyAgentTool,
 } from "@slopus/happy-agent-base";
 import type {
+    SessionEvent,
     SessionInputBlock,
     SessionOutputBlock,
     SessionToolCallBlock,
@@ -75,6 +76,7 @@ import {
     historyRecordIdSchema,
     historyRemoteMessageIdSchema,
     historyTimestampSchema,
+    MAX_HISTORY_BLOCKS_PER_MESSAGE,
     MAX_HISTORY_BLOCKS_PER_PAGE,
     MAX_HISTORY_MESSAGES_PER_APPEND,
     MAX_HISTORY_MESSAGE_JSON_BYTES,
@@ -143,6 +145,7 @@ import {
 import { readAgentHistoryTool } from "./tools/read_agent_history.js";
 
 type HistoryToolArguments = Static<typeof historyToolArgumentsSchema>;
+type ProviderToolResultEndEvent = Extract<SessionEvent, { readonly type: "toolcall_result_end" }>;
 
 const PENDING_BLOCKS_KEY = "pending_blocks";
 const PENDING_INFERENCE_ID_KEY = "pending_inference_id";
@@ -227,6 +230,7 @@ export class HistoryModule implements AgentModule {
     readonly #config: ConfigModule | undefined;
     readonly #providerUsage: ProviderUsageModule | undefined;
     readonly #executionReservations = new ExecutionConfigurationReservations();
+    readonly #activeProviderResultStarts = new Map<string, Set<string>>();
 
     /** Who is watching the archive: the live subscriptions this module supervises. */
     readonly #appendListeners = new Set<HistoryAppendListener>();
@@ -251,11 +255,14 @@ export class HistoryModule implements AgentModule {
         // Compile during module construction, not while the first history request owns the
         // database transaction. The cache contains fixed schemas, never transcript content.
         for (const schema of [
+            historyBlockSchema,
             historyMessageSchema,
             historyToolArgumentsSchema,
+            historyToolResultBlockSchema,
             historyRecordSchema,
             historyRunSchema,
             historyRunsPageSchema,
+            pendingBlocksSchema,
         ]) {
             historyValidator(schema);
         }
@@ -1277,10 +1284,207 @@ export class HistoryModule implements AgentModule {
             ...(result.isError === true ? { isError: true } : {}),
             ...(presentation === undefined ? {} : { presentation }),
         };
-        if (!Value.Check(historyToolResultBlockSchema, toolResultBlock)) {
+        if (!historyValidator(historyToolResultBlockSchema).Check(toolResultBlock)) {
             throw new Error("History module received an invalid tool result.");
         }
         await this.#appendToolResult(ctx, scope.agent.id, toolResultBlock);
+    }
+
+    async #recordProviderToolResult(
+        ctx: Context,
+        scope: AgentModuleScope,
+        event: ProviderToolResultEndEvent,
+    ): Promise<void> {
+        const rows = await agentDatabaseRows<HistoryRow>(
+            ctx.db,
+            sql`SELECT ${sql.raw(HISTORY_ROW_COLUMNS)}
+                FROM ${sql.raw(HISTORY_TABLE)}
+                WHERE agent_id = ${scope.agent.id}
+                  AND record_id = (
+                      SELECT record_id
+                      FROM ${sql.raw(HISTORY_TOOL_CALLS_TABLE)}
+                      WHERE agent_id = ${scope.agent.id} AND call_id = ${event.callId}
+                      LIMIT 1
+                  )
+                LIMIT 1`,
+        );
+        const row = rows[0];
+        if (row !== undefined) {
+            const existing = toHistoryRecord(row).message;
+            if (
+                existing.blocks.some(
+                    (block) => block.type === "tool_result" && block.callId === event.callId,
+                )
+            ) {
+                return;
+            }
+            const call = existing.blocks.find(
+                (block): block is Extract<HistoryBlock, { type: "tool_call" }> =>
+                    block.type === "tool_call" && block.callId === event.callId,
+            );
+            if (call === undefined) return;
+            const output = renderOutput(event.content, MAX_HISTORY_RECORDED_TOOL_OUTPUT_LENGTH);
+            const toolResultBlock: HistoryBlock = {
+                type: "tool_result",
+                callId: event.callId,
+                display: toolDisplay(call.name, output, event.isError === true),
+                output,
+                toolName: call.name,
+                ...(event.isError === true ? { isError: true } : {}),
+            };
+            if (!historyValidator(historyToolResultBlockSchema).Check(toolResultBlock)) {
+                throw new Error("History module received an invalid tool result.");
+            }
+            await this.#appendToolResult(ctx, scope.agent.id, toolResultBlock, existing);
+            return;
+        }
+        const pending = await this.#pendingBlocks(ctx, scope);
+        if (
+            pending.some((block) => block.type === "tool_result" && block.callId === event.callId)
+        ) {
+            return;
+        }
+        const pendingCall = pending.find(
+            (block): block is Extract<HistoryBlock, { type: "tool_call" }> =>
+                block.type === "tool_call" && block.callId === event.callId,
+        );
+        if (pendingCall === undefined) return;
+        const output = renderOutput(event.content, MAX_HISTORY_RECORDED_TOOL_OUTPUT_LENGTH);
+        const toolResultBlock: HistoryBlock = {
+            type: "tool_result",
+            callId: event.callId,
+            display: toolDisplay(pendingCall.name, output, event.isError === true),
+            output,
+            toolName: pendingCall.name,
+            ...(event.isError === true ? { isError: true } : {}),
+        };
+        if (!historyValidator(historyToolResultBlockSchema).Check(toolResultBlock)) {
+            throw new Error("History module received an invalid tool result.");
+        }
+        await this.#appendPendingBlock(ctx, scope, toolResultBlock);
+    }
+
+    async #materializeInferenceBlock(
+        ctx: Context,
+        scope: AgentModuleScope,
+        pendingInferenceId: string,
+        block: HistoryBlock,
+    ): Promise<void> {
+        const pending = await this.#pendingBlocks(ctx, scope);
+        if (
+            !historyValidator(historyBlockSchema).Check(block) ||
+            (block.type === "tool_call" &&
+                block.arguments !== undefined &&
+                !historyToolArgumentsWithinByteLimit(block.arguments))
+        ) {
+            throw new Error("History module received an invalid pending block.");
+        }
+        const runId =
+            this.#events?.activeRunId(scope.agent.id) ??
+            (await this.#events?.activeRunIdInTransaction(ctx, scope.agent.id));
+        const existing = await this.message(ctx, scope.agent.id, pendingInferenceId);
+        if (existing === undefined) {
+            const messages: HistoryMessage[] = [];
+            const prepared = this.#executionReservations.flushBeforeAssistant(
+                scope.agent.id,
+                pendingInferenceId,
+                this.#config?.executionObservation(scope.agent.id, pendingInferenceId),
+                () => this.#config?.currentExecutionObservation(scope.agent.id, pendingInferenceId),
+            );
+            if (prepared !== undefined) {
+                messages.push(...prepared.records);
+                if (prepared.baseline !== null) {
+                    await scope.kv.write(ctx, EXECUTION_BASELINE_KEY, prepared.baseline);
+                }
+                if (this.#config !== undefined) {
+                    await scope.runKV.delete(ctx, EXECUTION_ANCHOR_KEY);
+                }
+                afterCommit(ctx, () => {
+                    prepared.commit();
+                });
+            }
+            messages.push({
+                at: Date.now(),
+                blocks: [...pending, block],
+                recordId: pendingInferenceId,
+                role: "assistant",
+                provider: scope.agent.provider,
+                ...(scope.agent.model === undefined ? {} : { model: scope.agent.model }),
+                ...(runId === undefined ? {} : { runId }),
+            });
+            await this.#append(ctx, scope.agent.id, ...messages);
+            if (pending.length > 0) {
+                await scope.runKV.delete(ctx, PENDING_BLOCKS_KEY);
+            }
+            return;
+        }
+        const combined = [...existing.blocks, ...pending, block];
+        const answeredCallIds = new Set(
+            combined.flatMap((candidate) =>
+                candidate.type === "tool_result" ? [candidate.callId] : [],
+            ),
+        );
+        const unansweredCalls = combined.filter(
+            (candidate) => candidate.type === "tool_call" && !answeredCallIds.has(candidate.callId),
+        ).length;
+        const updated: HistoryMessage = {
+            ...existing,
+            blocks: combined,
+        };
+        const encoded =
+            combined.length + unansweredCalls <= MAX_HISTORY_BLOCKS_PER_MESSAGE
+                ? JSON.stringify(updated)
+                : undefined;
+        if (
+            encoded !== undefined &&
+            Buffer.byteLength(encoded, "utf8") + unansweredCalls * 65_536 <=
+                MAX_HISTORY_MESSAGE_JSON_BYTES
+        ) {
+            const stats = summarizeHistory([updated]);
+            const searchText = foldHistorySearchText(historyMessageSearchParts(updated).join("\n"));
+            await agentDatabaseRun(
+                ctx.db,
+                sql`UPDATE ${sql.raw(HISTORY_TABLE)}
+                    SET message_json = ${encoded},
+                        search_text = ${searchText},
+                        assistant_messages = ${stats.assistantMessages},
+                        user_messages = ${stats.userMessages},
+                        text_characters = ${stats.textCharacters},
+                        thinking_blocks = ${stats.thinkingBlocks},
+                        tool_calls = ${stats.toolCalls},
+                        tool_results = ${stats.toolResults}
+                    WHERE agent_id = ${scope.agent.id} AND record_id = ${updated.recordId}`,
+            );
+            await indexHistoryToolCalls(ctx.db, scope.agent.id, {
+                ...updated,
+                blocks: [...pending, block],
+            });
+            if (pending.length > 0) {
+                await scope.runKV.delete(ctx, PENDING_BLOCKS_KEY);
+            }
+            return;
+        }
+        if (existing.blocks.length > 1 && existing.blocks.at(-1)?.type !== "tool_result") {
+            this.#scheduleAppendNotification(ctx, scope.agent.id, [existing]);
+        }
+        const continuationId = createRecordId();
+        await scope.runKV.write(ctx, PENDING_INFERENCE_ID_KEY, continuationId);
+        await this.#append(ctx, scope.agent.id, {
+            at: Date.now(),
+            blocks: [...pending, block],
+            recordId: continuationId,
+            role: "assistant",
+            provider: scope.agent.provider,
+            ...(scope.agent.model === undefined ? {} : { model: scope.agent.model }),
+            ...(existing.runId !== undefined
+                ? { runId: existing.runId }
+                : runId === undefined
+                  ? {}
+                  : { runId }),
+        });
+        if (pending.length > 0) {
+            await scope.runKV.delete(ctx, PENDING_BLOCKS_KEY);
+        }
     }
 
     /**
@@ -1291,29 +1495,60 @@ export class HistoryModule implements AgentModule {
      * while this module still has only its pending blocks. Finalizing those blocks before the
      * recovered call runs makes the call index and its eventual result one durable history chain.
      */
-    async #flushPendingBlocks(ctx: Context, scope: AgentModuleScope): Promise<void> {
+    async #flushPendingBlocks(
+        ctx: Context,
+        scope: AgentModuleScope,
+        settling = false,
+    ): Promise<void> {
         const blocks = await this.#pendingBlocks(ctx, scope);
-        if (blocks.length === 0) return;
-
-        const runId = this.#events?.activeRunId(scope.agent.id);
         const pendingInferenceId = await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY);
-        if (!Value.Check(historyRecordIdSchema, pendingInferenceId)) {
-            throw new Error(
-                "History module found a missing or invalid pending inference identity.",
-            );
+        if (blocks.length > 0) {
+            if (!Value.Check(historyRecordIdSchema, pendingInferenceId)) {
+                throw new Error(
+                    "History module found a missing or invalid pending inference identity.",
+                );
+            }
+            const existing = await this.message(ctx, scope.agent.id, pendingInferenceId);
+            if (existing === undefined) {
+                const runId = this.#events?.activeRunId(scope.agent.id);
+                const message: HistoryMessage = {
+                    at: Date.now(),
+                    blocks,
+                    recordId: pendingInferenceId,
+                    ...(scope.agent.model === undefined ? {} : { model: scope.agent.model }),
+                    provider: scope.agent.provider,
+                    role: "assistant",
+                    ...(runId === undefined ? {} : { runId }),
+                };
+                await this.#append(ctx, scope.agent.id, message);
+                await scope.runKV.delete(ctx, PENDING_BLOCKS_KEY);
+            } else {
+                await scope.runKV.delete(ctx, PENDING_BLOCKS_KEY);
+                for (const block of blocks) {
+                    const currentId = await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY);
+                    const targetId = Value.Check(historyRecordIdSchema, currentId)
+                        ? currentId
+                        : pendingInferenceId;
+                    await this.#materializeInferenceBlock(ctx, scope, targetId, block);
+                }
+            }
         }
-        const message: HistoryMessage = {
-            at: Date.now(),
-            blocks,
-            recordId: pendingInferenceId as string,
-            ...(scope.agent.model === undefined ? {} : { model: scope.agent.model }),
-            provider: scope.agent.provider,
-            role: "assistant",
-            ...(runId === undefined ? {} : { runId }),
-        };
-        await this.#append(ctx, scope.agent.id, message);
-        await scope.runKV.delete(ctx, PENDING_BLOCKS_KEY);
-        await scope.runKV.delete(ctx, PENDING_INFERENCE_ID_KEY);
+        if (settling) {
+            const finalInferenceId = await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY);
+            if (Value.Check(historyRecordIdSchema, finalInferenceId)) {
+                const existing = await this.message(ctx, scope.agent.id, finalInferenceId);
+                if (
+                    existing !== undefined &&
+                    existing.blocks.length > 1 &&
+                    existing.blocks.at(-1)?.type !== "tool_result"
+                ) {
+                    this.#scheduleAppendNotification(ctx, scope.agent.id, [existing]);
+                }
+            }
+        }
+        if (blocks.length > 0 || settling) {
+            await scope.runKV.delete(ctx, PENDING_INFERENCE_ID_KEY);
+        }
     }
 
     async #afterInference(
@@ -1322,6 +1557,11 @@ export class HistoryModule implements AgentModule {
         inference: AgentBaseInference,
     ): Promise<void> {
         const blocks = await this.#pendingBlocks(ctx, scope);
+        const pendingInferenceId = await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY);
+        const activeRecordId = Value.Check(historyRecordIdSchema, pendingInferenceId)
+            ? pendingInferenceId
+            : inference.inferenceId;
+        const existingInitial = await this.message(ctx, scope.agent.id, inference.inferenceId);
         const runId = this.#events?.activeRunId(scope.agent.id);
         const attribution = {
             at: Date.now(),
@@ -1343,19 +1583,46 @@ export class HistoryModule implements AgentModule {
         }
         if (this.#config !== undefined) await scope.runKV.delete(ctx, EXECUTION_ANCHOR_KEY);
         if (blocks.length > 0) {
-            messages.push({
-                role: "assistant",
-                blocks,
-                recordId: inference.inferenceId,
-                ...attribution,
-            });
+            if (existingInitial !== undefined) {
+                await scope.runKV.delete(ctx, PENDING_BLOCKS_KEY);
+                for (const block of blocks) {
+                    const currentId = await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY);
+                    const targetId = Value.Check(historyRecordIdSchema, currentId)
+                        ? currentId
+                        : activeRecordId;
+                    await this.#materializeInferenceBlock(ctx, scope, targetId, block);
+                }
+            } else {
+                messages.push({
+                    role: "assistant",
+                    blocks,
+                    recordId: inference.inferenceId,
+                    ...attribution,
+                });
+            }
+        }
+        if (existingInitial !== undefined) {
+            const finalId = await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY);
+            const targetId = Value.Check(historyRecordIdSchema, finalId) ? finalId : activeRecordId;
+            const finalized =
+                targetId === inference.inferenceId && blocks.length === 0
+                    ? existingInitial
+                    : await this.message(ctx, scope.agent.id, targetId);
+            if (
+                finalized !== undefined &&
+                finalized.blocks.length > 1 &&
+                finalized.blocks.at(-1)?.type !== "tool_result"
+            ) {
+                this.#scheduleAppendNotification(ctx, scope.agent.id, [finalized]);
+            }
         }
         // A run's first overflow before any visible output is not a failure: Agent Base resets the
         // context once and retries the turn, and the reset records its own notice. Only an
         // overflow after that reset reaches the person as `context_too_long`.
+        const materialized = blocks.length > 0 || existingInitial !== undefined;
         const overflowed =
             inference.errorMessage !== undefined &&
-            blocks.length === 0 &&
+            !materialized &&
             attempts?.at(-1)?.contextOverflow === true;
         const recovering =
             overflowed && (await scope.runKV.read(ctx, CONTEXT_RESET_KEY)) === undefined;
@@ -1466,7 +1733,7 @@ export class HistoryModule implements AgentModule {
             throw new Error("History module reached its pending block limit.");
         }
         if (
-            !Value.Check(historyBlockSchema, block) ||
+            !historyValidator(historyBlockSchema).Check(block) ||
             (block.type === "tool_call" &&
                 block.arguments !== undefined &&
                 !historyToolArgumentsWithinByteLimit(block.arguments))
@@ -1479,7 +1746,7 @@ export class HistoryModule implements AgentModule {
     async #pendingBlocks(ctx: Context, scope: AgentModuleScope): Promise<HistoryBlock[]> {
         const value = await scope.runKV.read(ctx, PENDING_BLOCKS_KEY);
         if (value === undefined) return [];
-        if (!Value.Check(pendingBlocksSchema, value)) {
+        if (!historyValidator(pendingBlocksSchema).Check(value)) {
             throw new Error("History module found invalid pending blocks.");
         }
         return value as HistoryBlock[];
@@ -1644,25 +1911,29 @@ export class HistoryModule implements AgentModule {
         ctx: Context,
         agentId: string,
         result: Extract<HistoryBlock, { type: "tool_result" }>,
+        existingMessage?: HistoryMessage,
     ): Promise<void> {
-        const rows = await agentDatabaseRows<HistoryRow>(
-            ctx.db,
-            sql`SELECT ${sql.raw(HISTORY_ROW_COLUMNS)}
-                FROM ${sql.raw(HISTORY_TABLE)}
-                WHERE agent_id = ${agentId}
-                  AND record_id = (
-                      SELECT record_id
-                      FROM ${sql.raw(HISTORY_TOOL_CALLS_TABLE)}
-                      WHERE agent_id = ${agentId} AND call_id = ${result.callId}
-                      LIMIT 1
-                  )
-                LIMIT 1`,
-        );
-        const row = rows[0];
-        if (row === undefined) {
-            throw new Error("The completed tool call is missing from durable history.");
+        let existing = existingMessage;
+        if (existing === undefined) {
+            const rows = await agentDatabaseRows<HistoryRow>(
+                ctx.db,
+                sql`SELECT ${sql.raw(HISTORY_ROW_COLUMNS)}
+                    FROM ${sql.raw(HISTORY_TABLE)}
+                    WHERE agent_id = ${agentId}
+                      AND record_id = (
+                          SELECT record_id
+                          FROM ${sql.raw(HISTORY_TOOL_CALLS_TABLE)}
+                          WHERE agent_id = ${agentId} AND call_id = ${result.callId}
+                          LIMIT 1
+                      )
+                    LIMIT 1`,
+            );
+            const row = rows[0];
+            if (row === undefined) {
+                throw new Error("The completed tool call is missing from durable history.");
+            }
+            existing = toHistoryRecord(row).message;
         }
-        const existing = toHistoryRecord(row).message;
         if (
             !existing.blocks.some(
                 (block) => block.type === "tool_call" && block.callId === result.callId,
@@ -1681,10 +1952,16 @@ export class HistoryModule implements AgentModule {
             ...existing,
             blocks: [...existing.blocks, result],
         };
-        if (!historyMessageWithinPersistenceBounds(updated)) {
+        const encoded =
+            updated.blocks.length <= MAX_HISTORY_BLOCKS_PER_MESSAGE
+                ? JSON.stringify(updated)
+                : undefined;
+        if (
+            encoded === undefined ||
+            Buffer.byteLength(encoded, "utf8") > MAX_HISTORY_MESSAGE_JSON_BYTES
+        ) {
             throw new Error("The tool result exceeds its durable history message bounds.");
         }
-        const encoded = JSON.stringify(updated);
         const stats = summarizeHistory([updated]);
         const searchText = foldHistorySearchText(historyMessageSearchParts(updated).join("\n"));
         await agentDatabaseRun(
@@ -2049,9 +2326,13 @@ export class HistoryModule implements AgentModule {
             scope: AgentModuleScope,
             event: AgentBasePersistedEvent,
         ): Promise<void> => {
-            const requested =
-                event.type === "toolcall_end" &&
-                (await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY)) === undefined;
+            const sessionEvent = event as SessionEvent;
+            if (sessionEvent.type === "toolcall_result_end") {
+                await this.#recordProviderToolResult(ctx, scope, sessionEvent);
+                return;
+            }
+            const pendingInferenceId = await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY);
+            const requested = event.type === "toolcall_end" && pendingInferenceId === undefined;
             const block = toHistoryBlock(event, requested);
             if (block.type === "tool_call" && requested) {
                 // A user-requested call is committed at acceptance, before any inference exists.
@@ -2068,7 +2349,52 @@ export class HistoryModule implements AgentModule {
                 });
                 return;
             }
-            await this.#appendPendingBlock(ctx, scope, block);
+            if (pendingInferenceId === undefined) {
+                await this.#appendPendingBlock(ctx, scope, block);
+                return;
+            }
+            if (!Value.Check(historyRecordIdSchema, pendingInferenceId)) {
+                throw new Error(
+                    "History module found a missing or invalid pending inference identity.",
+                );
+            }
+            await this.#materializeInferenceBlock(ctx, scope, pendingInferenceId, block);
+        },
+
+        onEvent: async (
+            ctx: Context,
+            scope: AgentModuleScope,
+            event: SessionEvent,
+        ): Promise<void> => {
+            if (event.type === "block_reset") {
+                this.#activeProviderResultStarts.delete(scope.agent.id);
+                return;
+            }
+            if (event.type === "toolcall_result_start") {
+                let active = this.#activeProviderResultStarts.get(scope.agent.id);
+                if (active === undefined) {
+                    active = new Set();
+                    this.#activeProviderResultStarts.set(scope.agent.id, active);
+                }
+                active.add(event.callId);
+                return;
+            }
+            if (event.type !== "toolcall_result_end") return;
+            const active = this.#activeProviderResultStarts.get(scope.agent.id);
+            if (active?.delete(event.callId) !== true) return;
+            if (active.size === 0) {
+                this.#activeProviderResultStarts.delete(scope.agent.id);
+            }
+            try {
+                await this.#direct(ctx, (txCtx) =>
+                    this.#recordProviderToolResult(txCtx, scope, event),
+                );
+            } catch (error: unknown) {
+                withLogContext(ctx, {
+                    agentId: scope.agent.id,
+                    callId: event.callId,
+                }).log.warn("The history module could not record a provider tool result.", error);
+            }
         },
 
         /**
@@ -2340,6 +2666,7 @@ export class HistoryModule implements AgentModule {
             try {
                 await this.#afterInference(ctx, scope, inference);
             } finally {
+                this.#activeProviderResultStarts.delete(scope.agent.id);
                 this.#config?.endExecutionObservation(scope.agent.id, inference.inferenceId);
                 // Reservations have the same lifetime as streamed output. A crash loses the
                 // uncommitted snapshot; rollback also releases it, so a retried inference makes
@@ -2354,6 +2681,7 @@ export class HistoryModule implements AgentModule {
             turn: AgentBaseTurn,
         ): Promise<void> => {
             if (!turn.aborted) return;
+            this.#activeProviderResultStarts.delete(scope.agent.id);
             this.#config?.endAgentExecutionObservations(scope.agent.id);
             this.#executionReservations.endAgent(scope.agent.id);
             await this.#finishRun(ctx, scope.agent.id, "aborted", "abort", Date.now());
@@ -2370,10 +2698,10 @@ export class HistoryModule implements AgentModule {
             scope: AgentModuleScope,
             settlement: AgentBaseSettlement,
         ): Promise<void> => {
+            this.#activeProviderResultStarts.delete(scope.agent.id);
             this.#config?.endAgentExecutionObservations(scope.agent.id);
             this.#executionReservations.endAgent(scope.agent.id);
-            await this.#flushPendingBlocks(ctx, scope);
-            await scope.runKV.delete(ctx, PENDING_INFERENCE_ID_KEY);
+            await this.#flushPendingBlocks(ctx, scope, true);
             if (settlement.error !== undefined) {
                 await this.#recordSettlementFailure(
                     ctx,
@@ -3035,10 +3363,7 @@ function parseRequestedArguments(value: string): Static<typeof clientMetadataVal
 function parseArguments(value: string): HistoryToolArguments {
     try {
         const parsed: unknown = JSON.parse(value);
-        if (
-            Value.Check(historyToolArgumentsSchema, parsed) &&
-            historyToolArgumentsWithinByteLimit(parsed)
-        ) {
+        if (historyToolArgumentsWithinByteLimit(parsed)) {
             return parsed as HistoryToolArguments;
         }
     } catch {
