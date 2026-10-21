@@ -10,6 +10,13 @@ respect the two-hour guard, Happy's position, and the person's moves and folds. 
 is manual placement from the outset. This preserves immediate new-work organization without
 letting repeated tidies move the work the person is doing.
 
+Manual reorder protection belongs to the moved rows, not every row whose index shifted. Compare
+parent/disclosure changes directly, then retain a longest common subsequence of the remaining
+refs to infer the minimum moved set. A full HTML replacement cannot identify which row was
+dragged in an ambiguous swap; ties retain the earliest longest subsequence in the final order.
+Demo and daemon setup must use manager placement, not the person-only legacy PATCH route:
+that route intentionally records manual authority, including `manual_at`.
+
 Maintenance notes have durable runs without provider events. Live API delivery must announce the
 terminal run as well as its message so an open chat can render exactly the note found after reload.
 

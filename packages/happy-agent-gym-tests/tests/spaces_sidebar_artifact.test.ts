@@ -70,6 +70,67 @@ it("keeps queued HTML when ordinary artifact tools change only metadata", async 
 
 const running = new Set<AgentGym>();
 
+it("lets Tidy move untouched rows after the person drags one row above them", async () => {
+    const h = await sidebarGym();
+    try {
+        await h.read();
+        const redesign = await h.create();
+        const lightbox = await h.create();
+        const table = await h.create();
+        const later = await h.create();
+        const node = (id: string) => `<happy-space ref="${id}" tree></happy-space>`;
+        await h.hold();
+        const initial = await h.read();
+        const happy = initial.spaces.find((space) => space.title === "Happy")!;
+        const layout = (ids: string[]) =>
+            `<nav>${node(happy.id)}${ids.map(node).join("")}<happy-section id="desktop" label="Desktop"></happy-section></nav>`;
+        const arranged = layout([
+            redesign.space.id,
+            lightbox.space.id,
+            table.space.id,
+            later.space.id,
+        ]);
+        expect((await h.edit(arranged)).text).toContain("queued");
+        await h.calm();
+        const seeded = await h.gym.waitUntil(async () => {
+            const doc = await h.read();
+            return doc.html === arranged ? doc : undefined;
+        }, "Prioritizing's initial arrangement");
+        await h.hold();
+        const dragged = layout([
+            table.space.id,
+            redesign.space.id,
+            lightbox.space.id,
+            later.space.id,
+        ]);
+        const current = await h.gym.http.ok<Sidebar>("PUT", "/v0/spaces/sidebar", {
+            html: dragged,
+            baseVersion: seeded.version,
+            mutationId: "drag-table-above-redesign",
+        });
+        expect(JSON.parse((await h.call("list_sidebar", {})).text)).toMatchObject({
+            manualSpaceIds: [table.space.id],
+        });
+        const tidy = dragged
+            .replace(node(lightbox.space.id), "")
+            .replace('label="Desktop">', `label="Desktop">${node(lightbox.space.id)}`);
+        expect((await h.edit(tidy)).text).toContain("queued");
+        await h.calm();
+        const applied = await h.gym.waitUntil(async () => {
+            const doc = await h.read();
+            return doc.version === current.version + 1 ? doc : undefined;
+        }, "Tidy moving the untouched Lightbox row");
+        expect(applied.html).toBe(tidy);
+        await h.hold();
+        const undoDrag = tidy
+            .replace(node(table.space.id), "")
+            .replace('label="Desktop">', `label="Desktop">${node(table.space.id)}`);
+        expect((await h.edit(undoDrag)).text).toContain("manual placement");
+    } finally {
+        await h.gym.dispose();
+    }
+}, 120000);
+
 it("keeps each person's sidebar references and ordinary writes owner-authorized", async () => {
     const { gym, alice, bob, aliceHttp, bobHttp } = await surfaceTeamClients({
         inference: () => ({ content: [{ type: "text", text: "Done." }] }),

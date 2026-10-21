@@ -105,6 +105,13 @@ describe("sidebar lifecycle", () => {
             changedSidebarRefs(html, html.replace('label="Desktop"', 'label="Desktop" collapsed')),
         ).toEqual(["manual"]);
     });
+    it("attributes a drag to the moved row rather than every shifted sibling", () => {
+        const row = (id: string) => `<happy-space ref="${id}"></happy-space>`;
+        const before = `<nav>${["happy", "redesign", "lightbox", "table", "later"].map(row).join("")}</nav>`;
+        const after = `<nav>${["happy", "table", "redesign", "lightbox", "later"].map(row).join("")}</nav>`;
+        expect(changedSidebarRefs(before, after)).toEqual(["table"]);
+        expect(changedSidebarRefs(after, before)).toEqual(["table"]);
+    });
     it("detects ancestor section reordering and movement between anonymous containers", () => {
         const first =
             '<happy-section id="one" label="One"><happy-space ref="first"></happy-space></happy-section>';

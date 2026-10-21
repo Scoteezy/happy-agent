@@ -111,38 +111,63 @@ export function sidebarPosition(node: SidebarNode, peerIds: ReadonlySet<string>)
 }
 
 export function changedSidebarRefs(before: string, after: string): string[] {
-    const left = sidebarNodes(parseSidebar(before)).filter((node) => node.tag === "happy-space");
-    const right = sidebarNodes(parseSidebar(after)).filter((node) => node.tag === "happy-space");
+    const beforeNodes = sidebarNodes(parseSidebar(before));
+    const afterNodes = sidebarNodes(parseSidebar(after));
+    const left = beforeNodes.filter((node) => node.tag === "happy-space");
+    const right = afterNodes.filter((node) => node.tag === "happy-space");
     const next = new Map(right.map((node) => [node.attrs["ref"]!, node]));
-    const noPeers = new Set<string>();
+    const nextSections = new Set(
+        afterNodes.filter((node) => node.tag === "happy-section").map((node) => node.attrs["id"]!),
+    );
+    const sectionPeers = new Set(
+        beforeNodes
+            .filter((node) => node.tag === "happy-section" && nextSections.has(node.attrs["id"]!))
+            .map((node) => `section:${node.attrs["id"]}`),
+    );
+    // Compare ancestry and disclosure independently of sibling offsets. Rows that changed
+    // containers are removed from the reorder comparison, so their old neighbors stay put.
     const peers = new Set(
         left
             .filter((node) => {
                 const other = next.get(node.attrs["ref"]!);
                 return (
                     other !== undefined &&
-                    sidebarPosition(node, noPeers) === sidebarPosition(other, noPeers)
+                    sidebarPosition(node, sectionPeers) === sidebarPosition(other, sectionPeers)
                 );
             })
             .map((node) => node.attrs["ref"]!),
     );
-    const nextSections = new Set(
-        sidebarNodes(parseSidebar(after))
-            .filter((node) => node.tag === "happy-section")
-            .map((node) => node.attrs["id"]!),
+    const stationary = stationarySidebarRefs(
+        left.map((node) => node.attrs["ref"]!).filter((id) => peers.has(id)),
+        right.map((node) => node.attrs["ref"]!).filter((id) => peers.has(id)),
     );
-    for (const section of sidebarNodes(parseSidebar(before)).filter(
-        (node) => node.tag === "happy-section",
-    )) {
-        if (nextSections.has(section.attrs["id"]!)) peers.add(`section:${section.attrs["id"]}`);
-    }
     return left
-        .filter((node) => {
-            const other = next.get(node.attrs["ref"]!);
-            return (
-                other === undefined ||
-                sidebarPosition(node, peers) !== sidebarPosition(other, peers)
-            );
-        })
+        .filter((node) => !stationary.has(node.attrs["ref"]!))
         .map((node) => node.attrs["ref"]!);
+}
+
+/** Unique refs let a longest increasing subsequence identify the minimum moved set. */
+function stationarySidebarRefs(before: readonly string[], after: readonly string[]): Set<string> {
+    const positions = new Map(before.map((id, index) => [id, index]));
+    const lengths = after.map(() => 1);
+    const previous = after.map(() => -1);
+    let best = -1;
+    // Documents contain at most 1,000 elements, bounding this comparison to 1M pairs.
+    for (let index = 0; index < after.length; index++) {
+        for (let earlier = 0; earlier < index; earlier++) {
+            if (
+                positions.get(after[earlier]!)! < positions.get(after[index]!)! &&
+                lengths[earlier]! + 1 > lengths[index]!
+            ) {
+                lengths[index] = lengths[earlier]! + 1;
+                previous[index] = earlier;
+            }
+        }
+        if (best === -1 || lengths[index]! > lengths[best]!) best = index;
+    }
+    const stationary = new Set<string>();
+    for (let index = best; index !== -1; index = previous[index]!) {
+        stationary.add(after[index]!);
+    }
+    return stationary;
 }
