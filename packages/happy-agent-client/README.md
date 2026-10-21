@@ -421,6 +421,15 @@ The daemon resolves on its own host and connects the recorded network's machine 
 IP literal without a second lookup. The exact recorded loopback exception needs no DNS.
 URL updates govern subsequent connections; already-open connections remain.
 
+`artifactAddressPublic`, `artifactAddressLoopback`, and `artifactNetworkHost` share the artifact
+address policy between browsers and daemons without Node APIs or DNS. The first two accept IP
+literals and return false for invalid addresses. `artifactNetworkHost` uses URL normalization
+to classify numeric hostname spellings; it throws when URL parsing fails. Do not use that normalization
+for the exact loopback-origin comparison: compare the requested and recorded spellings instead.
+Public IPv6 is limited to `2000::/3` excluding `2001::/23`, `2001:db8::/32`, `2002::/16`, and
+`3fff::/20`, plus mapped, translated, and well-known NAT64 addresses whose embedded IPv4 is public.
+Only `127/8`, `::1`, and mapped/translated `127/8` count as loopback.
+
 Use a browser profile scoped to the artifact ID on its daemon or connection, shared by that
 artifact's versions and views but never by other artifacts or the workspace browser. Never send
 daemon credentials to the live page, expose the artifact data bridge, or forward its `/api/*`
