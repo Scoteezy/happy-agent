@@ -995,17 +995,18 @@ export class CollaborationModule implements AgentModule {
 function vendorUsageWindows(usage: ProviderUsage | null): AgentOptionsUsageWindow[] {
     if (usage === null) return [];
     const named = [
-        ["5-hour", usage.windows.fiveHour],
-        ["weekly", usage.windows.weekly],
-        ["monthly", usage.windows.monthly],
-        ["Fable weekly", usage.windows.fableWeekly ?? null],
+        ["", "5-hour", usage.windows.fiveHour],
+        ["", "weekly", usage.windows.weekly],
+        ["", "monthly", usage.windows.monthly],
+        // Fable's own allowance stops only Fable.
+        ["Fable", "weekly", usage.windows.fableWeekly ?? null],
     ] as const;
-    return named.flatMap(([window, value]) =>
+    return named.flatMap(([scope, window, value]) =>
         value === null
             ? []
             : [
                   {
-                      scope: "",
+                      scope,
                       window,
                       remainingPercent: Math.max(0, Math.round(100 - value.usedPercent)),
                       resetsAt:

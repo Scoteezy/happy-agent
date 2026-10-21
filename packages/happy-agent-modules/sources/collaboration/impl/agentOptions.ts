@@ -115,19 +115,45 @@ export function formatAgentOptions(options: AgentOptions): string {
     return lines.join("\n");
 }
 
-/** The quota each account's agent reports, one line per window. */
+/**
+ * The quota each account reports, one line per account. A window that is out says when it
+ * resets; once a weekly or monthly window is out, nothing shorter in its scope matters.
+ */
 export function formatAgentOptionsUsage(options: AgentOptions): string {
     const lines = options.harnesses.flatMap((harness) =>
-        harness.providers.flatMap((provider) =>
-            (provider.usage ?? []).map(
-                (window) =>
-                    `${provider.id}: ${window.scope === "" ? "" : `${window.scope}, `}${window.window}: ${String(window.remainingPercent)}% left${
-                        window.resetsAt === null ? "" : `, resets ${window.resetsAt}`
-                    }`,
-            ),
-        ),
+        harness.providers.flatMap((provider) => {
+            const scopes = new Map<string, AgentOptionsUsageWindow[]>();
+            for (const window of provider.usage ?? []) {
+                const windows = scopes.get(window.scope) ?? [];
+                scopes.set(window.scope, [...windows, window]);
+            }
+            if (scopes.size === 0) return [];
+            const parts = [...scopes].map(([scope, windows]) => {
+                const long = windows.filter((window) => /week|month/iu.test(window.window));
+                const out = long.filter((window) => window.remainingPercent <= 0);
+                const shown = (out.length > 0 ? out : windows).toSorted(
+                    (a, b) => Number(long.includes(a)) - Number(long.includes(b)),
+                );
+                return `${scope === "" ? "" : `${scope} `}${shown.map(formatWindow).join(", ")}`;
+            });
+            return [`${provider.id}: ${parts.join("; ")}`];
+        }),
     );
     return lines.length === 0 ? "No account reports usage." : lines.join("\n");
+}
+
+function formatWindow(window: AgentOptionsUsageWindow): string {
+    const name = /month/iu.test(window.window)
+        ? "monthly"
+        : /week/iu.test(window.window)
+          ? "weekly"
+          : /five hour|5-hour/iu.test(window.window)
+            ? "5-hour"
+            : window.window;
+    if (window.remainingPercent > 0) return `${name} ${String(window.remainingPercent)}%`;
+    return window.resetsAt === null
+        ? `${name} out`
+        : `${name} out until ${window.resetsAt.replace(/:\d{2}(\.\d+)?Z$/u, "Z")}`;
 }
 
 /** What changed between two listings, as the lines removed and added. */

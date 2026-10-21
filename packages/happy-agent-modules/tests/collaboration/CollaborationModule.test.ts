@@ -1850,7 +1850,13 @@ async function harnessConfig(extra = "") {
     const agy = join(bin, "agy");
     await writeFile(
         agy,
-        "#!/bin/sh\nprintf 'Gemini Models\\tWeekly Limit Remaining\\t95%%\\t2026-10-27T00:00:00Z\\n'\n",
+        [
+            "#!/bin/sh",
+            "printf 'Gemini Models\\tWeekly Limit Remaining\\t95%%\\t2026-10-27T00:00:00Z\\n'",
+            "printf 'Gemini Models\\tFive Hour Limit Remaining\\t99%%\\t2026-10-21T01:34:03Z\\n'",
+            "printf 'Gemini 4 Argon\\tGemini 4 Argon Weekly Limit\\t0%%\\t2026-10-26T21:29:49Z\\n'",
+            "",
+        ].join("\n"),
         { mode: 0o755 },
     );
     return await temporaryTestConfig(`${HARNESSES_TOML}\nenv = { AGY_BIN = "${agy}" }\n${extra}`);
@@ -2019,7 +2025,7 @@ describe("sub-agent harnesses", () => {
             "antigravity/gemini-3.8-flash (Gemini 3.8 Flash) on antigravity via antigravity: high*",
         ]);
         expect(await module.agentOptionsUsage(ON_HAPPY)).toBe(
-            "antigravity: Gemini Models, Weekly Limit Remaining: 95% left, resets 2026-10-27T00:00:00Z",
+            "antigravity: Gemini Models 5-hour 99%, weekly 95%; Gemini 4 Argon weekly out until 2026-10-26T21:29Z",
         );
     });
 
@@ -2035,7 +2041,10 @@ describe("sub-agent harnesses", () => {
                                 usedPercent: 30,
                                 resetsAt: Date.parse("2026-10-21T00:00:00Z"),
                             },
-                            weekly: { usedPercent: 100, resetsAt: null },
+                            weekly: {
+                                usedPercent: 100,
+                                resetsAt: Date.parse("2026-10-28T00:00:00Z"),
+                            },
                             monthly: null,
                         },
                     },
@@ -2052,10 +2061,10 @@ describe("sub-agent harnesses", () => {
         );
         await resolveModuleHooks(ctx0(), module, collection.asRef());
 
+        // An exhausted week hides the session window: nothing runs until the week resets.
         expect((await module.agentOptionsUsage(ON_HAPPY)).split("\n")).toEqual([
-            "claude: 5-hour: 70% left, resets 2026-10-21T00:00:00.000Z",
-            "claude: weekly: 0% left",
-            "antigravity: Gemini Models, Weekly Limit Remaining: 95% left, resets 2026-10-27T00:00:00Z",
+            "claude: weekly out until 2026-10-28T00:00Z",
+            "antigravity: Gemini Models 5-hour 99%, weekly 95%; Gemini 4 Argon weekly out until 2026-10-26T21:29Z",
         ]);
     });
 
