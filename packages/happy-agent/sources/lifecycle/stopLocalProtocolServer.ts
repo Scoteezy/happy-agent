@@ -10,6 +10,8 @@ import type { HappyDaemonPaths } from "./getHappyDaemonPaths.js";
 import { waitForSocketRemoval } from "./waitForSocketRemoval.js";
 
 const DAEMON_SHUTDOWN_TIMEOUT_MS = 30_000;
+/** How long a drain that lost its daemon waits to see the process gone before reporting failure. */
+const DRAIN_LOST_DAEMON_EXIT_TIMEOUT_MS = 2_000;
 const DRAIN_POLL_INTERVAL_MS = 100;
 /**
  * Agent work owns the drain for as long as it needs, but an HTTP mutation finishes in moments.
@@ -23,6 +25,11 @@ export interface StopLocalProtocolServerOptions {
     readonly onDrainWaiting?: (waiting: readonly DrainWaitingFor[]) => void;
     /** The drain is over and the daemon is being asked to exit. */
     readonly onStopping?: () => void;
+    /**
+     * The daemon process exited, for example by crashing, before its drain finished. The stop is
+     * then complete: there is nothing left to shut down.
+     */
+    readonly onExitedWhileDraining?: () => void;
 }
 
 export async function stopLocalProtocolServer(
@@ -32,7 +39,25 @@ export async function stopLocalProtocolServer(
 ): Promise<void> {
     const socketPath = typeof paths === "string" ? paths : paths.socketPath;
     let pid = typeof paths === "string" ? undefined : await readDaemonPid(paths.pidPath);
-    await drainLocalProtocolServer(client, options.onDrainProgress, true, options.onDrainWaiting);
+    try {
+        await drainLocalProtocolServer(
+            client,
+            options.onDrainProgress,
+            true,
+            options.onDrainWaiting,
+        );
+    } catch (error) {
+        // A daemon that dies mid-drain refuses the next health poll. The stop has nothing left to
+        // do, so it succeeds instead of surfacing a raw connection error.
+        if (
+            pid !== undefined &&
+            (await waitForDaemonProcessExit(pid, DRAIN_LOST_DAEMON_EXIT_TIMEOUT_MS))
+        ) {
+            options.onExitedWhileDraining?.();
+            return;
+        }
+        throw error;
+    }
     options.onStopping?.();
     try {
         pid = (await client.shutdown()).pid;

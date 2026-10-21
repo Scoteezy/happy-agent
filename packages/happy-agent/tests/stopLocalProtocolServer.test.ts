@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -254,6 +257,72 @@ describe("stopLocalProtocolServer", () => {
 
         expect(progress).toEqual(["This daemon does not support draining; stopping it directly."]);
         expect(shutdown).toHaveBeenCalledOnce();
+    });
+
+    it("treats a daemon that exits while draining as stopped", async () => {
+        vi.resetModules();
+        const { stopLocalProtocolServer } =
+            await import("../sources/lifecycle/stopLocalProtocolServer.js");
+        const directory = await mkdtemp(join(tmpdir(), "rig-stop-"));
+        const child = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000);"], {
+            stdio: "ignore",
+        });
+        try {
+            await once(child, "spawn");
+            const pidPath = join(directory, "daemon.pid");
+            await writeFile(pidPath, `${String(child.pid)}\n`);
+            const shutdown = vi.fn();
+            const client = {
+                drain: vi.fn().mockResolvedValue({ draining: true, pid: child.pid }),
+                getHealth: vi.fn().mockImplementation(async () => {
+                    // The daemon crashes mid-drain: its socket refuses the next poll.
+                    child.kill("SIGKILL");
+                    await once(child, "exit");
+                    throw new Error("connect ECONNREFUSED /tmp/rig/server.sock");
+                }),
+                shutdown,
+            } as unknown as HappyAgentClient;
+            const onExitedWhileDraining = vi.fn();
+
+            await expect(
+                stopLocalProtocolServer(
+                    client,
+                    { pidPath, socketPath: join(directory, "server.sock") },
+                    { onExitedWhileDraining },
+                ),
+            ).resolves.toBeUndefined();
+
+            expect(onExitedWhileDraining).toHaveBeenCalledOnce();
+            expect(shutdown).not.toHaveBeenCalled();
+        } finally {
+            if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it("still fails a drain that loses a daemon which keeps running", async () => {
+        vi.resetModules();
+        const { stopLocalProtocolServer } =
+            await import("../sources/lifecycle/stopLocalProtocolServer.js");
+        const directory = await mkdtemp(join(tmpdir(), "rig-stop-"));
+        try {
+            const pidPath = join(directory, "daemon.pid");
+            await writeFile(pidPath, `${String(process.pid)}\n`);
+            const client = {
+                drain: vi.fn().mockResolvedValue({ draining: true, pid: process.pid }),
+                getHealth: vi.fn().mockRejectedValue(new Error("socket hang up")),
+                shutdown: vi.fn(),
+            } as unknown as HappyAgentClient;
+
+            await expect(
+                stopLocalProtocolServer(client, {
+                    pidPath,
+                    socketPath: join(directory, "server.sock"),
+                }),
+            ).rejects.toThrow("socket hang up");
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
     });
 });
 

@@ -122,10 +122,13 @@ export async function runAgentDaemonCommand(
         let reloaded: Awaited<ReturnType<typeof ensureAgentDaemon>>;
         try {
             if (connection !== undefined) {
+                await recordStopIntentForRecordedDaemon(paths);
                 await stopLocalProtocolServer(connection.client, paths, {
                     onDrainProgress: log,
                     onDrainWaiting: (waiting) => status.draining(waiting),
                     onStopping: () => status.phase("stopping"),
+                    onExitedWhileDraining: () =>
+                        log("The daemon exited while draining; starting a fresh one."),
                 });
             }
             status.phase("starting");
@@ -188,8 +191,31 @@ export async function runAgentDaemonCommand(
         return;
     }
     log("Daemon is stopping.");
-    await stopLocalProtocolServer(connection.client, paths, { onDrainProgress: log });
+    await recordStopIntentForRecordedDaemon(paths);
+    await stopLocalProtocolServer(connection.client, paths, {
+        onDrainProgress: log,
+        onExitedWhileDraining: () => log("The daemon exited while draining."),
+    });
     log("Daemon stopped.");
+}
+
+/**
+ * A stop begins with the drain, not with the shutdown request: the daemon records its own stop
+ * intent only once shutdown starts, so a daemon that crashes while draining would otherwise look
+ * like an unexpected exit and be restarted by its supervisor despite the stop. Recording first
+ * keeps an intentional stop from ever respawning. The record names only this PID, so it never
+ * suppresses a later daemon's restart.
+ */
+async function recordStopIntentForRecordedDaemon(
+    paths: ReturnType<typeof getHappyDaemonPaths>,
+): Promise<void> {
+    const pid = await readDaemonPid(paths.pidPath).catch(() => undefined);
+    if (pid === undefined) return;
+    try {
+        recordDaemonStopIntent(paths.directory, pid);
+    } catch {
+        // Without the record a crash during the drain is judged by its exit status alone.
+    }
 }
 
 async function assertNoUnresponsiveDaemon(pidPath: string): Promise<void> {
