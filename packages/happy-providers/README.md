@@ -1183,6 +1183,12 @@ load; `internal_server_error` — the backend failed; `empty_response` — the p
 nothing usable; `unclassified` — we don't know how to recover from this, and the human-readable
 message on the `done` event is the best available explanation.
 
+Claude reports a spent subscription window and a momentary throttle with the same `rate_limit`
+assistant error. The unified limiter's `rate_limit_event` separates them: `status: "rejected"` with
+a `resetsAt`, while not running on overage, is the condition under which Claude Code itself says
+"You've hit your weekly limit", so it is `out_of_tokens` with that window's reset. Any other
+`rate_limit` stays `rate_limit`.
+
 Diagnostics are bounded and sized for logs — never a raw upstream dump.
 
 ## License

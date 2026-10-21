@@ -239,7 +239,7 @@ describe("ClaudeSession", () => {
         ).rejects.toBe(delayError);
     });
 
-    it("preserves weekly quota classification, reset time, retries, and the native error", async () => {
+    it("reports a spent weekly window as out of tokens with its reset, retries, and the native error", async () => {
         const credential = await ClaudeAuthTokenCredential.tryLoad({ authToken: "test-token" });
         if (credential === null) throw new Error("Expected test credential.");
         const session = new ClaudeSession("quota-session", {
@@ -338,10 +338,10 @@ describe("ClaudeSession", () => {
         expect(events.at(-1)).toEqual({
             type: "done",
             state: "error",
-            kind: "unknown",
+            kind: "billing_error",
             message: "You've hit your weekly limit · resets Jul 25 at 5am",
             providerError: {
-                type: "rate_limit",
+                type: "out_of_tokens",
                 resetAt: 2_000_000,
                 diagnostics: {
                     attempts: 3,

@@ -59,8 +59,14 @@ export function classifyClaudeError(options: {
             ...(diagnostics === undefined ? {} : { diagnostics }),
         };
     }
-    const resetAt = earliestResetAt(options.rateLimitInfo);
+    // The CLI reports a spent subscription window and a momentary throttle with the same
+    // `rate_limit` assistant error. What tells them apart is the unified limiter's own verdict:
+    // `rejected` with a reset, while not running on overage, is the condition under which Claude
+    // Code itself says "You've hit your … limit". A throttle carries no such rejection.
+    const windowReset = spentWindowResetAt(options.rateLimitInfo);
+    const resetAt = windowReset ?? earliestResetAt(options.rateLimitInfo);
     const outOfTokens =
+        windowReset !== undefined ||
         options.assistantError === "billing_error" ||
         options.rateLimitInfo?.overageDisabledReason === "out_of_credits" ||
         normalized.includes("credit balance is too low") ||
@@ -132,6 +138,17 @@ export function isClaudeMidResponseServerError(message: string): boolean {
         normalized.includes("mid-response") &&
         normalized.includes("response above may be incomplete")
     );
+}
+
+/** When the subscription window the limiter rejected the account for resets, in epoch ms. */
+function spentWindowResetAt(rateLimitInfo: SDKRateLimitInfo | undefined): number | undefined {
+    if (rateLimitInfo?.status !== "rejected" || rateLimitInfo.isUsingOverage === true) {
+        return undefined;
+    }
+    const seconds = rateLimitInfo.resetsAt;
+    return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0
+        ? seconds * 1_000
+        : undefined;
 }
 
 function earliestResetAt(rateLimitInfo: SDKRateLimitInfo | undefined): number | undefined {
