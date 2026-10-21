@@ -232,6 +232,11 @@ into the user's Claude configuration directory.
 The date attachment is the local calendar date at replay time, as it is in the CLI. A session
 rebuilt after midnight therefore differs from the one it replaces; the CLI itself reports a
 changed date on a long-lived query, and the one-hour cache lifetime makes the difference moot.
+"Local" means the CLI's local zone, which follows the `TZ` in the environment the session starts
+it with, not this process's zone. Computing it in this process's zone made a replay started with
+`TZ=UTC` from Los Angeles record yesterday's date for the seven hours after UTC midnight, and the
+CLI appended "The date has changed" to every rebuilt request. Like the CLI's runtime, an empty or
+unresolvable `TZ` means UTC.
 
 The working directory in the environment snapshot is the one the CLI sees after it starts, with
 links resolved: started in `/tmp/x` on macOS, it reports `/private/tmp/x`. A replay naming the

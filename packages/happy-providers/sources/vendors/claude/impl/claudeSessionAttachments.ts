@@ -101,7 +101,7 @@ export function claudeSessionAttachments(options: {
         },
         { type: "model", identity, text: modelIdentityText(identity) },
         { type: "session_context", context: {} },
-        { type: "date", date: calendarDate(options.now ?? new Date()) },
+        { type: "date", date: calendarDate(options.now ?? new Date(), options.env) },
     ];
 }
 
@@ -165,8 +165,36 @@ function detectGitRepository(cwd: string): { isGitRepo: boolean; isWorktree: boo
     }
 }
 
-function calendarDate(now: Date): string {
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    return `${now.getFullYear()}-${month}-${day}`;
+/**
+ * The local calendar date as the CLI computes it. Claude Code reads the date from its own clock,
+ * which follows the `TZ` of the environment it is started with rather than this process's, and on
+ * resume it appends "The date has changed" whenever the stored date differs. A `TZ` the runtime
+ * cannot resolve, or an empty one, leaves the CLI on UTC; a leading colon is the POSIX spelling of
+ * a zone file name. Without a `TZ` the CLI inherits the same system zone this process uses.
+ */
+function calendarDate(now: Date, env: NodeJS.ProcessEnv): string {
+    const zone = env.TZ;
+    if (zone === undefined) {
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        return `${now.getFullYear()}-${month}-${day}`;
+    }
+    let format: Intl.DateTimeFormat;
+    try {
+        format = zonedDateFormat(zone.startsWith(":") ? zone.slice(1) : zone);
+    } catch {
+        format = zonedDateFormat("UTC");
+    }
+    const part = (type: "year" | "month" | "day") =>
+        format.formatToParts(now).find((entry) => entry.type === type)?.value ?? "";
+    return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function zonedDateFormat(timeZone: string): Intl.DateTimeFormat {
+    return new Intl.DateTimeFormat("en-US", {
+        timeZone: timeZone === "" ? "UTC" : timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    });
 }
