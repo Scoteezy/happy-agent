@@ -120,8 +120,24 @@ it("isolates team drafts, timestamps, bootstrap, event pulls and streams, and re
         const { profile } = await client.getProfile();
         await client.updateProfile({ name }, { ifMatch: profile.version });
     }
+    const beforeProject = (await alice.getEvents()).latestCursor;
     const { project } = await alice.registerProject({ path: workspace });
     const { agent } = await alice.createAgent({ workspaceId: project.id, title: "Private drafts" });
+    // Settle project discovery before asserting which events the private draft produces.
+    await vi.waitFor(
+        async () => {
+            const page = await alice.getEvents({ after: beforeProject });
+            expect(
+                page.events.some(
+                    (event) =>
+                        event.type === "project.updated" &&
+                        event.payload.projectId === project.id &&
+                        event.payload.changes.worktreeSupport === "unsupported",
+                ),
+            ).toBe(true);
+        },
+        { timeout: 10_000 },
+    );
     const draft = (text: string) => ({
         text,
         providerId: "gym",
