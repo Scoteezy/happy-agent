@@ -80,6 +80,21 @@ import type {
     UnarchiveTaskRequest,
 } from "./protocol/tasks.js";
 import type {
+    CreateStemCellRequest,
+    CreateStemCellResponse,
+    SpaceAttentionRequest,
+    SpaceAttentionResponse,
+    SpaceBatchListResponse,
+    SpaceListResponse,
+    SpaceResponse,
+    SpaceSectionResponse,
+    SpaceSidebarResponse,
+    SpaceSidebarObservationsRequest,
+    UpdateSpaceSidebarRequest,
+    UpdateSpaceRequest,
+    UpdateSpaceSectionRequest,
+} from "./protocol/spaces.js";
+import type {
     CreateSurfaceRequest,
     CreateTodoRequest,
     CalendarEventMutationRequest,
@@ -1603,6 +1618,150 @@ export class HappyAgentClient {
             path: `v0/tasks/${encodeURIComponent(taskId)}/unarchive`,
             json: bodyOf(options),
             ifMatch: options.ifMatch,
+            signal: options.signal,
+        });
+    }
+
+    // Spaces
+
+    /** Read (and lazily create) the person's sidebar artifact. */
+    async getSpaceSidebar(options: RequestOptions = {}): Promise<SpaceSidebarResponse> {
+        return await this.#json({
+            method: "GET",
+            path: "v0/spaces/sidebar",
+            signal: options.signal,
+        });
+    }
+
+    /** Commit one version. Retry with the same mutation ID; reload on a 409. */
+    async updateSpaceSidebar(
+        request: UpdateSpaceSidebarRequest,
+        options: RequestOptions = {},
+    ): Promise<SpaceSidebarResponse> {
+        return await this.#json({
+            method: "PUT",
+            path: "v0/spaces/sidebar",
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    async reportSpaceSidebarObservations(
+        request: SpaceSidebarObservationsRequest,
+        options: RequestOptions = {},
+    ): Promise<void> {
+        await this.#send({
+            method: "POST",
+            path: "v0/spaces/sidebar/observations",
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /** `GET /v0/spaces` — the caller's whole sidebar, and the cursor to follow it from. */
+    async listSpaces(options: RequestOptions = {}): Promise<SpaceListResponse> {
+        return await this.#json({ method: "GET", path: "v0/spaces", signal: options.signal });
+    }
+
+    /** `GET /v0/spaces/batches` — applied batches, newest first; `limit` is 1–100. */
+    async listSpaceBatches(
+        options: RequestOptions & { readonly limit?: number } = {},
+    ): Promise<SpaceBatchListResponse> {
+        return await this.#json({
+            method: "GET",
+            path: "v0/spaces/batches",
+            query: { limit: options.limit },
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * `POST /v0/spaces/stem-cells` — new work: a fresh unnamed task and its row. Repeating `id`
+     * returns the existing row and conversation.
+     */
+    async createStemCell(
+        request: CreateStemCellRequest = {},
+        options: RequestOptions = {},
+    ): Promise<CreateStemCellResponse> {
+        return await this.#json({
+            method: "POST",
+            path: "v0/spaces/stem-cells",
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * `PATCH /v0/spaces/:spaceId` — the person's own move, fold, or hide, applied at once. Giving
+     * `sectionId` moves the row; `afterId` places it within that section.
+     */
+    async updateSpace(
+        spaceId: Cuid2,
+        request: UpdateSpaceRequest,
+        options: RequestOptions = {},
+    ): Promise<SpaceResponse> {
+        return await this.#json({
+            method: "PATCH",
+            path: `v0/spaces/${encodeURIComponent(spaceId)}`,
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * `PATCH /v0/spaces/:spaceId` with `removed: true` — take new work nobody wrote in out of the
+     * sidebar and archive its task; idempotent. Answers `409` once its conversation holds a message.
+     */
+    async removeSpace(
+        spaceId: Cuid2,
+        options: RequestOptions & { readonly mutationId?: string } = {},
+    ): Promise<void> {
+        await this.#send({
+            method: "PATCH",
+            path: `v0/spaces/${encodeURIComponent(spaceId)}`,
+            json: { removed: true, ...bodyOf(options) },
+            signal: options.signal,
+        });
+    }
+
+    /** `PATCH /v0/spaces/sections/:sectionId` — the person's own disclosure, applied at once. */
+    async updateSpaceSection(
+        sectionId: Cuid2,
+        request: UpdateSpaceSectionRequest,
+        options: RequestOptions = {},
+    ): Promise<SpaceSectionResponse> {
+        return await this.#json({
+            method: "PATCH",
+            path: `v0/spaces/sections/${encodeURIComponent(sectionId)}`,
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * `POST /v0/spaces/attention` — `interacting` holds batches back; `calm` lets a waiting one
+     * apply and returns it.
+     */
+    async reportSpaceAttention(
+        request: SpaceAttentionRequest,
+        options: RequestOptions = {},
+    ): Promise<SpaceAttentionResponse> {
+        return await this.#json({
+            method: "POST",
+            path: "v0/spaces/attention",
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /** `POST /v0/spaces/tidy` — post "Tidy the sidebar now" into Prioritizing's conversation. */
+    async tidySpaces(
+        options: RequestOptions & { readonly mutationId?: string } = {},
+    ): Promise<void> {
+        await this.#send({
+            method: "POST",
+            path: "v0/spaces/tidy",
+            json: bodyOf(options),
             signal: options.signal,
         });
     }

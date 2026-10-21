@@ -381,6 +381,14 @@ left to name itself from its first message, and `renameTask()` renames it. A tas
 `workspaceId` works with every workspace route, files, terminals, and Git included. Follow `task.created` and `task.updated` for the tasks, and `task.joined`,
 `task.reordered`, and `task.left` for the caller's memberships.
 
+Spaces, the sidebar, are additive without a protocol bump. Detect support through `listSpaces()`:
+`404` means the daemon has no Spaces. It returns the caller's rows, sections, and the event cursor
+to follow `space.*` events from. `createStemCell()` starts new work, `updateSpace()` and
+`updateSpaceSection()` apply the person's own changes at once, and `removeSpace()` drops new work
+nobody wrote in. Prioritizing, a subtask of Happy, organises the rest; its changes apply in
+batches. `reportSpaceAttention()` holds them back while the person is `interacting` and lets one
+apply when `calm`, and `tidySpaces()` posts "Tidy the sidebar now" into its conversation. `listSpaceBatches()` reads the applied batches with their notes.
+
 Artifacts are additive without a protocol bump. Detect support through `listArtifacts()`: `404`
 means the daemon has no artifacts. The catalog is global and pages newest-created first; filter it by
 `type`, `sourceKind`/`sourceId`, `agentId`, or `authorKind`/`authorId`, and follow

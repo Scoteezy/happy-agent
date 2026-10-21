@@ -132,6 +132,10 @@ export const agentSchema = Type.Recursive((agent) =>
         title: Nullable(Type.String()),
         /** `"idle"` while no title has been generated yet. */
         titleStatus: Type.Union([Type.Literal("idle"), Type.Literal("ready")]),
+        /** Own recorded input + output on activity rows; null when unmeasured, absent on older daemons. */
+        totalTokens: Type.Optional(
+            Nullable(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+        ),
         unread: Nullable(agentUnreadSchema),
         updatedAt: timestampSchema,
         /** Whether this agent belongs to a project or workspace's visible root-agent series. */

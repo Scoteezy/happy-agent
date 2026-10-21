@@ -44,6 +44,7 @@ import {
     secretEnvironmentVariableNameSchema,
     secretSchema,
 } from "./secrets.js";
+import { spaceBatchSchema, spaceSchema, spaceSectionSchema } from "./spaces.js";
 import { taskMembershipSchema, taskSchema } from "./tasks.js";
 import {
     surfaceIdSchema,
@@ -209,6 +210,40 @@ export const taskMembershipPayloadSchema = Type.Object({
     mutationId: Type.Optional(mutationIdSchema),
 });
 export type TaskMembershipPayload = Static<typeof taskMembershipPayloadSchema>;
+
+/** A sidebar row was added or changed. Space events carry the whole row. */
+export const spacePayloadSchema = Type.Object({
+    mutationId: Type.Optional(mutationIdSchema),
+    space: spaceSchema,
+});
+export type SpacePayload = Static<typeof spacePayloadSchema>;
+
+/** A sidebar row was discarded, or its work was archived or left. */
+export const spaceRemovedPayloadSchema = Type.Object({
+    mutationId: Type.Optional(mutationIdSchema),
+    spaceId: cuid2Schema,
+});
+export type SpaceRemovedPayload = Static<typeof spaceRemovedPayloadSchema>;
+
+/** A sidebar section was added or changed. */
+export const spaceSectionPayloadSchema = Type.Object({
+    mutationId: Type.Optional(mutationIdSchema),
+    section: spaceSectionSchema,
+});
+export type SpaceSectionPayload = Static<typeof spaceSectionPayloadSchema>;
+
+export const spaceSectionRemovedPayloadSchema = Type.Object({
+    mutationId: Type.Optional(mutationIdSchema),
+    sectionId: cuid2Schema,
+});
+export type SpaceSectionRemovedPayload = Static<typeof spaceSectionRemovedPayloadSchema>;
+
+/** A batch applied, after its rows' and sections' own events. */
+export const spaceBatchAppliedPayloadSchema = Type.Object({
+    batch: spaceBatchSchema,
+    mutationId: Type.Optional(mutationIdSchema),
+});
+export type SpaceBatchAppliedPayload = Static<typeof spaceBatchAppliedPayloadSchema>;
 
 /**
  * Members stay present on chat-only and edit-only changes. Chat association, `name`, and `image`
@@ -595,6 +630,13 @@ export type HappyAgentEvent =
     | EventEnvelope<"task.joined", TaskMembershipPayload>
     | EventEnvelope<"task.reordered", TaskMembershipPayload>
     | EventEnvelope<"task.left", TaskMembershipPayload>
+    | EventEnvelope<"space.created", SpacePayload>
+    | EventEnvelope<"space.updated", SpacePayload>
+    | EventEnvelope<"space.removed", SpaceRemovedPayload>
+    | EventEnvelope<"space.section.created", SpaceSectionPayload>
+    | EventEnvelope<"space.section.updated", SpaceSectionPayload>
+    | EventEnvelope<"space.section.removed", SpaceSectionRemovedPayload>
+    | EventEnvelope<"space.batch.applied", SpaceBatchAppliedPayload>
     | EventEnvelope<"surface.updated", SurfaceUpdatedPayload>
     | EventEnvelope<"surface.created", SurfaceCreatedPayload>
     | EventEnvelope<"todo.created", TodoCreatedPayload>
