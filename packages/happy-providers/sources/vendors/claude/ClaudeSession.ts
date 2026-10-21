@@ -52,6 +52,17 @@ import type { Context } from "@steve.kite/stdlib";
 export type ClaudeSdkQuery = typeof defaultClaudeSdkQuery;
 
 const CLAUDE_QUERY_ABORTED = Symbol("claude_query_aborted");
+const CLAUDE_QUERY_IDLE_TIMEOUT_MS = 90 * 60 * 1000;
+
+interface ClaudeQueryOptions {
+    abort?: AbortSignal;
+    compaction?: boolean;
+    context: SessionContext;
+    effort?: SessionReasoningEffort;
+    maxRetries?: number;
+    model: string;
+    structuredOutput?: SessionRunRequest["structuredOutput"];
+}
 
 /**
  * The SDK answers a json_schema output format by making the model call this tool of its own, then
@@ -93,6 +104,7 @@ export class ClaudeSession extends BaseSession {
     private sdkSessionId = randomUUID();
     private readonly query: ClaudeSdkQuery;
     private activeQuery: ReturnType<ClaudeSdkQuery> | undefined;
+    private idleQueryTimer: ReturnType<typeof setTimeout> | undefined;
     private activeQueryKey: string | undefined;
     /** Wire identity of the conversation the live query holds, including what it generated. */
     private sentConversation: readonly string[] | undefined;
@@ -375,15 +387,24 @@ export class ClaudeSession extends BaseSession {
         }
     }
 
-    private async *streamQuery(options: {
-        abort?: AbortSignal;
-        compaction?: boolean;
-        context: SessionContext;
-        effort?: SessionReasoningEffort;
-        maxRetries?: number;
-        model: string;
-        structuredOutput?: SessionRunRequest["structuredOutput"];
-    }): AsyncGenerator<SessionEvent> {
+    private async *streamQuery(options: ClaudeQueryOptions): AsyncGenerator<SessionEvent> {
+        this.clearIdleQueryTimer();
+        try {
+            yield* this.streamActiveQuery(options);
+        } finally {
+            const query = this.activeQuery;
+            if (query !== undefined) {
+                // Caller-owned tools can keep running after inference returns. Closing their
+                // SDK waits does not cancel them: the next run replays the caller's real results.
+                this.idleQueryTimer = setTimeout(() => {
+                    if (this.activeQuery === query) this.closeActiveQuery();
+                }, CLAUDE_QUERY_IDLE_TIMEOUT_MS);
+                this.idleQueryTimer.unref();
+            }
+        }
+    }
+
+    private async *streamActiveQuery(options: ClaudeQueryOptions): AsyncGenerator<SessionEvent> {
         yield { type: "block_start" };
         const modelConfiguration = this.modelConfigurations?.[options.model];
         const tools = modelConfiguration?.tools ?? this.tools ?? [];
@@ -976,6 +997,7 @@ export class ClaudeSession extends BaseSession {
     }
 
     private closeActiveQuery(): void {
+        this.clearIdleQueryTimer();
         this.activeToolBridge?.close();
         this.activeToolBridge = undefined;
         this.activePromptQueue?.close();
@@ -985,6 +1007,11 @@ export class ClaudeSession extends BaseSession {
         this.activeQueryKey = undefined;
         this.sentConversation = undefined;
         this.activeReplay = undefined;
+    }
+
+    private clearIdleQueryTimer(): void {
+        clearTimeout(this.idleQueryTimer);
+        this.idleQueryTimer = undefined;
     }
 }
 

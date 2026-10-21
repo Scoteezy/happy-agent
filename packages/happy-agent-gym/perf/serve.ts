@@ -65,7 +65,10 @@ const CATALOG: Record<string, readonly string[]> = {
     grok: ["xai/grok-4.7"],
 };
 // An installation's own provider IDs, as JSON `{ "<providerId>": ["<modelId>", ...] }`.
-Object.assign(CATALOG, JSON.parse(process.env.PERF_EXTRA_PROVIDERS ?? "{}") as Record<string, readonly string[]>);
+Object.assign(
+    CATALOG,
+    JSON.parse(process.env.PERF_EXTRA_PROVIDERS ?? "{}") as Record<string, readonly string[]>,
+);
 const models: AgentModel[] = Object.entries(CATALOG).flatMap(([providerId, ids]) =>
     ids.map((id) => ({
         defaultEffort: "medium",

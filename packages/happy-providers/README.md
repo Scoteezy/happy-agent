@@ -402,6 +402,11 @@ state that makes continuations fast and correct: open connections, warm cache pr
 identifiers, active model state, and the context adopted by native compaction. Throwing a session
 away between turns throws that warmth away with it.
 
+Claude Code SDK sessions release their subprocess after 90 minutes without an active inference or
+compaction. The next operation starts a new subprocess and replays the complete caller-supplied
+history. Caller-owned tools keep running if the subprocess expires while waiting for their results;
+include those results in the next request as usual. Active inference and compaction do not expire.
+
 The division of labor is strict, and it's worth internalizing:
 
 - **The session keeps the connection.** Transport choice, keep-alive, reconnection, and

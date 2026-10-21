@@ -1,15 +1,364 @@
 import { testContext, testContextWith } from "./testContext.js";
 
 import { Type } from "@sinclair/typebox";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderUsage } from "@/core/ProviderUsage.js";
+import type { SessionMessage } from "@/core/SessionContext.js";
+import { assistantMessageFromEvents } from "@/core/SessionAssistantMessageAccumulator.js";
 import { ClaudeAuthTokenCredential } from "@/vendors/claude/ClaudeAuthTokenCredential.js";
 import { ClaudeSession, type ClaudeSdkQuery } from "@/vendors/claude/ClaudeSession.js";
 import { CLAUDE_SDK_PRIVACY_ENVIRONMENT } from "@/vendors/claude/claudeSdkPrivacyEnvironment.js";
 import { collectSessionEvents, textFromSessionEvents } from "./helpers/collectSessionEvents.js";
 
 describe("ClaudeSession", () => {
+    describe("idle subprocess cleanup", () => {
+        const idleMs = 90 * 60 * 1000;
+        const sessions: ClaudeSession[] = [];
+        const initialMessage: SessionMessage = {
+            role: "user",
+            content: [{ type: "text", text: "FIRST QUESTION" }],
+        };
+        const request = { context: { instructions: "", messages: [initialMessage] } };
+
+        beforeEach(() => vi.useFakeTimers());
+        afterEach(() => {
+            for (const session of sessions.splice(0)) session.destroy();
+            vi.restoreAllMocks();
+            vi.useRealTimers();
+        });
+
+        async function createSession(query: ClaudeSdkQuery): Promise<ClaudeSession> {
+            const credential = await ClaudeAuthTokenCredential.tryLoad({ authToken: "test-token" });
+            if (credential === null) throw new Error("Expected test credential.");
+            const session = new ClaudeSession("idle-session", {
+                instructions: "",
+                credential,
+                model: "sonnet[1m]",
+                query,
+                tools: [{ name: "Bash", parameters: Type.Object({ command: Type.String() }) }],
+            });
+            sessions.push(session);
+            return session;
+        }
+
+        it("unloads at 90 idle minutes and replays the complete history on the next request", async () => {
+            const close = vi.fn();
+            let replayed: unknown;
+            const query = vi.fn<ClaudeSdkQuery>((parameters) => {
+                if (query.mock.calls.length === 1)
+                    return Object.assign(fakeQuery("FIRST ANSWER"), { close });
+                async function* messages() {
+                    replayed = await parameters.options?.sessionStore?.load({
+                        projectKey: "test",
+                        sessionId: parameters.options.resume ?? "idle-session",
+                    });
+                    yield* fakeQuery("SECOND ANSWER");
+                }
+                return Object.assign(messages(), {
+                    close: vi.fn(),
+                }) as unknown as ReturnType<ClaudeSdkQuery>;
+            });
+            const session = await createSession(query);
+            const first = await collectSessionEvents(session.run(testContext, request));
+            const assistant = assistantMessageFromEvents(first);
+            if (assistant === undefined) throw new Error("Missing assistant message.");
+
+            await vi.advanceTimersByTimeAsync(idleMs - 1);
+            expect(close).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(close).toHaveBeenCalledOnce();
+            const history: SessionMessage[] = [
+                initialMessage,
+                assistant,
+                { role: "user", content: [{ type: "text", text: "SECOND QUESTION" }] },
+            ];
+            const original = structuredClone(history);
+            const second = await collectSessionEvents(
+                session.run(testContext, {
+                    context: { instructions: "", messages: history },
+                }),
+            );
+
+            expect(query).toHaveBeenCalledTimes(2);
+            expect(JSON.stringify(replayed)).toContain("FIRST QUESTION");
+            expect(JSON.stringify(replayed)).toContain("FIRST ANSWER");
+            expect(history).toEqual(original);
+            expect(textFromSessionEvents(second)).toBe("SECOND ANSWER");
+            expect(second.at(-1)).toMatchObject({ type: "done", state: "normal" });
+        });
+
+        it("reuses a warm query and resets the full idle period after another response", async () => {
+            const close = vi.fn();
+            const query = vi.fn<ClaudeSdkQuery>(() => {
+                async function* messages() {
+                    yield* fakeQuery("FIRST ANSWER");
+                    yield* fakeQuery("SECOND ANSWER");
+                }
+                return Object.assign(messages(), {
+                    close,
+                }) as unknown as ReturnType<ClaudeSdkQuery>;
+            });
+            const session = await createSession(query);
+            const first = await collectSessionEvents(session.run(testContext, request));
+            const assistant = assistantMessageFromEvents(first);
+            if (assistant === undefined) throw new Error("Missing assistant message.");
+            await vi.advanceTimersByTimeAsync(idleMs - 60_000);
+            await collectSessionEvents(
+                session.run(testContext, {
+                    context: {
+                        instructions: "",
+                        messages: [
+                            initialMessage,
+                            assistant,
+                            { role: "user", content: [{ type: "text", text: "SECOND QUESTION" }] },
+                        ],
+                    },
+                }),
+            );
+            await vi.advanceTimersByTimeAsync(idleMs - 1);
+            expect(close).not.toHaveBeenCalled();
+            expect(query).toHaveBeenCalledOnce();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(close).toHaveBeenCalledOnce();
+        });
+
+        it("protects an ongoing inference past its previous idle deadline", async () => {
+            const close = vi.fn();
+            const started = deferred<void>();
+            const finish = deferred<void>();
+            const query = vi.fn<ClaudeSdkQuery>(() => {
+                async function* messages() {
+                    yield* fakeQuery("FIRST ANSWER");
+                    started.resolve();
+                    await finish.promise;
+                    yield* fakeQuery("SECOND ANSWER");
+                }
+                return Object.assign(messages(), {
+                    close,
+                }) as unknown as ReturnType<ClaudeSdkQuery>;
+            });
+            const session = await createSession(query);
+            const first = await collectSessionEvents(session.run(testContext, request));
+            const assistant = assistantMessageFromEvents(first);
+            if (assistant === undefined) throw new Error("Missing assistant message.");
+            await vi.advanceTimersByTimeAsync(idleMs - 1);
+            const running = collectSessionEvents(
+                session.run(testContext, {
+                    context: {
+                        instructions: "",
+                        messages: [
+                            initialMessage,
+                            assistant,
+                            { role: "user", content: [{ type: "text", text: "SECOND QUESTION" }] },
+                        ],
+                    },
+                }),
+            );
+            await started.promise;
+            await vi.advanceTimersByTimeAsync(idleMs * 2);
+            expect(close).not.toHaveBeenCalled();
+            finish.resolve();
+            expect((await running).at(-1)).toMatchObject({ type: "done", state: "normal" });
+            await vi.advanceTimersByTimeAsync(idleMs);
+            expect(close).toHaveBeenCalledOnce();
+        });
+
+        it("unloads while waiting for caller tools and resumes from their supplied results", async () => {
+            const close = vi.fn();
+            let replayed: unknown;
+            const query = vi.fn<ClaudeSdkQuery>((parameters) => {
+                if (query.mock.calls.length === 1) return fakeToolCallQuery(close);
+                async function* messages() {
+                    replayed = await parameters.options?.sessionStore?.load({
+                        projectKey: "test",
+                        sessionId: parameters.options.resume ?? "idle-session",
+                    });
+                    yield* fakeQuery("TOOL COMPLETE");
+                }
+                return Object.assign(messages(), {
+                    close: vi.fn(),
+                }) as unknown as ReturnType<ClaudeSdkQuery>;
+            });
+            const session = await createSession(query);
+            const first = await collectSessionEvents(session.run(testContext, request));
+            expect(first.at(-1)).toMatchObject({ type: "done", state: "tool_call" });
+            const assistant = assistantMessageFromEvents(first);
+            if (assistant === undefined) throw new Error("Missing assistant message.");
+            const tool = deferred<SessionMessage>();
+            await vi.advanceTimersByTimeAsync(idleMs);
+            expect(close).toHaveBeenCalledOnce();
+            tool.resolve({
+                role: "tool",
+                callId: "call-1",
+                content: [{ type: "text", text: "ACTUAL TOOL RESULT" }],
+            });
+            const history = [initialMessage, assistant, await tool.promise];
+            const original = structuredClone(history);
+            const second = await collectSessionEvents(
+                session.run(testContext, {
+                    context: { instructions: "", messages: history },
+                }),
+            );
+            expect(query).toHaveBeenCalledTimes(2);
+            expect(replayed).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        type: "assistant",
+                        message: expect.objectContaining({
+                            content: expect.arrayContaining([
+                                expect.objectContaining({ type: "tool_use", id: "call-1" }),
+                            ]),
+                        }),
+                    }),
+                    expect.objectContaining({
+                        type: "user",
+                        message: {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "tool_result",
+                                    tool_use_id: "call-1",
+                                    content: "ACTUAL TOOL RESULT",
+                                },
+                            ],
+                        },
+                    }),
+                ]),
+            );
+            expect(history).toEqual(original);
+            expect(second.some((event) => event.type === "toolcall_start")).toBe(false);
+            expect(textFromSessionEvents(second)).toBe("TOOL COMPLETE");
+        });
+
+        it("protects native compaction and cancels the replaced query's deadline", async () => {
+            const close = vi.fn();
+            const compactClose = vi.fn();
+            const started = deferred<void>();
+            const finish = deferred<void>();
+            const query = vi.fn<ClaudeSdkQuery>((parameters) => {
+                if (query.mock.calls.length === 1)
+                    return Object.assign(fakeQuery("ANSWER"), { close });
+                async function* messages() {
+                    started.resolve();
+                    await finish.promise;
+                    yield* fakeNativeCompactQuery(parameters, "SUMMARY", []);
+                }
+                return Object.assign(messages(), {
+                    close: compactClose,
+                }) as unknown as ReturnType<ClaudeSdkQuery>;
+            });
+            const session = await createSession(query);
+            const events = await collectSessionEvents(session.run(testContext, request));
+            const assistant = assistantMessageFromEvents(events);
+            if (assistant === undefined) throw new Error("Missing assistant message.");
+            await vi.advanceTimersByTimeAsync(idleMs - 1);
+            const compacting = session.compact(testContext, {
+                context: { instructions: "", messages: [initialMessage, assistant] },
+            });
+            await started.promise;
+            expect(close).toHaveBeenCalledOnce();
+            await vi.advanceTimersByTimeAsync(idleMs * 2);
+            expect(compactClose).not.toHaveBeenCalled();
+            finish.resolve();
+            expect(await compacting).toMatchObject({ status: "completed", summary: "SUMMARY" });
+            expect(compactClose).toHaveBeenCalledOnce();
+            expect(vi.getTimerCount()).toBe(0);
+        });
+
+        it("gives a replacement query its own full idle period", async () => {
+            const firstClose = vi.fn();
+            const secondClose = vi.fn();
+            const query = vi.fn<ClaudeSdkQuery>(
+                (): ReturnType<ClaudeSdkQuery> =>
+                    Object.assign(fakeQuery("ANSWER"), {
+                        close: query.mock.calls.length === 1 ? firstClose : secondClose,
+                    }),
+            );
+            const session = await createSession(query);
+            await collectSessionEvents(session.run(testContext, request));
+            await vi.advanceTimersByTimeAsync(idleMs - 1);
+            await collectSessionEvents(session.run(testContext, { ...request, model: "opus[1m]" }));
+            expect(query).toHaveBeenCalledTimes(2);
+            expect(firstClose).toHaveBeenCalledOnce();
+            await vi.advanceTimersByTimeAsync(idleMs - 1);
+            expect(secondClose).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(secondClose).toHaveBeenCalledOnce();
+        });
+
+        it.each(["abort", "error"] as const)(
+            "clears the timeout when an active query ends by %s",
+            async (outcome) => {
+                const close = vi.fn();
+                const started = deferred<void>();
+                const finish = deferred<void>();
+                const query = vi.fn<ClaudeSdkQuery>(() => {
+                    async function* messages() {
+                        yield* fakeQuery("FIRST ANSWER");
+                        started.resolve();
+                        await finish.promise;
+                        if (outcome === "error") throw new Error("SDK connection failed.");
+                        yield* fakeQuery("SECOND ANSWER");
+                    }
+                    return Object.assign(messages(), {
+                        close,
+                    }) as unknown as ReturnType<ClaudeSdkQuery>;
+                });
+                const session = await createSession(query);
+                const first = await collectSessionEvents(session.run(testContext, request));
+                const assistant = assistantMessageFromEvents(first);
+                if (assistant === undefined) throw new Error("Missing assistant message.");
+                const abort = new AbortController();
+                const running = collectSessionEvents(
+                    session.run(testContextWith(abort.signal), {
+                        context: {
+                            instructions: "",
+                            messages: [
+                                initialMessage,
+                                assistant,
+                                {
+                                    role: "user",
+                                    content: [{ type: "text", text: "SECOND QUESTION" }],
+                                },
+                            ],
+                        },
+                    }),
+                );
+                await started.promise;
+                if (outcome === "abort") abort.abort();
+                finish.resolve();
+                if (outcome === "error")
+                    await expect(running).rejects.toThrow("SDK connection failed.");
+                else await running;
+                expect(close).toHaveBeenCalledOnce();
+                expect(vi.getTimerCount()).toBe(0);
+                await vi.advanceTimersByTimeAsync(idleMs * 2);
+                expect(close).toHaveBeenCalledOnce();
+            },
+        );
+
+        it("cancels its timer on destroy and does not keep Node alive", async () => {
+            const close = vi.fn();
+            const timeout = vi.spyOn(globalThis, "setTimeout");
+            const session = await createSession(() =>
+                Object.assign(fakeQuery("ANSWER"), { close }),
+            );
+            await collectSessionEvents(session.run(testContext, request));
+            const idleTimer = timeout.mock.results.findLast(
+                (result, index) => timeout.mock.calls[index]?.[1] === idleMs,
+            )?.value as NodeJS.Timeout | undefined;
+            expect(idleTimer).toBeDefined();
+            expect(idleTimer?.hasRef()).toBe(false);
+            session.destroy();
+            expect(close).toHaveBeenCalledOnce();
+            await vi.advanceTimersByTimeAsync(idleMs * 2);
+            expect(close).toHaveBeenCalledOnce();
+            expect(vi.getTimerCount()).toBe(0);
+            timeout.mockRestore();
+        });
+    });
+
     it("retries a server error after rolling back its incomplete response", async () => {
         const credential = await ClaudeAuthTokenCredential.tryLoad({ authToken: "test-token" });
         if (credential === null) throw new Error("Expected test credential.");
