@@ -317,6 +317,11 @@ daemons. Task agents and their workspaces appear in no project or workspace list
 workspace `kind` value `"task"` and the workspace `taskId` field appear only on a task's
 workspace, which a client reaches only through a task.
 
+Spaces are additive and do not increment the protocol version. Clients detect them through
+`GET /v0/spaces`: `404` means the daemon has no Spaces. The `space.*` events are absent on older
+compatible daemons. Archiving or leaving a task or bot now also removes its row with
+`space.removed`; clients that do not know Spaces never see it.
+
 Surfaces are additive and do not increment the protocol version. Clients detect them through
 `GET /v0/surfaces`: `404` or `501` means Surface support is unavailable. The desktop bootstrap
 `surfaces` field and the `surface.*` and `todo.*` events are absent on
@@ -5199,6 +5204,11 @@ Fields:
   sendable despite their non-null parent.
 - `title`, `titleStatus` — a generated human-readable title for the conversation.
   `titleStatus` is `"idle"` while none has been generated yet and `"ready"` once one has.
+- `totalTokens` — optional additive non-negative integer or `null`. Emitted on every child in
+  the activity response and the focused bootstrap's `subagents` list: this agent's lifetime
+  recorded input plus output tokens, excluding separate cache counters and descendants' usage.
+  `null` means no inference usage has been recorded; recorded zero usage is `0`. Other agent
+  projections and older compatible daemons may omit it, meaning the total is unavailable.
 - `status` — what the agent is doing right now, granularly:
     - `"idle"` — no run or maintenance work in progress.
     - `"thinking"` — the model is reasoning before it produces anything visible.
@@ -7273,7 +7283,8 @@ Response — `200`:
 - `subagents` — full agent objects (with `parentAgentId` set to this agent), including
   finished and archived ones; their `status` tells which are still running. This includes
   subtasks, distinguished by `subtask: true`. Unlike an agent's `subtasks` tree, this activity list
-  also includes ordinary hidden subagents and finished or archived children.
+  also includes ordinary hidden subagents and finished or archived children. Each child carries
+  `totalTokens` from its own recorded usage, or `null` when none has been recorded.
 - `processes` — full process objects, including exited ones.
 
 `404` when no such agent exists. On a subagent the endpoint works normally — subagents can
@@ -9321,6 +9332,317 @@ Idempotent. The same callers may unarchive as may archive.
 Response — `200`: `{ "task": { ... }, "membership": { ... } }` with `archivedAt` `null`, and a
 `task.updated` event after commit, echoing `mutationId`. `403`, `404`, and `409` as for archive.
 
+## Spaces
+
+Spaces are the sidebar: one flat, ordered list of each person's work. A space is one row in it —
+almost always a task, otherwise a bot (Happy among them) or a Surface — with an icon, a place, and
+a visibility. Rows sit in flat
+sections, and each section may show only its first few rows behind a "+k more" tail.
+
+Each person has their own sidebar. In standalone mode it belongs to the installation's one person;
+in team mode every route answers with the authenticated member's sidebar only, and `space.*`
+events reach only that member's connections. Rows and sections are created by the daemon: the
+first read makes a row for Happy, first in the list, and one row for every other active bot, joined
+task, and joined Surface the person already has. New work gets a row when it appears; archived or left work loses it.
+
+**Prioritizing.** Organisation belongs to Prioritizing, an ordinary subtask of Happy that runs
+on the cheapest model the installation offers. It is created with the person's first new work
+(`POST /v0/spaces/stem-cells`), the same way Happy creates any subtask, and appears in Happy's
+`subtasks` like any other; until then there is none, and nothing organises the sidebar. After a new conversation's first
+message it gives the row an icon and decides where it belongs, and it tidies the list when asked.
+Its placement, visibility, and section changes are not applied one by one: they wait and apply
+together as one **batch** at a calm moment — when the client reports `calm`, or after two minutes
+without a report or a message from the person — and never while the client reports
+`interacting`. Each batch adds one short line to Happy's conversation, such as "Moved Preview
+viewer release to Older.", and is recorded with its diff. Icons apply at once, because they move
+nothing. A person's own changes through `PATCH` apply immediately and are never queued. Other
+agents may ask Prioritizing to move a row through their `request_space_placement` tool; only
+Prioritizing changes organisation.
+
+Prioritizing never folds or hides running work or work active in the last two hours. This is
+checked against the batch's final outcome, including section removal: protected shown rows leave
+a removed section as shown, unsectioned rows directly after Happy, keeping their relative order.
+The person's own visibility changes still apply.
+
+**Order.** A client renders the shown rows with no section in `orderKey` order, then each section
+in `orderKey` order with its shown rows in `orderKey` order, then the folded rows — the Older part
+of the list — most recently updated first. Hidden rows are not shown. Order keys are opaque
+strings compared within one section; moving a row changes only that row's key. Happy is an
+ordinary row whose target is Happy's bot; it starts first, the daemon places new work after it,
+and Prioritizing never moves or hides it, but the person may drag it like any other row.
+
+**Task trees.** A task row is the root of the sidebar's existing task tree, built from data the
+client already holds rather than from the space: the task's subtasks are its agent's `subtasks`
+(see Agents), shown while their `status` is `"working"` or their `pendingQuestionId` is set; its
+workspaces are the active workspaces whose `creatorAgentId` or `subtaskAgentId` is the task's
+agent or one of those subtasks, shown while they exist. A bot row, Happy's included, is the root
+of its bot's subtasks the same way; Prioritizing is one of Happy's. Their changes travel as
+`agent.updated` and `workspace.*` events, not as `space.updated`.
+
+### The space object
+
+```json
+{
+    "id": "s3k8m2q9w1e5r7y3u6i0o2p4",
+    "title": "Android 2.5 release",
+    "icon": { "type": "library", "slug": "app-store-release" },
+    "target": {
+        "kind": "task",
+        "id": "t4k8m2q9w1e5r7y3u6i0o2p4",
+        "agentId": "a9b8c7d6e5f4g3h2i1j0k9l8",
+        "workspaceId": "w5v4u3t2s1r0q9p8o7n6m5l4"
+    },
+    "sectionId": "c2n4b6v8m0q1w3e5r7t9y1u3",
+    "orderKey": "5",
+    "placement": "settled",
+    "visibility": "shown",
+    "working": false,
+    "version": 4,
+    "createdAt": 1755300000000,
+    "updatedAt": 1755400000000
+}
+```
+
+- `title` — the content's current name, or `null` while new work has not named itself yet;
+  clients label such a row themselves, for example "New".
+- `icon` — `null` until one is chosen, `{ "type": "stem_cell" }` for new work Prioritizing has not
+  given an icon yet, `{ "type": "library", "slug": "..." }` for an icon from the desktop's icon
+  library, or `{ "type": "image", "url": "/v0/bots/.../avatar" }` for the content's own picture,
+  a daemon-relative path read with the same bearer token.
+- `target` — what selecting the row opens. `kind` is `"task"` for nearly every row: new work and
+  everything the person does is a task. `"bot"` names a bot's conversation — Happy's row and any
+  other bot the person has — and `"surface"` a joined Surface. `id` is that task, bot, or Surface. `agentId` is the conversation to show and `workspaceId` its
+  workspace; both are `null` for a Surface. A client skips a row whose `kind` it does not know.
+- `sectionId` — the section it is in, or `null`.
+- `orderKey` — its opaque position within its section.
+- `placement` — `"pending"` while Prioritizing has not placed new work yet, otherwise `"settled"`.
+- `visibility` — `"shown"`, `"folded"` (in the Older part of the list), or `"hidden"`.
+- `working` — whether the target's conversation is running now.
+- `version` — an integer that grows with every change to the row. Space events carry whole
+  objects, so a client keeps the copy with the greater `version`.
+
+### The section object
+
+```json
+{
+    "id": "c2n4b6v8m0q1w3e5r7t9y1u3",
+    "name": "Releases",
+    "visibleCount": 3,
+    "collapsed": false,
+    "tailExpanded": false,
+    "orderKey": "5",
+    "version": 2,
+    "createdAt": 1755300000000,
+    "updatedAt": 1755400000000
+}
+```
+
+- `name` — unique within the person's sidebar, ignoring case.
+- `visibleCount` — show only this many rows and put the rest behind "+k more", or `null` to show
+  all of them. Prioritizing chooses it.
+- `collapsed`, `tailExpanded` — the person's own disclosure: the whole section closed, and the
+  "+k more" tail opened.
+- `orderKey`, `version`, `createdAt`, `updatedAt` — as on spaces.
+
+A section with no rows stays until Prioritizing removes it.
+
+### The batch object
+
+```json
+{
+    "id": "b7x2c4v6b8n0m1q3w5e7r9t1",
+    "note": "Moved Preview viewer release to Older.",
+    "noteMessageId": "m1q3w5e7r9t1y3u5i7o9p1a3",
+    "changes": [
+        {
+            "spaceId": "s3k8m2q9w1e5r7y3u6i0o2p4",
+            "title": "Preview viewer release",
+            "from": {
+                "sectionId": "c2n4b6v8m0q1w3e5r7t9y1u3",
+                "sectionName": "Releases",
+                "index": 0,
+                "visibility": "shown"
+            },
+            "to": { "sectionId": null, "sectionName": null, "index": 0, "visibility": "folded" }
+        }
+    ],
+    "appliedAt": 1755400000000
+}
+```
+
+- `note` — the one line added to Happy's conversation, written from the changes themselves.
+- `noteMessageId` — that line's message `id` in Happy's conversation (`target.agentId` of Happy's
+  row), or `null` when Happy is unavailable.
+- `changes` — every row the batch moved, with its `title` at the time. `from` and `to` give its
+  section, its zero-based `index` among the rows it was listed with (its section's shown rows,
+  the unsectioned shown rows, the folded rows, or the hidden rows), and its `visibility`. A batch
+  that only added or removed sections has no changes.
+
+### `GET /v0/spaces`
+
+The caller's whole sidebar, every visibility included.
+
+Response — `200`:
+
+```json
+{
+    "spaces": [
+        /* space objects */
+    ],
+    "sections": [
+        /* section objects, in order */
+    ],
+    "cursor": "01991f3a-..."
+}
+```
+
+`cursor` is the event cursor this snapshot is current at; follow `space.*` events from it.
+
+### Sidebar artifact
+
+The experimental sidebar is one immutable-versioned `sidebar` artifact per person, owned by
+Prioritizing and listed under Happy. It is created lazily together with Prioritizing (including
+on the first sidebar-document read). Seed it from the current layout: Happy, the unsectioned
+rows, each existing section in order with its rows, and a collapsed Older section. Legacy
+sections, order keys, placement and visibility keep their existing contract independently;
+document edits do not synchronize them.
+
+The entry is a single UTF-8 `index.html`, at most 128 KiB, 1,000 elements and depth 16.
+It has one `<nav>` root. Allowed elements are `nav`, `happy-space`, `happy-section`, `div`,
+`ul`, `li`, `p`, `span`, `strong`, `em`, `hr`. Plain elements accept only `class` from
+`note`, `muted`, `divider`. `happy-space` requires `ref`, optionally boolean `tree` and
+`collapsed`; `happy-section` requires unique `id` (1–128 characters) and `label`, optionally
+boolean `collapsed`. A space cannot contain another space. Unknown/duplicate space references,
+unknown tags/attributes, scripts, event handlers, URLs, forms, embeds, SVG, MathML, and style
+elements/attributes are rejected. Validation runs on every artifact write, including ordinary
+artifact tools. Rejection preserves the last valid version and returns diagnostics
+`[{message, offset}]` (zero-based character offset). Renderers validate again and use trusted
+components; authored JavaScript never executes. `tree` children come from live app state.
+
+`GET /v0/spaces/sidebar` returns `200 {artifactId, version, html, spaces}`, where `version`
+is the immutable artifact version number and `spaces` contains the person's ordinary space
+objects. `PUT /v0/spaces/sidebar` takes `{html, baseVersion, mutationId}` and returns the same
+shape. All three fields are required on this new route. A retry with the same mutation ID returns
+its committed version without writing again; reusing an ID for different content is `409`.
+A stale base is `409 conflict` with `currentVersion`; invalid HTML is `400 invalid_request`
+with `diagnostics`. These details are additional fields on the ordinary error envelope.
+Every sidebar update emits the existing `artifact.updated` event for its artifact ID after
+commit, echoing the mutation ID when supplied. Clients reload on conflict and report through
+their existing error path; no automatic merge.
+
+Ordinary artifact updates/tools accept optional `baseVersion`; it is required when the target
+is a sidebar. Prioritizing may read and update its artifact using ordinary artifact tools.
+Its convenience `edit_sidebar {baseVersion, edits:[{oldText,newText}]}` applies sequential
+exact-text replacements (each old text must occur exactly once), making one version per call.
+Its edits wait for the existing calm batch; stale or invalid proposals never overwrite a newer
+document. `get_sidebar_styles` returns the allowed elements, attributes, classes and light/dark
+theme tokens. These replace Prioritizing's legacy section/place/visibility tools.
+
+`POST /v0/spaces/sidebar/observations` takes `{visibleSpaceIds, collapsed?}`, with `collapsed`
+an optional array of authored section IDs or space IDs currently folded. It returns `204`.
+Snapshots are bounded to 1,000 IDs and folded into the next calm brief; visibility is ephemeral,
+never permission to move work. Apps send at most once per second. Committed manual document
+changes also enter that brief and preserve the person's authority over the moved nodes.
+
+New spaces missing from the document are inserted directly after Happy. Archived/left spaces'
+nodes are removed and authored children promoted in place. Lifecycle changes publish ordinary
+artifact events. Prioritizing never moves Happy, never undoes manual moves, and leaves work
+active in the last two hours in place (a new pending space may receive its first placement).
+Each applied manager batch adds exactly one factual diff-derived note to Happy's conversation
+and publishes the ordinary live message event so open conversations update immediately.
+
+### `GET /v0/spaces/batches`
+
+Applied batches, newest first. Query `limit` is optional, 1–100, default 20; anything else is
+`400 invalid_request`.
+
+Response — `200`: `{ "batches": [ /* batch objects */ ] }`.
+
+### `POST /v0/spaces/stem-cells`
+
+For the artifact sidebar, `sectionId` may also name an authored `<happy-section id>` (1–128
+characters). The new node is inserted at the start of that section; without it, immediately after
+Happy. Existing section IDs retain their existing behavior. Unknown authored sections return
+`404` before creating work. Creation and document insertion commit together.
+
+Starts new work: a fresh conversation with no project or bot — an unnamed task with its own
+folder, as `POST /v0/tasks` creates — and a row for it with the stem-cell icon.
+
+Request: `{ "id": "s3k8m2q9w1e5r7y3u6i0o2p4", "sectionId": "c2n4b6v8m0q1w3e5r7t9y1u3", "mutationId": "..." }`
+
+- `id` — optional client-supplied space ID; the retry key. Repeating it answers `200` with the
+  existing row and conversation and changes nothing, including concurrent retries. An ID already
+  owned by another person answers `404`; no additional task is created.
+- `sectionId` — optional. Omitted or `null` (a new chat from anywhere), the row is
+  `placement: "pending"` among the unsectioned rows, right after Happy, and Prioritizing places it
+  after the first message. A section ID (that section's `+`) puts the row at the top of that section,
+  already settled. An unknown section is `404`.
+
+Response — `201`: `{ "space": { ... }, "agent": { ... } }`, the full agent object. Send the first
+message through `POST /v0/agents/:agentId/send`. Creation emits `task.created`, `task.joined`,
+`agent.created`, and `space.created` after commit, echoing `mutationId`.
+
+### `PATCH /v0/spaces/:spaceId`
+
+The person changed a row: dragged it, folded or hid it, or closed new work they never wrote in. It
+applies immediately, and any queued Prioritizing change to the row is dropped.
+
+Request: `{ "sectionId": "c2n4b6v8m0q1w3e5r7t9y1u3", "afterId": "s9w1e5r7y3u6i0o2p4k8m2q3", "visibility": "shown", "mutationId": "..." }`
+
+- `sectionId` — move the row into this section, or `null` for the unsectioned rows. Omitted, it
+  stays in its section.
+- `afterId` — the row to follow within that section, or `null` to move first. Omitted while
+  `sectionId` is given, the row moves first.
+- `visibility` — `"shown"`, `"folded"`, or `"hidden"`. Omitted, a moved row becomes `"shown"` and
+  a row that is not moved keeps its visibility.
+- `removed` — `true` takes the row out of the sidebar and archives its task. Only new work whose
+  conversation holds no message, sent, queued, or recorded, can be removed; anything else is
+  `409`, and is hidden instead. In team mode removal requires task archive authority (the task's
+  owner or the team owner); otherwise it is `403 forbidden`. `removed` cannot be combined with
+  the other fields.
+
+At least one of the fields is required; a request with none is `400`. A changed row becomes
+`settled`, and Prioritizing leaves it where the person put it.
+
+Response — `200`: `{ "space": { ... } }`, with `space.updated` after commit. Removal answers `204`,
+with `space.removed` and `task.updated` after commit; removing a row that is already gone answers
+`204` again. `404` for an unknown row or section; `409` when `afterId` is the row itself or not in
+that section.
+
+### `PATCH /v0/spaces/sections/:sectionId`
+
+The person opened or closed a section, or its "+k more" tail. It applies immediately.
+
+Request: `{ "collapsed": true, "tailExpanded": false, "mutationId": "..." }` — at least one of the
+two flags; a request with neither is `400`.
+
+Response — `200`: `{ "section": { ... } }`, with `space.section.updated` after commit. `404` for an
+unknown section.
+
+### `POST /v0/spaces/attention`
+
+The client's view of the person's attention, which decides when a batch may apply.
+
+Request: `{ "state": "interacting" }` or `{ "state": "calm" }`.
+
+- `interacting` — the person is in the middle of something in the sidebar: pointing at it,
+  dragging, or using a menu. No batch applies until the client reports `calm`, or ten minutes
+  pass without a report.
+- `calm` — a navigation gesture just finished, or the person went idle. A waiting batch applies
+  now; if Prioritizing is still deciding, it applies as soon as Prioritizing finishes.
+
+Response — `200`: `{ "batch": { ... } }` for the batch this report applied, or `{ "batch": null }`.
+A batch moves rows only and never changes what the person has selected.
+
+### `POST /v0/spaces/tidy`
+
+Posts "Tidy the sidebar now" into Prioritizing's conversation as an automatic message, and
+nothing more; before the person's first new work there is no Prioritizing, and it does nothing.
+Request: `{}` or `{ "mutationId": "..." }`.
+
+Response — `202` with no body. The changes Prioritizing makes wait for a calm moment like any
+other batch.
+
 ## Artifacts
 
 An artifact is finished work published for people to see: a Markdown document or an HTML page with
@@ -9466,6 +9788,7 @@ Existing `page` presentations remain readable as history.
 | `html`         | `index.html`, UTF-8 | the entry plus any other files; 1–256 files | entry 16 MiB; 256 MiB together |
 | `image`        | its one file        | exactly one image                           | 32 MiB                         |
 | `image_series` | the first file      | 1–64 images, shown in `path` order          | 32 MiB each, 256 MiB together  |
+| `sidebar`      | `index.html`, UTF-8 | exactly one file                            | 128 KiB                        |
 | `video`        | its one file        | exactly one video                           | 256 MiB                        |
 | `document`     | its one file        | exactly one document                        | 64 MiB                         |
 
@@ -10999,6 +11322,26 @@ event is idempotent by attachment ID.
     - `membership` (full membership object with its new `orderKey`).
 - `task.left` — the member left a task. In team mode it reaches only that member's connections.
     - `membership` (the removed membership object).
+
+**Spaces**
+
+Space events reach only the sidebar's own person in team mode. They carry whole objects rather
+than version-chained changes; a client keeps the copy with the greater `version`.
+
+- `space.created` — a row was added: new work, a stem cell, or work brought back from the archive.
+    - `space` (full space object).
+- `space.updated` — a row changed: icon, title, place, visibility, placement, or `working`.
+    - `space` (full space object).
+- `space.removed` — a row left the sidebar: the person removed it, or its work was archived or left.
+    - `spaceId` (ID string).
+- `space.section.created`, `space.section.updated` — a section was added or changed.
+    - `section` (full section object).
+- `space.section.removed` — a section was removed.
+    - `sectionId` (ID string).
+- `space.batch.applied` — a batch applied. Its rows' and sections' own events precede it.
+    - `batch` (full batch object).
+
+Every space event echoes the `mutationId` of the request that caused it, when one was supplied.
 
 **Artifacts**
 
