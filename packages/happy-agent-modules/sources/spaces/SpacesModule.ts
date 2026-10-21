@@ -30,6 +30,7 @@ import {
     escapeSidebarText,
     SidebarValidationError,
     type ArtifactAuthor,
+    type UpdateArtifactInput,
     type SidebarNode,
 } from "../artifacts/index.js";
 import { ConfigModule } from "../config/index.js";
@@ -399,13 +400,7 @@ export class SpacesModule implements AgentModule {
         await writeOwnerState(ctx, { ...state, sidebarArtifactId: artifactId });
         const happy = (await querySpaces(ctx, ownerUserId)).find((space) => space.role === "happy")
             ?.contents[0];
-        const actor =
-            state.prioritizingAgentId === undefined
-                ? {
-                      kind: "user" as const,
-                      ...(ownerUserId === SPACE_STANDALONE_OWNER ? {} : { userId: ownerUserId }),
-                  }
-                : { kind: "agent" as const, agentId: state.prioritizingAgentId };
+        const actor = (await artifacts.actorFor(ctx, state.prioritizingAgentId)).author;
         await artifacts.create(ctx, {
             id: artifactId,
             type: "sidebar",
@@ -572,15 +567,22 @@ export class SpacesModule implements AgentModule {
         baseVersion: number,
         operationId: string,
         author: ArtifactAuthor,
+        metadata: Pick<UpdateArtifactInput, "title" | "background"> = {},
     ) {
         const artifacts = this.#requireArtifacts();
         const upload = await artifacts.stageSidebarText(ctx, html);
+        const source =
+            author.kind === "agent"
+                ? (await artifacts.actorFor(ctx, author.agentId)).source
+                : undefined;
         return await artifacts.commitSidebar(ctx, {
+            ...metadata,
             artifactId,
             baseVersion,
             operationId,
             files: [{ path: "index.html", uploadId: upload.id }],
             author,
+            ...(source === undefined ? {} : { source }),
         });
     }
 
@@ -653,6 +655,7 @@ export class SpacesModule implements AgentModule {
         html: string,
         baseVersion: number,
         operationId: string,
+        metadata: Pick<UpdateArtifactInput, "title" | "background"> = {},
     ): Promise<void> {
         const owner = await queryOwnerBySidebarArtifact(ctx, artifactId);
         if (owner === undefined || owner.prioritizingAgentId === undefined)
@@ -669,8 +672,12 @@ export class SpacesModule implements AgentModule {
         });
         await writeOwnerState(ctx, {
             ...owner,
-            sidebarPending: [...pending, { html, baseVersion, operationId }],
+            sidebarPending: [...pending, { html, baseVersion, operationId, ...metadata }],
         });
+    }
+
+    async pendingSidebarText(ctx: Context, artifactId: string): Promise<string | undefined> {
+        return (await queryOwnerBySidebarArtifact(ctx, artifactId))?.sidebarPending?.at(-1)?.html;
     }
 
     sidebarArtifactTools(agentId: string): AnyAgentTool[] {
@@ -1547,6 +1554,12 @@ export class SpacesModule implements AgentModule {
                 proposal.baseVersion,
                 proposal.operationId,
                 author,
+                {
+                    ...(proposal.title === undefined ? {} : { title: proposal.title }),
+                    ...(proposal.background === undefined
+                        ? {}
+                        : { background: proposal.background }),
+                },
             );
         const cleared = {
             ...state,
@@ -1557,7 +1570,13 @@ export class SpacesModule implements AgentModule {
         };
         delete cleared.applyRequestedAt;
         await writeOwnerState(ctx, cleared);
-        if (current.html === final.html) return undefined;
+        if (
+            current.html === final.html &&
+            pending.every(
+                (proposal) => proposal.title === undefined && proposal.background === undefined,
+            )
+        )
+            return undefined;
         const note =
             changes.length === 0 && sections.length === 0
                 ? "Updated the sidebar."

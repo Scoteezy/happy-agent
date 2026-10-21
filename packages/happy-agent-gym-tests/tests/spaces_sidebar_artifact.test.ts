@@ -1,5 +1,71 @@
 import { createAgentGym, frameEvent, type AgentGym } from "@slopus/happy-agent-gym";
 import { afterEach, expect, it } from "vitest";
+import { sidebarGym } from "./support/sidebarGym.js";
+
+it("keeps queued HTML when ordinary artifact tools change only metadata", async () => {
+    const h = await sidebarGym();
+    try {
+        const initial = await h.read();
+        const html = initial.html.replace(
+            "</nav>",
+            '<p class="note">Keep this queued HTML</p></nav>',
+        );
+        await h.hold();
+        expect(
+            (
+                await h.call("update_artifact", {
+                    artifactId: initial.artifactId,
+                    baseVersion: initial.version,
+                    title: "Draft sidebar",
+                    files: [{ path: "index.html", content: html }],
+                })
+            ).text,
+        ).toContain("proposal accepted");
+        expect(
+            (
+                await h.call("update_artifact", {
+                    artifactId: initial.artifactId,
+                    baseVersion: initial.version + 1,
+                    title: "Renamed sidebar",
+                    background: "#ABC",
+                })
+            ).text,
+        ).toContain("proposal accepted");
+        expect((await h.read()).version).toBe(initial.version);
+        await h.calm();
+        const applied = await h.gym.waitUntil(async () => {
+            const doc = await h.read();
+            return doc.version === initial.version + 2 ? doc : undefined;
+        }, "both artifact versions");
+        expect(applied.html).toBe(html);
+        expect((await h.gym.client.getArtifact(initial.artifactId)).artifact).toMatchObject({
+            title: "Renamed sidebar",
+            background: "#abc",
+        });
+        expect(
+            (await h.gym.client.listArtifactVersions(initial.artifactId)).versions.map(
+                (version) => version.title,
+            ),
+        ).toEqual(["Renamed sidebar", "Draft sidebar", "Sidebar"]);
+        await h.hold();
+        await h.call("update_artifact", {
+            artifactId: initial.artifactId,
+            baseVersion: applied.version,
+            title: "Sidebar final",
+        });
+        await h.calm();
+        await h.gym.waitUntil(
+            async () => ((await h.read()).version === applied.version + 1 ? true : undefined),
+            "the metadata-only version",
+        );
+        expect((await h.read()).html).toBe(html);
+        expect(
+            (await h.gym.http.ok<{ batches: unknown[] }>("GET", "/v0/spaces/batches")).batches,
+        ).toHaveLength(2);
+    } finally {
+        await h.gym.dispose();
+    }
+}, 120000);
 
 const running = new Set<AgentGym>();
 afterEach(async () => {

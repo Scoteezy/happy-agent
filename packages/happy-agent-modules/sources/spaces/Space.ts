@@ -223,6 +223,16 @@ export const spaceOwnerStateSchema = Type.Object(
                         html: Type.String({ maxLength: 131072 }),
                         baseVersion: spaceVersionSchema,
                         operationId: Type.String({ minLength: 1, maxLength: 256 }),
+                        title: Type.Optional(spaceTextSchema),
+                        background: Type.Optional(
+                            Type.Union([
+                                Type.String({
+                                    pattern:
+                                        "^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+                                }),
+                                Type.Null(),
+                            ]),
+                        ),
                     },
                     { additionalProperties: false },
                 ),

@@ -786,10 +786,17 @@ export class ArtifactsModule implements AgentModule {
             );
             const now = Math.max(Date.now(), current.updatedAt + 1);
             if (current.type === "sidebar") {
-                const html = await this.#sidebarText(txCtx, entry.sha256);
+                let html = await this.#sidebarText(txCtx, entry.sha256);
                 parseSidebar(html);
                 if (this.#spaces === undefined)
                     throw new ArtifactInputError("Spaces is unavailable.");
+                if (
+                    !sidebarBatch &&
+                    input.author.kind === "agent" &&
+                    !(input.files ?? []).some((file) => file.path === "index.html")
+                ) {
+                    html = (await this.#spaces.pendingSidebarText(txCtx, current.id)) ?? html;
+                }
                 await this.#spaces.validateSidebarWrite(txCtx, current.id, html, input.author);
                 if (!sidebarBatch && input.author.kind === "agent") {
                     await this.#spaces.queueSidebarArtifact(
@@ -798,6 +805,12 @@ export class ArtifactsModule implements AgentModule {
                         html,
                         input.baseVersion!,
                         input.operationId ?? createId(),
+                        {
+                            ...(input.title === undefined ? {} : { title: input.title }),
+                            ...(input.background === undefined
+                                ? {}
+                                : { background: input.background }),
+                        },
                     );
                     return current;
                 }
