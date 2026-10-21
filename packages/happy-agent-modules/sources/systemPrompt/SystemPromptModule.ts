@@ -16,10 +16,7 @@ import type { ConfigModule } from "../config/index.js";
 import type { ComputeModule } from "../compute/index.js";
 import type { AgentsMdSnapshot } from "./AgentsMd.js";
 import { AgentsMdInstructions } from "./impl/agentsMdInstructions.js";
-import {
-    assembleEnvironmentPrompt,
-    formatAvailableModels,
-} from "./impl/assembleEnvironmentPrompt.js";
+import { assembleEnvironmentPrompt } from "./impl/assembleEnvironmentPrompt.js";
 import { systemPromptForModel } from "./impl/systemPromptForModel.js";
 import {
     DEFAULT_SYSTEM_PROMPT_IDENTITY,
@@ -32,7 +29,6 @@ import {
 } from "./SystemPromptSelection.js";
 import {
     MAX_SYSTEM_PROMPT_AVAILABLE_MODEL_FIELD_LENGTH,
-    MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES,
     MAX_SYSTEM_PROMPT_AVAILABLE_MODELS,
     systemPromptAvailableModelSchema,
     systemPromptAvailableModelsSchema,
@@ -45,15 +41,12 @@ const NAME_MARKER = "{{name}}";
 const AGENTS_MD_OUTPUT_TRUNCATION_NOTICE =
     "[Some AGENTS.md instruction content was omitted to stay within the system prompt byte limit.]";
 const INVALID_AVAILABLE_MODELS_ERROR = "System prompt available models are invalid.";
-const AVAILABLE_MODELS_BYTE_BOUND_ERROR =
-    "System prompt available models exceed the configured UTF-8 byte bound.";
 
 /** The largest prompt output accepted after identity substitution. */
 export const MAX_SYSTEM_PROMPT_OUTPUT_BYTES = 1_000_000;
 
 export {
     MAX_SYSTEM_PROMPT_AVAILABLE_MODEL_FIELD_LENGTH,
-    MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES,
     MAX_SYSTEM_PROMPT_AVAILABLE_MODELS,
     systemPromptAvailableModelSchema,
     systemPromptAvailableModelsSchema,
@@ -96,7 +89,7 @@ export class SystemPromptModule implements AgentModule {
     }
 
     /**
-     * The routes the environment section prints, taken from configuration.
+     * The routes the environment section names the current model from, taken from configuration.
      *
      * Configuration owns which accounts exist and which models they serve, so the catalog is read
      * from it rather than restated here. Provider scans and explicit overrides can change it while
@@ -110,12 +103,6 @@ export class SystemPromptModule implements AgentModule {
         }));
         if (!Value.Check(systemPromptAvailableModelsSchema, models)) {
             throw new Error(INVALID_AVAILABLE_MODELS_ERROR);
-        }
-        if (
-            new TextEncoder().encode(formatAvailableModels(models)).byteLength >
-            MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES
-        ) {
-            throw new Error(AVAILABLE_MODELS_BYTE_BOUND_ERROR);
         }
         return Object.freeze(models.map((model) => Object.freeze(model)));
     }

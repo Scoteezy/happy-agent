@@ -7,10 +7,12 @@ import { archiveSubtaskTool } from "../../sources/subtasks/tools/archive_subtask
 import { createSubtaskTool } from "../../sources/subtasks/tools/create_subtask.js";
 
 describe("subtask creation tool", () => {
-    const tool = createSubtaskTool({} as unknown as SubtasksModule, "parent", {
-        provider: "codex",
-        model: undefined,
-    });
+    const tool = createSubtaskTool(
+        {} as unknown as SubtasksModule,
+        "parent",
+        { provider: "codex", model: undefined },
+        "OPTIONS-LISTING",
+    );
 
     it("guides the model toward sidebar-friendly titles", () => {
         expect(tool.description).toContain("2–3 words");
@@ -75,10 +77,12 @@ describe("subtask instructions", () => {
 
 describe("subtask creation result", () => {
     it("gives the coordinator the exact tag to mention the new subtask", () => {
-        const tool = createSubtaskTool({} as unknown as SubtasksModule, "parent", {
-            provider: "codex",
-            model: undefined,
-        });
+        const tool = createSubtaskTool(
+            {} as unknown as SubtasksModule,
+            "parent",
+            { provider: "codex", model: undefined },
+            "OPTIONS-LISTING",
+        );
         expect(tool.toLLM({ agentId: "subtaskagent1" })).toEqual([
             {
                 type: "text",

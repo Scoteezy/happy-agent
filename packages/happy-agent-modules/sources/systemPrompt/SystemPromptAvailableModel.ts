@@ -4,13 +4,6 @@ import { Type, type Static } from "@sinclair/typebox";
 export const MAX_SYSTEM_PROMPT_AVAILABLE_MODELS = 1_000;
 /** The largest label, model ID, or provider ID accepted in the prompt's model catalog. */
 export const MAX_SYSTEM_PROMPT_AVAILABLE_MODEL_FIELD_LENGTH = 256;
-/**
- * The largest UTF-8 rendering of the available-models section accepted at construction.
- *
- * The instruction assembly fits the live AGENTS.md chain into whatever output budget remains
- * after this section, the vendor prompt, and the environment details are rendered.
- */
-export const MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES = 512_000;
 
 const availableModelFieldSchema = Type.String({
     minLength: 1,

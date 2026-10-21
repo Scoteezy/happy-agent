@@ -75,7 +75,7 @@ describe.skipIf(!live.includes("from-happy") || token === undefined)(
                 });
 
                 await gym.send(
-                    "Call the Happy tool agent_options. Then call create_agent with model " +
+                    "Call the Happy tool agent_options with usage true. Then call create_agent with model " +
                         '"antigravity/gemini-3.8-flash", effort "low", title "Plum probe", and text ' +
                         '"Reply with only the word PLUM-SEVEN." Pass no harness and no provider. ' +
                         "Then reply with only the harness IDs agent_options listed, comma separated.",
@@ -89,9 +89,9 @@ describe.skipIf(!live.includes("from-happy") || token === undefined)(
                 // Happy reaches Antigravity by default, but not Claude Code, whose models it runs.
                 expect(lastText(first)).toContain("antigravity");
                 expect(lastText(first)).not.toContain("claude_code");
-                // Antigravity's own quota report rides along with its models.
+                // Antigravity's own quota report, on request.
                 expect(JSON.stringify(calls.find((call) => call.name === "agent_options"))).toMatch(
-                    /usage: .*% left/u,
+                    /antigravity: .*% left/u,
                 );
                 const childId = calls.find((call) => call.name === "create_agent")?.presentation
                     ?.agentId;

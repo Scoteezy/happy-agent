@@ -4,12 +4,10 @@ import type { Context } from "@steve.kite/stdlib";
 
 import type { CollaborationCreator } from "../CollaborationAgent.js";
 import type { CollaborationModule } from "../CollaborationModule.js";
-import { formatAgentOptions } from "../impl/agentOptions.js";
 
 const agentOptionsInputSchema = Type.Object(
     {
-        harness: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-        provider: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+        usage: Type.Optional(Type.Boolean()),
     },
     { additionalProperties: false },
 );
@@ -21,13 +19,13 @@ const agentOptionsResultSchema = Type.Object(
 );
 
 /**
- * List what this agent can create sub-agents and subtasks with. Reading the options marks them
- * seen, so later changes arrive as a notice instead of in any tool definition.
+ * List what this agent can create sub-agents and subtasks with now. Reading them makes them what
+ * the agent knows, so later notices carry only what changed since.
  */
 export function agentOptionsTool(
     collaboration: CollaborationModule,
     creator: CollaborationCreator,
-    markSeen: (ctx: Context, version: string) => Promise<void>,
+    markKnown: (ctx: Context, text: string) => Promise<void>,
 ) {
     return defineAgentTool({
         name: "agent_options",
@@ -35,18 +33,20 @@ export function agentOptionsTool(
         capabilities: ["Create, message, and coordinate coding subagents."],
         searchKeywords: ["list models", "subagent models", "harnesses", "providers", "quota"],
         description:
-            "List the harnesses, providers, and models you can create collaborators and subtasks with, each model's efforts, and the quota an account's agent reports. A harness is who runs the agent's loop: happy is Happy's own; others are foreign agents such as Antigravity or Claude Code. Filter by harness or provider. When these options change later, you are told.",
+            "The current models you can start agents and subtasks on, by harness and provider. usage: true adds the quota each account reports.",
         parameters: agentOptionsInputSchema,
         returnType: agentOptionsResultSchema,
         durable: false,
         shouldReviewInAutoMode: () => false,
         execute: async (ctx, input: AgentOptionsInput) => {
-            const options = await collaboration.agentOptions(creator, input);
-            // Only the whole set is a version the agent has seen; a filtered view is not.
-            if (input.harness === undefined && input.provider === undefined) {
-                await markSeen(ctx, options.version);
-            }
-            return { text: formatAgentOptions(options) };
+            const text = collaboration.agentOptionsText(creator);
+            await markKnown(ctx, text);
+            return {
+                text:
+                    input.usage === true
+                        ? `${text}\n\nUsage:\n${await collaboration.agentOptionsUsage(creator)}`
+                        : text,
+            };
         },
         toLLM: ({ text }) => [{ type: "text", text }],
     });

@@ -167,7 +167,6 @@ export { formatGoalForModel } from "./goal/impl/formatGoalForModel.js";
 export {
     SystemPromptModule,
     MAX_SYSTEM_PROMPT_AVAILABLE_MODEL_FIELD_LENGTH,
-    MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES,
     MAX_SYSTEM_PROMPT_AVAILABLE_MODELS,
     MAX_SYSTEM_PROMPT_OUTPUT_BYTES,
     systemPromptAvailableModelSchema,

@@ -115,10 +115,11 @@ Happy's loop and a foreign agent starts a fresh context with a handoff.
 Any Happy agent creates sub-agents with `create_agent` and subtasks with `create_subtask`, on any
 harness its own harness reaches. Both take `harness`, `provider`, `model`, and `effort`; an
 omitted `harness` or `provider` is the creator's own when that serves the model, or the only one
-that does. `agent_options` lists the harnesses, accounts, models, and efforts the agent can use,
-and the quota Antigravity reports for its account. The tool definitions never list models, so a
-model or account change does not restart the agent or cost its prompt cache: an agent that has
-called `agent_options` gets the fresh list as a hidden system notice on its next turn.
+that does. Their descriptions list the models the agent can start agents on, one line per model
+with its harness, accounts, and efforts, as they were when the conversation began; they never
+change, so the prompt cache holds. When the list changes, the agent gets a hidden system notice
+with the lines removed and added. `agent_options` lists the current models, and
+`agent_options({ usage: true })` adds the quota Antigravity reports for its account.
 
 By default Happy's own loop reaches only foreign harnesses whose models it cannot run itself,
 which today is `antigravity`; Claude Code, Codex CLI, and OpenCode run models Happy already runs.
@@ -147,8 +148,9 @@ To let a Happy agent start Antigravity sessions on the user's Google account:
    The `Antigravity` account appears in the picker with its models, such as
    `antigravity/gemini-3.8-flash`.
 3. From any Happy session, ask for an Antigravity sub-agent or subtask. The agent calls
-   `agent_options`, sees the Antigravity models and the quota left in each window (from
-   `agy -p /usage`, read at most every five minutes), and starts it with
+   Antigravity models in `create_agent`'s description (`agent_options({ usage: true })` adds
+   the quota left in each window, from `agy -p /usage`, read at most every five minutes), and
+   starts it with
    `model = "antigravity/gemini-3.8-flash"`.
 
 The quota is shown to agents only; the app's usage panel does not show Antigravity yet.
@@ -167,5 +169,5 @@ without asking follows its own settings, so set those to match what the user exp
 2. Ask it to create a file with its own tools and then call a Happy tool, such as listing
    projects. Confirm both happen.
 3. Send a second message while it runs a long command and confirm it steers.
-4. From a Happy session, ask it to call `agent_options` and confirm the new harness is listed
+4. From a Happy session, ask it to call `agent_options` and confirm the new harness's models are listed
    when Happy reaches it, then to create a sub-agent on it.

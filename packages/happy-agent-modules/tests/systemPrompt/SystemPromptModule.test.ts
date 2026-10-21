@@ -14,7 +14,6 @@ import { AGENTS_MD_SPEC } from "../../sources/systemPrompt/AgentsMd.js";
 import {
     SystemPromptModule,
     MAX_SYSTEM_PROMPT_OUTPUT_BYTES,
-    MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES,
     MAX_SYSTEM_PROMPT_AVAILABLE_MODELS,
     systemPromptSelectionSchema,
 } from "../../sources/systemPrompt/SystemPromptModule.js";
@@ -23,7 +22,6 @@ import {
     systemPromptAvailableModelSchema,
     systemPromptAvailableModelsSchema,
 } from "../../sources/systemPrompt/SystemPromptAvailableModel.js";
-import { formatAvailableModels } from "../../sources/systemPrompt/impl/assembleEnvironmentPrompt.js";
 import { systemPromptForModel } from "../../sources/systemPrompt/impl/systemPromptForModel.js";
 import { FakeCompute } from "../compute/support/FakeCompute.js";
 import { resolveModuleHooks } from "../support/moduleHooks.js";
@@ -76,26 +74,6 @@ async function moduleWithCatalog(models: readonly AgentModel[] = []): Promise<{
         docsHome: world.config.configuration.paths.docsHome,
         instructions: hooks.instructions!,
     };
-}
-
-function catalogWithBytes(targetBytes: number): AgentModel[] {
-    const fieldLength = 158;
-    const catalog = Array.from({ length: MAX_SYSTEM_PROMPT_AVAILABLE_MODELS }, () => ({
-        name: "x".repeat(fieldLength),
-        id: "x".repeat(fieldLength),
-        providerId: "x".repeat(fieldLength),
-    }));
-    const baseBytes = new TextEncoder().encode(formatAvailableModels(catalog)).byteLength;
-    let remaining = targetBytes - baseBytes;
-    if (remaining < 0 || remaining > (256 - fieldLength) * catalog.length) {
-        throw new Error("The test catalog target is outside the available adjustment range.");
-    }
-    for (let index = 0; remaining > 0; index += 1) {
-        const added = Math.min(256 - fieldLength, remaining);
-        catalog[index]!.name = "x".repeat(fieldLength + added);
-        remaining -= added;
-    }
-    return catalog.map(({ name, id, providerId }) => catalogModel(name, id, providerId));
 }
 
 describe("SystemPromptModule", () => {
@@ -247,9 +225,7 @@ describe("SystemPromptModule", () => {
         expect(prompt).toContain(
             "- When the project is a Git folder, a workspace and a worktree are the same thing:",
         );
-        expect(prompt).toContain(
-            "## Available models\n- Claude Opus — model ID: `anthropic/opus-5`; provider ID: `anthropic`\n- Codex — model ID: `openai/gpt-5.6-sol`; provider ID: `openai`",
-        );
+        expect(prompt).not.toContain("## Available models");
     });
 
     it("omits the environment section when the context has no environment", async () => {
@@ -291,10 +267,6 @@ describe("SystemPromptModule", () => {
             "- By default the user sees only the last message you send before stopping; earlier messages are collapsed. Include all essential information in that last message.",
             '- Happy Desktop renders LaTeX math in messages with KaTeX: inline `$…$` or `\\(…\\)`, display `$$…$$` or `\\[…\\]`; put environments such as `aligned` or `pmatrix` inside display delimiters. Prices like "$5 and $10" stay text, `\\$` is a literal dollar, and math inside code is not rendered.',
             "- When the project is a Git folder, a workspace and a worktree are the same thing: creating a workspace creates a new worktree, and deleting a workspace archives it.",
-            "",
-            "## Available models",
-            "- Claude Opus — model ID: `anthropic/opus-5`; provider ID: `anthropic`",
-            "- Codex — model ID: `openai/gpt-5.6-sol`; provider ID: `openai`",
         ].join("\n");
 
         expect(
@@ -303,26 +275,6 @@ describe("SystemPromptModule", () => {
                 scopeOf(selection.model, selection.providerKind),
             ),
         ).toBe([module.promptFor(selection), expectedEnvironment, AGENTS_MD_SPEC].join("\n\n"));
-    });
-
-    it("accepts the exact catalog byte boundary and refuses the next byte", async () => {
-        const below = catalogWithBytes(MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES - 1);
-        const equal = catalogWithBytes(MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES);
-        const above = catalogWithBytes(MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES + 1);
-        const scope = scopeOf("anthropic/opus-5", "claude");
-
-        expect(new TextEncoder().encode(formatAvailableModels(equal)).byteLength).toBe(
-            MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES,
-        );
-        await expect(
-            (await moduleWithCatalog(below)).instructions(contextWithEnvironment(), scope),
-        ).resolves.toContain("## Available models");
-        await expect(
-            (await moduleWithCatalog(equal)).instructions(contextWithEnvironment(), scope),
-        ).resolves.toContain("## Available models");
-        await expect(
-            (await moduleWithCatalog(above)).instructions(contextWithEnvironment(), scope),
-        ).rejects.toThrow("System prompt available models exceed the configured UTF-8 byte bound");
     });
 
     it("refuses a configured catalog past the item or Unicode UTF-8 bounds", async () => {
@@ -334,7 +286,7 @@ describe("SystemPromptModule", () => {
         );
         await expect(
             (await moduleWithCatalog(maximumModels)).instructions(contextWithEnvironment(), scope),
-        ).resolves.toContain("## Available models");
+        ).resolves.toContain("# Environment");
 
         const tooManyModels = Array.from(
             { length: MAX_SYSTEM_PROMPT_AVAILABLE_MODELS + 1 },
@@ -343,14 +295,6 @@ describe("SystemPromptModule", () => {
         await expect(
             (await moduleWithCatalog(tooManyModels)).instructions(contextWithEnvironment(), scope),
         ).rejects.toThrow("System prompt available models are invalid");
-
-        const unicodeField = "😀".repeat(128);
-        const unicodeCatalog = Array.from({ length: MAX_SYSTEM_PROMPT_AVAILABLE_MODELS }, () =>
-            catalogModel(unicodeField, unicodeField, unicodeField),
-        );
-        await expect(
-            (await moduleWithCatalog(unicodeCatalog)).instructions(contextWithEnvironment(), scope),
-        ).rejects.toThrow("System prompt available models exceed the configured UTF-8 byte bound");
 
         await expect(
             (await moduleWithCatalog([catalogModel("bad\nname", "id", "provider")])).instructions(
@@ -369,14 +313,14 @@ describe("SystemPromptModule", () => {
         compute.write("/workspace/packages/AGENTS.md", document);
         compute.write("/workspace/packages/app/AGENTS.md", document);
         const world = await systemPromptWorld({
-            models: catalogWithBytes(MAX_SYSTEM_PROMPT_AVAILABLE_MODELS_BYTES - 1),
             globalInstructions: "界".repeat(131_072),
             compute: async () => compute,
         });
         const hooks = await resolveModuleHooks(ctx, world.module);
 
+        // A large environment leaves AGENTS.md only part of the budget.
         const prompt = await hooks.instructions!(
-            contextWithEnvironment(),
+            contextWithEnvironment({ ...testEnvironment, osVersion: "x".repeat(512_000) }),
             scopeOf("anthropic/opus-5", "claude"),
         );
 
@@ -405,11 +349,11 @@ describe("SystemPromptModule", () => {
         const scope = scopeOf("anthropic/opus-5", "claude");
 
         expect(await instructions(environmentCtx, scope)).toContain(
-            "- Claude Opus — model ID: `anthropic/opus-5`",
+            "- Current model: Claude Opus (`anthropic/opus-5`)",
         );
         (models[0] as { name: string }).name = "Mutated";
         expect(await instructions(environmentCtx, scope)).toContain(
-            "- Claude Opus — model ID: `anthropic/opus-5`",
+            "- Current model: Claude Opus (`anthropic/opus-5`)",
         );
 
         expect(

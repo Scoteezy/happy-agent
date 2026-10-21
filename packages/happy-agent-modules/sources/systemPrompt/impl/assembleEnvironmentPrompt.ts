@@ -2,21 +2,10 @@ import type { AgentEnvironment } from "@slopus/happy-agent-base";
 
 import type { SystemPromptAvailableModel } from "../SystemPromptAvailableModel.js";
 
-/** Render the heading and every configured provider/model route. */
-export function formatAvailableModels(
-    availableModels: readonly SystemPromptAvailableModel[],
-): string {
-    if (availableModels.length === 0) return "";
-    return [
-        "## Available models",
-        ...availableModels.map(
-            (model) =>
-                `- ${model.name} — model ID: \`${model.id}\`; provider ID: \`${model.providerId}\``,
-        ),
-    ].join("\n");
-}
-
-/** Render the machine guidance and configured model routes appended to a vendor prompt. */
+/**
+ * Render the machine guidance appended to a vendor prompt. The catalog only names the current
+ * model; the models an agent can start others on are in create_agent's description instead.
+ */
 export function assembleEnvironmentPrompt(options: {
     environment: AgentEnvironment;
     availableModels: readonly SystemPromptAvailableModel[];
@@ -65,8 +54,5 @@ export function assembleEnvironmentPrompt(options: {
         "- By default the user sees only the last message you send before stopping; earlier messages are collapsed. Include all essential information in that last message.",
         '- Happy Desktop renders LaTeX math in messages with KaTeX: inline `$…$` or `\\(…\\)`, display `$$…$$` or `\\[…\\]`; put environments such as `aligned` or `pmatrix` inside display delimiters. Prices like "$5 and $10" stay text, `\\$` is a literal dollar, and math inside code is not rendered.',
         "- When the project is a Git folder, a workspace and a worktree are the same thing: creating a workspace creates a new worktree, and deleting a workspace archives it.",
-        ...(options.availableModels.length === 0
-            ? []
-            : ["", formatAvailableModels(options.availableModels)]),
     ].join("\n");
 }

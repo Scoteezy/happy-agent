@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { AgentModel } from "@slopus/happy-agent-base";
 
 /** One model a new agent can run, with the choices its creation takes. */
@@ -38,12 +36,8 @@ export interface AgentOptionsHarness {
     readonly providers: readonly AgentOptionsProvider[];
 }
 
-/**
- * The harnesses, accounts, and models one agent can create sub-agents with. `version` changes
- * exactly when one of those choices does, and never for usage, which moves on every request.
- */
+/** The harnesses, accounts, and models one agent can create sub-agents with. */
 export interface AgentOptions {
-    readonly version: string;
     readonly current: { readonly harness: string; readonly provider: string };
     readonly harnesses: readonly AgentOptionsHarness[];
 }
@@ -86,40 +80,63 @@ export function buildAgentOptions(
             models: entries,
         })),
     }));
-    const version = createHash("sha256")
-        .update(JSON.stringify({ current, harnesses: listed }))
-        .digest("hex")
-        .slice(0, 12);
-    return { version: `o_${version}`, current, harnesses: listed };
+    return { current, harnesses: listed };
 }
 
-/** The options as the text a model reads. */
+/**
+ * The options as the text a model reads: one line per model, each complete on its own, so a
+ * change is just the lines that differ.
+ */
 export function formatAgentOptions(options: AgentOptions): string {
-    const lines = [
-        `Version ${options.version}. You are on harness ${options.current.harness}, provider ${options.current.provider}; omitted harness and provider default to these when they serve the model.`,
-    ];
-    if (options.harnesses.length === 0) lines.push("No harness offers sub-agents to you now.");
+    // No line names the agent's own route, so switching models changes nothing here unless
+    // what the agent can reach changes.
+    const lines = ["Models you can start agents on (* = default effort):"];
     for (const harness of options.harnesses) {
-        lines.push("", `Harness ${harness.id} (${harness.name}):`);
+        const models = new Map<string, { model: AgentOptionsModel; providers: string[] }>();
         for (const provider of harness.providers) {
-            lines.push(`- provider ${provider.id} (${provider.name}):`);
             for (const model of provider.models) {
-                lines.push(
-                    `  - ${model.id} (${model.name}; effort: ${model.efforts.join(", ")}, default ${model.defaultEffort}${
-                        model.serviceTiers === undefined
-                            ? ""
-                            : `; tiers: ${model.serviceTiers.join(", ")}`
-                    })`,
-                );
-            }
-            for (const window of provider.usage ?? []) {
-                lines.push(
-                    `  - usage: ${window.scope}, ${window.window}: ${String(window.remainingPercent)}% left${
-                        window.resetsAt === null ? "" : `, resets ${window.resetsAt}`
-                    }`,
-                );
+                const entry = models.get(model.id);
+                if (entry === undefined) models.set(model.id, { model, providers: [provider.id] });
+                else entry.providers.push(provider.id);
             }
         }
+        for (const { model, providers } of models.values()) {
+            const efforts = model.efforts
+                .map((effort) => (effort === model.defaultEffort ? `${effort}*` : effort))
+                .join(", ");
+            const tiers =
+                model.serviceTiers === undefined ? "" : `; tiers ${model.serviceTiers.join(", ")}`;
+            lines.push(
+                `${model.id} (${model.name}) on ${harness.id} via ${providers.join(", ")}: ${efforts}${tiers}`,
+            );
+        }
     }
+    if (lines.length === 1) lines.push("None.");
     return lines.join("\n");
+}
+
+/** The quota each account's agent reports, one line per window. */
+export function formatAgentOptionsUsage(options: AgentOptions): string {
+    const lines = options.harnesses.flatMap((harness) =>
+        harness.providers.flatMap((provider) =>
+            (provider.usage ?? []).map(
+                (window) =>
+                    `${provider.id}: ${window.scope}, ${window.window}: ${String(window.remainingPercent)}% left${
+                        window.resetsAt === null ? "" : `, resets ${window.resetsAt}`
+                    }`,
+            ),
+        ),
+    );
+    return lines.length === 0 ? "No account reports usage." : lines.join("\n");
+}
+
+/** What changed between two listings, as the lines removed and added. */
+export function formatAgentOptionsChange(before: string, after: string): string {
+    const old = new Set(before.split("\n"));
+    const now = new Set(after.split("\n"));
+    return [
+        "Your sub-agent options changed:",
+        ...[...old].filter((line) => !now.has(line)).map((line) => `- ${line}`),
+        ...[...now].filter((line) => !old.has(line)).map((line) => `+ ${line}`),
+    ].join("\n");
 }

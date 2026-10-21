@@ -147,7 +147,7 @@ its own; else the creator's `subagent_harnesses`; else, for `happy`, only `antig
 Happy cannot run itself); else, for a foreign harness, every harness but `happy`. Collaboration's
 `agent_options` tool and the `harness` input of `create_agent` and `create_subtask` read it.
 `harnessUsage` reads Antigravity's quota from `agy -p /usage` (`impl/harnessUsage.ts`), at most
-every five minutes per account, for `agent_options` to show.
+every five minutes per account, for `agent_options({ usage: true })` to show.
 
 After startup, configuration renews enabled Codex and Grok session logins in the background,
 then repeats three hours after each completed pass. Hidden enabled accounts are included;

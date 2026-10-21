@@ -38,7 +38,13 @@ import {
     type CollaborationCreator,
     type CollaborationSendInput,
 } from "./CollaborationAgent.js";
-import { buildAgentOptions, formatAgentOptions, type AgentOptions } from "./impl/agentOptions.js";
+import {
+    buildAgentOptions,
+    formatAgentOptions,
+    formatAgentOptionsChange,
+    formatAgentOptionsUsage,
+    type AgentOptions,
+} from "./impl/agentOptions.js";
 import { agentOptionsTool } from "./tools/agent_options.js";
 import { collaborationMigrations } from "./CollaborationMigrations.js";
 import { archiveAgentTool } from "./tools/archive_agent.js";
@@ -111,35 +117,45 @@ export class CollaborationModule implements AgentModule {
         return { collaboration: { reportToCreator: false } };
     }
 
-    /**
-     * The harnesses, accounts, and models `creator` can create sub-agents with, optionally
-     * narrowed to one harness or account, with the quota each account's agent reports.
-     */
-    async agentOptions(
-        creator: CollaborationCreator,
-        filter: { readonly harness?: string; readonly provider?: string } = {},
-    ): Promise<AgentOptions> {
+    /** The harnesses, accounts, and models `creator` can create sub-agents with. */
+    agentOptions(creator: CollaborationCreator): AgentOptions {
+        return this.#agentOptions(creator);
+    }
+
+    /** The options as the text tool descriptions, agent_options, and change notices show. */
+    agentOptionsText(creator: CollaborationCreator): string {
+        return formatAgentOptions(this.#agentOptions(creator));
+    }
+
+    /** The quota each of `creator`'s accounts reports, for agent_options to show on request. */
+    async agentOptionsUsage(creator: CollaborationCreator): Promise<string> {
         const options = this.#agentOptions(creator);
         const harnesses = await Promise.all(
-            options.harnesses
-                .filter((harness) => filter.harness === undefined || harness.id === filter.harness)
-                .map(async (harness) => ({
-                    ...harness,
-                    providers: await Promise.all(
-                        harness.providers
-                            .filter(
-                                (provider) =>
-                                    filter.provider === undefined ||
-                                    provider.id === filter.provider,
-                            )
-                            .map(async (provider) => {
-                                const usage = await this.#config.harnessUsage(provider.id);
-                                return usage === undefined ? provider : { ...provider, usage };
-                            }),
-                    ),
-                })),
+            options.harnesses.map(async (harness) => ({
+                ...harness,
+                providers: await Promise.all(
+                    harness.providers.map(async (provider) => {
+                        const usage = await this.#config.harnessUsage(provider.id);
+                        return usage === undefined ? provider : { ...provider, usage };
+                    }),
+                ),
+            })),
         );
-        return { ...options, harnesses: harnesses.filter((h) => h.providers.length > 0) };
+        return formatAgentOptionsUsage({ ...options, harnesses });
+    }
+
+    /**
+     * The options frozen into one agent's tool descriptions: the listing the first time its tools
+     * are built, kept in `kv` so the descriptions never change. Changes reach it as notices.
+     */
+    async shownAgentOptions(
+        ctx: Context,
+        kv: AgentModuleScope["kv"],
+        creator: CollaborationCreator,
+    ): Promise<string> {
+        return await kv.getOrCreate(ctx, AGENT_OPTIONS_SHOWN_KEY, () =>
+            this.agentOptionsText(creator),
+        );
     }
 
     #agentOptions(creator: CollaborationCreator): AgentOptions {
@@ -441,27 +457,25 @@ export class CollaborationModule implements AgentModule {
         },
 
         /**
-         * Tell an agent that has seen its sub-agent options when they change: the harnesses,
-         * accounts, and models it can create agents with, as a hidden system notice. Tool
-         * definitions never carry the options, so a change costs no prompt cache and no new
-         * provider session. An agent that never asked hears nothing.
+         * Tell an agent its sub-agent options changed, as a hidden system notice of the lines that
+         * differ from the last listing it saw. Tool descriptions keep the listing they started
+         * with, so a change costs no prompt cache and no new provider session.
          */
         beforeTurn: async (
             ctx: Context,
             scope: AgentModuleScope,
         ): Promise<readonly AgentModuleAction[] | undefined> => {
-            const seen = await scope.kv.read(ctx, AGENT_OPTIONS_SEEN_KEY);
-            if (typeof seen !== "string") return undefined;
-            const options = this.#agentOptions({
+            const known = await scope.kv.read(ctx, AGENT_OPTIONS_KNOWN_KEY);
+            if (typeof known !== "string") return undefined;
+            const current = this.agentOptionsText({
                 provider: scope.agent.provider,
                 model: scope.agent.model,
             });
-            if (options.version === seen) return undefined;
-            const pending = await scope.kv.update(ctx, AGENT_OPTIONS_PENDING_KEY, (current) =>
-                Value.Check(agentOptionsPendingSchema, current) &&
-                current.version === options.version
-                    ? current
-                    : { id: createId(), version: options.version },
+            if (current === known) return undefined;
+            const pending = await scope.kv.update(ctx, AGENT_OPTIONS_PENDING_KEY, (previous) =>
+                Value.Check(agentOptionsPendingSchema, previous) && previous.text === current
+                    ? previous
+                    : { id: createId(), text: current },
             );
             return [
                 {
@@ -469,17 +483,9 @@ export class CollaborationModule implements AgentModule {
                     id: pending.id,
                     message: {
                         role: "system",
-                        content: [
-                            {
-                                type: "text",
-                                text: `Your sub-agent options changed. They replace any you saw before.\n\n${formatAgentOptions(options)}`,
-                            },
-                        ],
+                        content: [{ type: "text", text: formatAgentOptionsChange(known, current) }],
                     },
-                    metadata: {
-                        hideFromUser: true,
-                        [AGENT_OPTIONS_METADATA_KEY]: { version: options.version },
-                    },
+                    metadata: { hideFromUser: true, [AGENT_OPTIONS_METADATA_KEY]: true },
                 },
             ];
         },
@@ -490,13 +496,12 @@ export class CollaborationModule implements AgentModule {
             scope: AgentModuleScope,
             accepted: AgentBaseAcceptedMessage,
         ): Promise<void> => {
-            const notice = accepted.metadata?.[AGENT_OPTIONS_METADATA_KEY];
-            if (typeof notice !== "object" || notice === null) return;
+            if (accepted.metadata?.[AGENT_OPTIONS_METADATA_KEY] === undefined) return;
             const pending = await scope.kv.read(ctx, AGENT_OPTIONS_PENDING_KEY);
             if (!Value.Check(agentOptionsPendingSchema, pending) || pending.id !== accepted.id) {
                 return;
             }
-            await scope.kv.write(ctx, AGENT_OPTIONS_SEEN_KEY, pending.version);
+            await scope.kv.write(ctx, AGENT_OPTIONS_KNOWN_KEY, pending.text);
             await scope.kv.delete(ctx, AGENT_OPTIONS_PENDING_KEY);
         },
 
@@ -539,16 +544,22 @@ export class CollaborationModule implements AgentModule {
         tools: async (ctx: Context, scope: AgentModuleScope): Promise<readonly AnyAgentTool[]> => {
             const settings = this.#config.configuration.values.settings;
             const creator = { provider: scope.agent.provider, model: scope.agent.model };
+            const shown = await this.shownAgentOptions(ctx, scope.kv, creator);
+            // What the description lists is what the agent knows until a notice or agent_options.
+            if ((await scope.kv.read(ctx, AGENT_OPTIONS_KNOWN_KEY)) === undefined) {
+                await scope.kv.write(ctx, AGENT_OPTIONS_KNOWN_KEY, shown);
+            }
             return [
                 createAgentTool(
                     this,
                     scope.agent.id,
                     creator,
+                    shown,
                     settings.maxCollaborators,
                     settings.maxCollaborationDepth,
                 ),
-                agentOptionsTool(this, creator, async (toolCtx, version) => {
-                    await scope.kv.write(toolCtx, AGENT_OPTIONS_SEEN_KEY, version);
+                agentOptionsTool(this, creator, async (toolCtx, text) => {
+                    await scope.kv.write(toolCtx, AGENT_OPTIONS_KNOWN_KEY, text);
                 }),
                 sendMessageTool(
                     this,
@@ -969,12 +980,14 @@ export class CollaborationModule implements AgentModule {
 /** Points a model that chose wrong at the one place listing what it can choose. */
 const OPTIONS_HINT = "Call agent_options for the harnesses, providers, and models you can use.";
 
-/** The options version this agent last saw, through agent_options or a change notice. */
-const AGENT_OPTIONS_SEEN_KEY = "agentOptionsSeen";
+/** The options listing frozen into this agent's tool descriptions. */
+const AGENT_OPTIONS_SHOWN_KEY = "agentOptionsShown";
+/** The last options listing this agent saw, from its tools, agent_options, or a notice. */
+const AGENT_OPTIONS_KNOWN_KEY = "agentOptionsKnown";
 /** A change notice queued for this agent and not yet accepted. */
-const AGENT_OPTIONS_PENDING_KEY = "agentOptionsPending";
+const AGENT_OPTIONS_PENDING_KEY = "agentOptionsChange";
 const AGENT_OPTIONS_METADATA_KEY = "agentOptions";
-const agentOptionsPendingSchema = Type.Object({ id: Type.String(), version: Type.String() });
+const agentOptionsPendingSchema = Type.Object({ id: Type.String(), text: Type.String() });
 
 /** Where a run keeps the last thing its model said, until the run ends. */
 const LAST_TEXT_KEY = "lastText";

@@ -556,13 +556,18 @@ export class SubtasksModule implements AgentModule {
                     currentId = parentId;
                 }
             },
-            tools: (_toolCtx, scope) => [
-                createSubtaskTool(this, scope.agent.id, {
-                    provider: scope.agent.provider,
-                    model: scope.agent.model,
-                }),
-                archiveSubtaskTool(this, scope.agent.id),
-            ],
+            tools: async (toolCtx, scope) => {
+                const creator = { provider: scope.agent.provider, model: scope.agent.model };
+                return [
+                    createSubtaskTool(
+                        this,
+                        scope.agent.id,
+                        creator,
+                        await this.#collaboration.shownAgentOptions(toolCtx, scope.kv, creator),
+                    ),
+                    archiveSubtaskTool(this, scope.agent.id),
+                ];
+            },
             instructions: async (ctx, scope) => {
                 const config = await agents.config(ctx, scope.agent.id);
                 if (this.isSubtask(config)) {

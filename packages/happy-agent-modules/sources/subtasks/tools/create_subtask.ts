@@ -10,6 +10,7 @@ export function createSubtaskTool(
     subtasks: SubtasksModule,
     agentId: string,
     creator: CollaborationCreator,
+    options: string,
 ) {
     return defineAgentTool({
         name: "create_subtask",
@@ -25,7 +26,7 @@ export function createSubtaskTool(
             "Omit workspace to share your filesystem, or supply workspace with projectId and a short name for a new workspace. Work starts after setup.",
             "Returns the agent ID without waiting. Coordinate via send_agent_message and archive direct subtasks with archive_subtask. Users can message or archive them. There is no wait tool.",
             "Keep delegated work in the subtask. Ask its agent through send_agent_message for progress, findings, diffs, verification, or follow-up changes. Do not directly inspect or modify its files or run commands in its workspace. Direct access to another workspace often requires elevated permissions and review by the reviewer model; talking to its agent avoids unnecessary permission reviews.",
-            "Call agent_options for the harnesses, providers, and models you can use, then choose a model and effort. Omitting harness or provider uses your own when it serves that model; otherwise each is optional only when the model settles it.",
+            `Choose a model and effort; harness and provider default to yours when they serve the model.\n\n${options}\n\nCall agent_options for the current list.`,
         ].join("\n\n"),
         parameters: createSubtaskInputSchema,
         returnType: subtaskResultSchema,
