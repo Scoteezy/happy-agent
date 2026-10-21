@@ -243,6 +243,13 @@ shutdown and does not claim that terminals or background processes have exited.
 
 ## Composer mode
 
+- Switching a failed turn used to change only its hidden continuation. `lastMode` still named the
+  failed route, so the next composer send silently selected it again and later child reports
+  continued failing there. The switch now records its complete mode on the hidden notice and
+  commits `lastMode` with failure resolution and message admission. It preserves permission mode
+  and supported effort and service tier, clears an unsupported tier, and rolls everything back
+  if admission fails. The existing mode endpoint and focused bootstrap return the new selection.
+
 - Execution provenance is output-only. Send, slash-command, and draft inputs validate known
   `account` and `providerType` fields using the published bounds, then immediately project them
   away before routing, pending messages, history, last mode, or either draft store. SDK stripping

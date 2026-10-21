@@ -43,7 +43,9 @@ export function messageFailure(input: {
             message:
                 command !== null && signIn?.product != null
                     ? `${signIn.product} isn't signed in. Run ${command}, then retry.`
-                    : `${provider.label} has no credentials. Check its settings, then retry.`,
+                    : input.unavailable !== undefined
+                      ? `${provider.label} has no credentials. Check its settings, then retry.`
+                      : `${provider.label} couldn't authenticate. Check its sign-in settings, then retry.`,
             provider,
             product: signIn?.product ?? null,
             command,

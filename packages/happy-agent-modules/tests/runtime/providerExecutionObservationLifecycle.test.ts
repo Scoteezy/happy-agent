@@ -454,7 +454,7 @@ async function failure(
                             (block) =>
                                 block.type === "text" &&
                                 block.text ===
-                                    `${account} has no credentials. Check its settings, then retry.`,
+                                    `${account} couldn't authenticate. Check its sign-in settings, then retry.`,
                         )
                     );
                 });

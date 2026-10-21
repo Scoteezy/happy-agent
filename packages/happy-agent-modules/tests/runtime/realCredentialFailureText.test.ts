@@ -183,7 +183,7 @@ api_url = "http://127.0.0.1:${address.port}"
                 for (const value of [historyContent, eventContent])
                     expect(value).toContainEqual({
                         type: "text",
-                        text: "private_account has no credentials. Check its settings, then retry.",
+                        text: "private_account couldn't authenticate. Check its sign-in settings, then retry.",
                     });
             } finally {
                 unsubscribe();

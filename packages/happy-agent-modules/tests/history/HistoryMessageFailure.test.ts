@@ -175,7 +175,7 @@ describe("a failed turn's typed failure", () => {
             }),
         ).toMatchObject({
             kind: "signin_missing",
-            message: "claude has no credentials. Check its settings, then retry.",
+            message: "claude couldn't authenticate. Check its sign-in settings, then retry.",
             product: null,
             command: null,
         });

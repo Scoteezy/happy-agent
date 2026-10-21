@@ -134,7 +134,7 @@ describe.each([
                     kind: "signin_missing",
                     message:
                         command === null
-                            ? "private_account has no credentials. Check its settings, then retry."
+                            ? "private_account couldn't authenticate. Check its sign-in settings, then retry."
                             : `${codex ? "Codex" : "Claude Code"} isn't signed in. Run ${command}, then retry.`,
                     provider: {
                         id: "private_account",

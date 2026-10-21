@@ -215,6 +215,12 @@ test of the alternative: one foreground request per send.
 
 ## A failed turn carries a typed failure that every reader shares
 
+An authentication failure after a credential was loaded used to say the provider had no
+credentials, hiding rejected or failed renewals behind a claim about discovery. The typed
+`signin_missing` kind still covers both cases, but only Config's missing-credential failure says
+"has no credentials". A rejected configured sign-in says it could not authenticate; native
+default login commands retain their existing guidance. Neither display path changes recovery.
+
 Clients used to receive the provider's prose plus owner-only recovery steps, and wrote nothing of
 their own. Error rows now also carry `failure`, discriminated by `kind` and identical for every
 reader; the row's text block is `failure.message`, the plain-text fallback for agents and older

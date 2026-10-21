@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HappyAgentApiError, type ServiceMessage } from "@slopus/happy-agent-client";
@@ -51,12 +52,15 @@ it("records a retry on the failed message, runs again, and stays idempotent", as
         expect(await userMessages()).toHaveLength(1);
 
         // Only one of the failure's alternatives may be switched to; there are none here.
+        const modeBeforeRejectedSwitch = await owner.getAgentMode(agent.id);
         await expect(
             owner.switchAndContinue(agent.id, failed!.id, {
                 providerId: "private_account",
                 modelId: model,
             }),
         ).rejects.toMatchObject({ status: 400 });
+        expect(await owner.getAgentMode(agent.id)).toEqual(modeBeforeRejectedSwitch);
+        expect((await failures())[0]?.failure?.resolution).toBeUndefined();
         // A message that is not a failure cannot be retried.
         const [user] = await userMessages();
         await expect(owner.retryFailedTurn(agent.id, user!.id)).rejects.toBeInstanceOf(
@@ -101,5 +105,116 @@ it("records a retry on the failed message, runs again, and stays idempotent", as
         vi.restoreAllMocks();
         vi.unstubAllEnvs();
         await rm(root, { recursive: true, force: true });
+    }
+}, 30_000);
+
+it("rolls back a switch's resolution, continuation and mode together, then preserves a supported tier", async () => {
+    let fixture: Awaited<ReturnType<typeof credentialWriterRuntime>> | undefined;
+    const provider = createServer((request, response) => {
+        request.resume();
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(
+            JSON.stringify({ error: { type: "authentication_error", message: "Rejected." } }),
+        );
+    });
+    try {
+        await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
+        const address = provider.address();
+        if (address === null || typeof address === "string")
+            throw new Error("Missing fixture port.");
+        fixture = await credentialWriterRuntime("owner", {
+            providerConfiguration: `[providers]
+default_enable = false
+${["private_account", "codex"]
+    .map(
+        (id) => `[providers.${id}]
+type = "codex"
+enabled = true
+credential_isolation = true
+api_key = "synthetic-${id}-key"
+base_url = "http://127.0.0.1:${address.port}/v1"
+transport = "sse"`,
+    )
+    .join("\n")}`,
+        });
+        const { owner, agent, runtime } = fixture;
+        // Usage ranking is covered by the gym. This fixture isolates a commit failure after
+        // real admission and metadata writes, without involving an external usage service.
+        vi.spyOn(runtime.modules.providerUsage, "fallbackProviders").mockReturnValue([
+            {
+                providerId: "codex",
+                providerLabel: "Codex",
+                modelId: writerMode.modelId,
+                group: "same_model",
+                usedPercent: 20,
+                usageWindow: "weekly",
+            },
+        ]);
+        const mode = {
+            ...writerMode,
+            serviceTier: "priority",
+            permissionMode: "read_only" as const,
+        };
+        await owner.sendMessage(agent.id, { text: "Fail before switching.", mode });
+        const failures = async () =>
+            (await owner.getMessages(agent.id)).runs
+                .flatMap((run) => run.messages)
+                .filter(
+                    (row): row is ServiceMessage =>
+                        row.role === "service" && row.failure !== undefined,
+                );
+        await vi.waitFor(async () => expect(await failures()).toHaveLength(1), {
+            timeout: 10_000,
+            interval: 10,
+        });
+        const [failed] = await failures();
+        const before = await owner.getMessages(agent.id);
+        const modeBefore = (await owner.getAgentMode(agent.id)).mode;
+        expect(modeBefore).toEqual(mode);
+        const updateMetadata = runtime.system.updateMetadata.bind(runtime.system);
+        const fault = vi
+            .spyOn(runtime.system, "updateMetadata")
+            .mockImplementation(async (...args) => {
+                await updateMetadata(...args);
+                throw new Error("Synthetic commit failure after metadata write.");
+            });
+        await expect(
+            owner.switchAndContinue(agent.id, failed!.id, {
+                providerId: "codex",
+                modelId: writerMode.modelId,
+            }),
+        ).rejects.toMatchObject({ status: 500 });
+        fault.mockRestore();
+        expect((await owner.getAgentMode(agent.id)).mode).toEqual(modeBefore);
+        expect((await failures())[0]?.failure?.resolution).toBeUndefined();
+        expect((await owner.getMessages(agent.id)).runs).toEqual(before.runs);
+
+        const switched = await owner.switchAndContinue(agent.id, failed!.id, {
+            providerId: "codex",
+            modelId: writerMode.modelId,
+        });
+        expect(switched.message.failure?.resolution).toMatchObject({
+            action: "switched",
+            providerId: "codex",
+        });
+        expect((await owner.getAgentMode(agent.id)).mode).toEqual({ ...mode, providerId: "codex" });
+        // Both accounts use the same local rejection fixture, so exactly one new run fails.
+        await vi.waitFor(async () => expect(await failures()).toHaveLength(2), {
+            timeout: 10_000,
+            interval: 10,
+        });
+        expect((await owner.getMessages(agent.id)).runs).toHaveLength(before.runs.length + 1);
+        const again = await owner.switchAndContinue(agent.id, failed!.id, {
+            providerId: "codex",
+            modelId: writerMode.modelId,
+        });
+        expect(again.message).toEqual(switched.message);
+        expect((await owner.getAgentMode(agent.id)).mode).toEqual({ ...mode, providerId: "codex" });
+        expect((await owner.getMessages(agent.id)).runs).toHaveLength(before.runs.length + 1);
+    } finally {
+        vi.restoreAllMocks();
+        await fixture?.close();
+        provider.closeAllConnections();
+        await new Promise<void>((resolve) => provider.close(() => resolve()));
     }
 }, 30_000);

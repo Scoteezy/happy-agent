@@ -92,6 +92,7 @@ import {
 import {
     cuid2Schema,
     currentAgentEnvironment,
+    DEFAULT_AGENT_PERMISSION_MODE,
     type AgentConfig,
     type AgentBaseMessageOptions,
     type AgentModule,
@@ -4922,6 +4923,7 @@ export class ApiModule implements AgentModule {
             throw new ApiError(409, "conflict", "The agent is still working.");
         }
         let options: AgentBaseMessageOptions = { id: createId(), metadata: { hideFromUser: true } };
+        let switchedMode: MessageMode | undefined;
         let text =
             "The person asked to retry the turn that just failed. Answer their last request again.";
         let resolution: NonNullable<MessageFailure["resolution"]> = {
@@ -4939,13 +4941,34 @@ export class ApiModule implements AgentModule {
                 throw invalidRequest("That route is not one of this failure's alternatives.");
             }
             const failedEffort = stored.error?.mode?.effort;
+            const failedTier = stored.error?.mode?.serviceTier;
+            const effort =
+                model.effortLevels.find((effort) => effort === failedEffort) ?? model.defaultEffort;
+            const config = await this.#agentSystem().config(ctx, agentId);
+            const previousMode = config === undefined ? undefined : agentModeFromConfig(config);
+            switchedMode = {
+                providerId: model.providerId,
+                modelId: model.id,
+                effort,
+                permissionMode:
+                    stored.error?.mode?.permissionMode ??
+                    (Value.Check(messageModeSchema, previousMode)
+                        ? previousMode.permissionMode
+                        : DEFAULT_AGENT_PERMISSION_MODE),
+                // Keep an explicit tier only when the new model supports it.
+                serviceTier:
+                    failedTier != null && model.serviceTiers?.includes(failedTier)
+                        ? failedTier
+                        : null,
+            };
             options = {
                 ...options,
-                provider: model.providerId,
-                model: model.id,
-                effort:
-                    model.effortLevels.find((effort) => effort === failedEffort) ??
-                    model.defaultEffort,
+                provider: switchedMode.providerId,
+                model: switchedMode.modelId,
+                effort,
+                permissionMode: switchedMode.permissionMode,
+                serviceTier: switchedMode.serviceTier,
+                metadata: { ...options.metadata, mode: switchedMode },
             };
             text = `The person switched this chat to ${fallback.providerLabel} · ${model.name} after the turn failed. Answer their last request again.`;
             resolution = {
@@ -4979,6 +5002,11 @@ export class ApiModule implements AgentModule {
                     { role: "system", content: [{ type: "text", text }] },
                     options,
                 );
+                // The switch changes this chat's selection, including what another composer
+                // reads for its next message. Commit it only when the continuation is admitted.
+                if (switchedMode !== undefined) {
+                    await this.#updateAgentMetadata(txCtx, agentId, { lastMode: switchedMode });
+                }
                 afterCommit(txCtx, () => {
                     this.#journal.append("message.updated", {
                         agentId,
