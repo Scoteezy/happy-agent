@@ -123,6 +123,28 @@ to the API's max effort. Their 1M windows compact at 850k: Kimi's published stra
 at 85%, and the same threshold leaves GLM room for its documented 128k output and a summary.
 They remain absent from native Codex, Claude, and Grok catalogs.
 
+## OpenAI-compatible endpoints are configuration
+
+Every OpenAI-speaking vendor used to need a new provider type. `type = "openai_compatible"` now
+covers them with one table: `base_url`, a key through `api_key_env` (or `api_key`), and the exact
+`models` list. The model list is never discovered. After startup the daemon reads the vendor's
+`/models` in the background, only to fill in each listed model's name, context window, image
+input, and efforts. It caches the result under `agent/openai-compatible/<id>/models.json`, and
+`model_overrides` wins field by field. Until that answer arrives, the defaults are a 128k window,
+text-only input, and no effort sent. `request` passes vendor extras such as OpenRouter's
+`reasoning = { enabled = true }` through verbatim. Protocol-owned fields are refused.
+
+A gateway model ID is not a native model: `openai/...` on OpenRouter is not Codex, and Chat
+Completions cannot carry Codex's grammar tools. The `openai_compatible` provider kind therefore
+outranks the model ID. These models get Claude Code's lean prompt, its function tools with a
+text-only reader, and its compaction contract, which is GLM's surface. A model switch on them
+always starts a fresh context.
+
+Only chat models belong here. The user ruled out decision models, such as GPT-6 Luna Decisions,
+which answer typed questions but cannot hold a conversation. They are not configured and there
+is no tool for them. Prices from `/models` are not used either, because API.md keeps run cost
+provider-reported and never derived from a local table.
+
 ## Inference speed preserves the provider tier
 
 Configuration supplies each account/model's complete ordered speed menu with explicit IDs and

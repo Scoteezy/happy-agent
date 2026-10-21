@@ -24,6 +24,7 @@ const computeToolProviderKindSchema = Type.Union([
     Type.Literal("foreign"),
     Type.Literal("grok"),
     Type.Literal("gym"),
+    Type.Literal("openai_compatible"),
 ]);
 
 /** The largest model identifier vendor selection accepts. */
@@ -64,6 +65,10 @@ export function computeToolVendor(selection: ComputeToolSelection): ComputeToolV
     if (!Value.Check(computeToolSelectionSchema, selection)) {
         throw new Error("Compute tool model selection is invalid.");
     }
+    // A configured OpenAI-compatible endpoint speaks Chat Completions, which has no grammar tools,
+    // and its model IDs are the gateway's, so `openai/...` there is not Codex. Those models get the
+    // Claude Code harness's function tools with a text-only reader, which is GLM's surface.
+    if (selection.providerKind === "openai_compatible") return "glm";
     const family = selection.model === undefined ? undefined : providerModelFamily(selection.model);
     // A foreign agent brings its own tools, whichever account it runs on.
     if (family !== undefined) return family;

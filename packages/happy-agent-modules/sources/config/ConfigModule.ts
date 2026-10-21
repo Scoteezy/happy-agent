@@ -49,6 +49,7 @@ import {
     agentModelContext,
     agentModels,
     foreignAgentModelContext,
+    openAICompatibleModelContext,
     agentProviders,
     configuredAnthropicBedrockTransport,
     smartProviderRoute,
@@ -71,6 +72,7 @@ import {
     foreignAgentStart,
 } from "./impl/createForeignAgentProvider.js";
 import { refreshForeignAgentModels } from "./impl/foreignAgentModels.js";
+import { refreshOpenAICompatibleMetadata } from "./impl/openAICompatibleModels.js";
 import { readAntigravityUsage, type HarnessUsageWindow } from "./impl/harnessUsage.js";
 import {
     hasConfiguredProviderUsageSource,
@@ -321,7 +323,99 @@ const providerCommonInput = {
     include_subagent_models: Type.Optional(boundedStringArraySchema),
     p2p_share: Type.Optional(p2pShareSchema),
 };
+/** The reasoning efforts an OpenAI-compatible model may be configured to accept. */
+const openAICompatibleEffortSchema = Type.Union([
+    Type.Literal("off"),
+    Type.Literal("minimal"),
+    Type.Literal("low"),
+    Type.Literal("medium"),
+    Type.Literal("high"),
+    Type.Literal("xhigh"),
+    Type.Literal("max"),
+]);
+/** Request fields passed through verbatim, such as OpenRouter's `reasoning = { enabled = true }`. */
+const openAICompatibleRequestSchema = Type.Record(configStringSchema, Type.Unknown(), {
+    maxProperties: MAX_CONFIG_TABLE_ENTRIES,
+});
+const openAICompatibleHeadersSchema = Type.Record(configStringSchema, configStringSchema, {
+    maxProperties: MAX_CONFIG_TABLE_ENTRIES,
+});
+/** Per-model settings that override what the vendor's `/models` endpoint reports. */
+const openAICompatibleModelOverrideInputSchema = Type.Object(
+    {
+        name: Type.Optional(Type.String({ minLength: 1, maxLength: 256, pattern: "\\S" })),
+        context_window: Type.Optional(Type.Integer({ minimum: 1_024, maximum: 100_000_000 })),
+        auto_compact_window: Type.Optional(Type.Integer({ minimum: 512, maximum: 100_000_000 })),
+        input: Type.Optional(
+            Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]), {
+                minItems: 1,
+                maxItems: 2,
+                uniqueItems: true,
+            }),
+        ),
+        efforts: Type.Optional(
+            Type.Array(openAICompatibleEffortSchema, {
+                minItems: 1,
+                maxItems: 7,
+                uniqueItems: true,
+            }),
+        ),
+        default_effort: Type.Optional(openAICompatibleEffortSchema),
+        request: Type.Optional(openAICompatibleRequestSchema),
+    },
+    { additionalProperties: false },
+);
+const openAICompatibleModelOverrideSchema = Type.Object(
+    {
+        name: Type.Optional(Type.String({ minLength: 1, maxLength: 256, pattern: "\\S" })),
+        contextWindow: Type.Optional(Type.Integer({ minimum: 1_024, maximum: 100_000_000 })),
+        autoCompactWindow: Type.Optional(Type.Integer({ minimum: 512, maximum: 100_000_000 })),
+        input: Type.Optional(
+            Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]), {
+                minItems: 1,
+                maxItems: 2,
+                uniqueItems: true,
+            }),
+        ),
+        efforts: Type.Optional(
+            Type.Array(openAICompatibleEffortSchema, {
+                minItems: 1,
+                maxItems: 7,
+                uniqueItems: true,
+            }),
+        ),
+        defaultEffort: Type.Optional(openAICompatibleEffortSchema),
+        request: Type.Optional(openAICompatibleRequestSchema),
+    },
+    { additionalProperties: false },
+);
+const reasoningFieldSchema = Type.Union([
+    Type.Literal("reasoning_content"),
+    Type.Literal("reasoning"),
+    Type.Literal("none"),
+]);
 const providerInputSchemas = {
+    openai_compatible: Type.Object(
+        {
+            ...providerCommonInput,
+            api_key: Type.Optional(configStringSchema),
+            api_key_env: Type.Optional(configStringSchema),
+            // Optional in one layer: the generated runtime file records only enablement.
+            base_url: Type.Optional(configStringSchema),
+            headers: Type.Optional(openAICompatibleHeadersSchema),
+            model_metadata: Type.Optional(Type.Boolean()),
+            model_overrides: Type.Optional(
+                Type.Record(configStringSchema, openAICompatibleModelOverrideInputSchema, {
+                    maxProperties: MAX_CONFIG_TABLE_ENTRIES,
+                }),
+            ),
+            models: Type.Optional(boundedStringArraySchema),
+            reasoning_field: Type.Optional(reasoningFieldSchema),
+            request: Type.Optional(openAICompatibleRequestSchema),
+            type: Type.Literal("openai_compatible"),
+        },
+        { additionalProperties: false },
+    ),
     bedrock: Type.Object(
         {
             ...providerCommonInput,
@@ -450,6 +544,7 @@ const providerInputSchemas = {
     ),
 } as const;
 const providerInputSchema = Type.Union([
+    providerInputSchemas.openai_compatible,
     providerInputSchemas.bedrock,
     providerInputSchemas.claude,
     providerInputSchemas.codex,
@@ -798,6 +893,26 @@ const providerRecordBase = {
     p2pShare: Type.Optional(p2pShareSchema),
 };
 const providerSchemas = {
+    openai_compatible: Type.Object(
+        {
+            ...providerRecordBase,
+            apiKey: Type.Optional(configStringSchema),
+            apiKeyEnv: Type.Optional(configStringSchema),
+            baseUrl: Type.String({ minLength: 1, maxLength: 2_048, pattern: "^https?://[^\\s]+$" }),
+            headers: Type.Optional(openAICompatibleHeadersSchema),
+            modelMetadata: Type.Optional(Type.Boolean()),
+            modelOverrides: Type.Optional(
+                Type.Record(configStringSchema, openAICompatibleModelOverrideSchema, {
+                    maxProperties: MAX_CONFIG_TABLE_ENTRIES,
+                }),
+            ),
+            models: Type.Optional(boundedStringArraySchema),
+            reasoningField: Type.Optional(reasoningFieldSchema),
+            request: Type.Optional(openAICompatibleRequestSchema),
+            type: Type.Literal("openai_compatible"),
+        },
+        { additionalProperties: false },
+    ),
     bedrock: Type.Object(
         {
             ...providerRecordBase,
@@ -921,6 +1036,7 @@ const providerSchemas = {
     ),
 } as const;
 const providerSchema = Type.Union([
+    providerSchemas.openai_compatible,
     providerSchemas.bedrock,
     providerSchemas.claude,
     providerSchemas.codex,
@@ -1982,6 +2098,7 @@ export class ConfigModule implements AgentModule {
             if (this.#credentialRefreshStarted) return;
             this.#credentialRefreshStarted = true;
             this.#refreshForeignAgentModels(ctx);
+            this.#refreshOpenAICompatibleMetadata(ctx);
             const lifetime =
                 ctx.lifetime === undefined
                     ? this.#providerLifetime.signal
@@ -2079,7 +2196,11 @@ export class ConfigModule implements AgentModule {
         ).filter((model) => !scriptedProviderIds.has(model.providerId));
         if (scripted !== undefined) {
             for (const model of scripted) {
-                const modelContext = agentModelContext(model.id);
+                // A configured provider served next to the script reports its own context.
+                const modelContext =
+                    foreignAgentModelContext(this.configuration, model.providerId, model.id) ??
+                    openAICompatibleModelContext(this.configuration, model.providerId, model.id) ??
+                    agentModelContext(model.id);
                 const entry: ConfiguredAgentModel = {
                     ...model,
                     autoCompactWindow: modelContext?.autoCompactWindow ?? null,
@@ -2108,6 +2229,7 @@ export class ConfigModule implements AgentModule {
         if (!enabled) return undefined;
         return (
             foreignAgentModelContext(this.configuration, providerId, modelId) ??
+            openAICompatibleModelContext(this.configuration, providerId, modelId) ??
             agentModelContext(modelId)
         );
     }
@@ -3056,6 +3178,25 @@ export class ConfigModule implements AgentModule {
             this.configuration,
         );
         return this.#resolvedScripted;
+    }
+
+    /**
+     * Ask each enabled OpenAI-compatible account's `/models` endpoint about its configured models,
+     * in the background. It only refines context windows, image input, and efforts; it never
+     * decides which models exist. Until it answers, configuration and defaults stand.
+     */
+    #refreshOpenAICompatibleMetadata(ctx: Context): void {
+        if (this.#scripted !== undefined) return;
+        for (const [id, provider] of Object.entries(this.configuration.values.providers)) {
+            if (provider.type !== "openai_compatible" || !this.isProviderEnabled(id)) continue;
+            void refreshOpenAICompatibleMetadata(this.configuration, id, provider).catch(
+                (error: unknown) => {
+                    ctx.log.warn(
+                        `Could not read model details for provider "${id}": ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                },
+            );
+        }
     }
 
     /**
@@ -4081,6 +4222,7 @@ function mergeValues(...partials: readonly PartialValues[]): HappyAgentConfigVal
         }
     }
     validateHarnesses(merged.harnesses, merged.providers);
+    validateOpenAICompatibleProviders(merged.providers);
     assertTeamAuthentication(merged.feature.team, teamWorkOSConfigured);
     if (merged.feature.team.enabled && merged.api?.token !== undefined) {
         throw new Error("Team deployments cannot configure a standalone API token.");
@@ -4499,6 +4641,62 @@ function mergePresence(
 function normalizeProvider(id: string, value: Record<string, unknown>): Record<string, unknown> {
     const inferred = inferProviderType(id, value["type"]);
     switch (inferred) {
+        case "openai_compatible":
+            return {
+                ...normalizeProviderCommon(value),
+                ...(value["api_key"] === undefined ? {} : { apiKey: value["api_key"] }),
+                ...(value["api_key_env"] === undefined ? {} : { apiKeyEnv: value["api_key_env"] }),
+                ...(value["base_url"] === undefined
+                    ? {}
+                    : { baseUrl: (value["base_url"] as string).trim().replace(/\/+$/u, "") }),
+                ...(value["headers"] === undefined ? {} : { headers: value["headers"] }),
+                ...(value["model_metadata"] === undefined
+                    ? {}
+                    : { modelMetadata: value["model_metadata"] }),
+                ...(value["model_overrides"] === undefined
+                    ? {}
+                    : {
+                          modelOverrides: Object.fromEntries(
+                              Object.entries(
+                                  value["model_overrides"] as Record<
+                                      string,
+                                      Static<typeof openAICompatibleModelOverrideInputSchema>
+                                  >,
+                              ).map(([model, override]) => [
+                                  model,
+                                  {
+                                      ...(override.name === undefined
+                                          ? {}
+                                          : { name: override.name.trim() }),
+                                      ...(override.context_window === undefined
+                                          ? {}
+                                          : { contextWindow: override.context_window }),
+                                      ...(override.auto_compact_window === undefined
+                                          ? {}
+                                          : { autoCompactWindow: override.auto_compact_window }),
+                                      ...(override.input === undefined
+                                          ? {}
+                                          : { input: override.input }),
+                                      ...(override.efforts === undefined
+                                          ? {}
+                                          : { efforts: override.efforts }),
+                                      ...(override.default_effort === undefined
+                                          ? {}
+                                          : { defaultEffort: override.default_effort }),
+                                      ...(override.request === undefined
+                                          ? {}
+                                          : { request: override.request }),
+                                  },
+                              ]),
+                          ),
+                      }),
+                ...(value["models"] === undefined ? {} : { models: value["models"] }),
+                ...(value["reasoning_field"] === undefined
+                    ? {}
+                    : { reasoningField: value["reasoning_field"] }),
+                ...(value["request"] === undefined ? {} : { request: value["request"] }),
+                type: inferred,
+            };
         case "bedrock":
             return {
                 ...normalizeProviderCommon(value),
@@ -4572,6 +4770,51 @@ function normalizeProvider(id: string, value: Record<string, unknown>): Record<s
     }
 }
 
+/**
+ * An OpenAI-compatible provider is only as complete as its own table: an endpoint, a key source,
+ * and at least one model. A key never sits beside a variable naming another.
+ */
+function validateOpenAICompatibleProviders(
+    providers: Readonly<Record<string, Record<string, unknown>>>,
+): void {
+    for (const [id, provider] of Object.entries(providers)) {
+        if (provider["type"] !== "openai_compatible") continue;
+        if (typeof provider["baseUrl"] !== "string") {
+            throw new Error(`Provider "${id}" must set base_url.`);
+        }
+        if (provider["apiKey"] !== undefined && provider["apiKeyEnv"] !== undefined) {
+            throw new Error(`Provider "${id}" must set api_key or api_key_env, not both.`);
+        }
+        if (provider["apiKey"] === undefined && provider["apiKeyEnv"] === undefined) {
+            throw new Error(`Provider "${id}" must set api_key or api_key_env.`);
+        }
+        const models = (provider["models"] as readonly string[] | undefined) ?? [];
+        if (models.length === 0) {
+            throw new Error(`Provider "${id}" must list models.`);
+        }
+        const overrides = (provider["modelOverrides"] ?? {}) as Record<
+            string,
+            { efforts?: readonly string[]; defaultEffort?: string }
+        >;
+        for (const [model, override] of Object.entries(overrides)) {
+            if (!models.includes(model)) {
+                throw new Error(
+                    `providers.${id}.model_overrides names "${model}", which is not in models.`,
+                );
+            }
+            if (
+                override.defaultEffort !== undefined &&
+                override.efforts !== undefined &&
+                !override.efforts.includes(override.defaultEffort)
+            ) {
+                throw new Error(
+                    `providers.${id}.model_overrides."${model}".default_effort is not one of its efforts.`,
+                );
+            }
+        }
+    }
+}
+
 function normalizeProviderCommon(value: Record<string, unknown>): Record<string, unknown> {
     return {
         ...(value["name"] === undefined ? {} : { name: (value["name"] as string).trim() }),
@@ -4601,6 +4844,7 @@ const CONFIGURED_PROVIDER_TYPES = [
     "claude",
     "grok",
     "bedrock",
+    "openai_compatible",
     "antigravity",
     "opencode",
     "acp",
@@ -4608,7 +4852,14 @@ const CONFIGURED_PROVIDER_TYPES = [
 ] as const;
 type ConfiguredProviderType = (typeof CONFIGURED_PROVIDER_TYPES)[number];
 /** The provider types people write; agents with their own login are harnesses instead. */
-const CONFIGURED_PROVIDER_TYPE_LIST = ["codex", "claude", "grok", "bedrock", "smart"]
+const CONFIGURED_PROVIDER_TYPE_LIST = [
+    "codex",
+    "claude",
+    "grok",
+    "bedrock",
+    "openai_compatible",
+    "smart",
+]
     .map((type) => `"${type}"`)
     .join(", ");
 
@@ -5572,7 +5823,11 @@ function readProviders(
         }
         const allowed = Object.keys(schema.properties);
         const parsed = readTableValues(providerValue, `providers.${id}`, unknown, allowed, schema);
-        if (parsed !== undefined && providerValue.model_overrides !== undefined) {
+        if (
+            parsed !== undefined &&
+            type === "bedrock" &&
+            providerValue.model_overrides !== undefined
+        ) {
             parsed.model_overrides = readModelOverrides(
                 providerValue.model_overrides,
                 `providers.${id}.model_overrides`,

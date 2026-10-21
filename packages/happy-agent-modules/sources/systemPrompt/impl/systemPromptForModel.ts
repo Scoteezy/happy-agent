@@ -60,6 +60,9 @@ export function systemPromptForModel(selection: SystemPromptSelection): string {
     if (!Value.Check(systemPromptSelectionSchema, selection)) {
         throw new Error("System prompt model selection is invalid.");
     }
+    // An OpenAI-compatible endpoint is given Claude Code's tools, so it is told Claude Code's
+    // non-Claude lean prompt whatever its gateway model ID resembles.
+    if (selection.providerKind === "openai_compatible") return glm_5_3_system_prompt;
     const model = selection.model;
     if (model !== undefined) {
         if (Object.hasOwn(promptsByModel, model)) return promptsByModel[model]!;

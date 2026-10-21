@@ -32,12 +32,40 @@ avoid overly short aliases. Omit redundant vendor or plan prefixes and suffixes:
 already supply that context. This is guidance for choosing a name. The product displays explicit
 names verbatim; it never shortens emails or appends plan names automatically.
 
-| Vendor  | Settings                                | How the user gets the credential                                                                     |
-| ------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Claude  | `type = "claude"`, `oauth_token`        | `claude setup-token` while signed in to that account; the user pastes it into the file.              |
-| Codex   | `type = "codex"`, `auth_file`           | Sign in with a separate home, e.g. `CODEX_HOME=~/.codex-work codex login`; point at its `auth.json`. |
-| Grok    | `type = "grok"`, `auth_file`            | That account's Grok auth file.                                                                       |
-| Bedrock | `type = "bedrock"`, `profile`, `region` | An AWS profile for that account.                                                                     |
+| Vendor            | Settings                                                          | How the user gets the credential                                                                     |
+| ----------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Claude            | `type = "claude"`, `oauth_token`                                  | `claude setup-token` while signed in to that account; the user pastes it into the file.              |
+| Codex             | `type = "codex"`, `auth_file`                                     | Sign in with a separate home, e.g. `CODEX_HOME=~/.codex-work codex login`; point at its `auth.json`. |
+| Grok              | `type = "grok"`, `auth_file`                                      | That account's Grok auth file.                                                                       |
+| Bedrock           | `type = "bedrock"`, `profile`, `region`                           | An AWS profile for that account.                                                                     |
+| OpenAI-compatible | `type = "openai_compatible"`, `base_url`, `api_key_env`, `models` | An API key from the vendor, exported in the daemon environment. See below.                           |
+
+**Add an OpenAI-compatible vendor** (OpenRouter, Together, Fireworks, DeepSeek, vLLM, LM Studio)
+with one table, filling `models` with the vendor's exact model IDs:
+
+```toml
+[providers.openrouter]
+type = "openai_compatible"
+name = "OpenRouter"
+enabled = true
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+models = ["deepseek/deepseek-v4.1-flash-1017"]
+reasoning_field = "reasoning"
+
+[providers.openrouter.request]
+reasoning = { enabled = true }
+```
+
+- Keep the key out of the file: put it in the variable `api_key_env` names, and reload the daemon
+  from a shell that has it. Never paste the key into `happy.toml`, a commit, or a message.
+- Only list chat models that support tool calling. Check the vendor's model page first. On
+  OpenRouter, `supported_parameters` must include `tools`.
+- Context window, image input, and efforts come from the vendor's `/models` in the background.
+  Override any of them under `[providers.<id>.model_overrides."<model>"]`. The
+  [reference](../configuration.md#openai-compatible-endpoints) lists every setting.
+- To verify, check that `GET /v0/config` lists the models under the new provider, then run one turn
+  that uses a tool.
 
 **Pool** same-type accounts behind a smart provider and hide the members:
 

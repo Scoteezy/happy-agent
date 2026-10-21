@@ -21,6 +21,7 @@ import {
     GrokSessionCredential,
     KimiProvider,
     GlmProvider,
+    OpenAICompatibleProvider,
     type ForeignAgentModel,
     providerModelFamily,
     loadCodexCredential,
@@ -46,6 +47,7 @@ import { ProviderCredentialsUnavailableError } from "./ProviderCredentialsUnavai
 import type { ProviderExecutionObservations } from "./ProviderExecutionObservations.js";
 import { observeProviderExecution } from "./observeProviderExecution.js";
 import { resolveDefaultNodeName } from "./resolveDefaultNodeName.js";
+import { openAICompatibleApiKey, openAICompatibleModels } from "./openAICompatibleModels.js";
 
 type ConfiguredProvider = HappyAgentConfigValues["providers"][string];
 type ConcreteConfiguredProvider = Exclude<ConfiguredProvider, { readonly type: "smart" }>;
@@ -459,7 +461,19 @@ function providerCatalog(
         ? []
         : provider.type === "bedrock"
           ? BEDROCK_CATALOG
-          : CATALOG.filter((candidate) => candidate.providerId === provider.type);
+          : provider.type === "openai_compatible"
+            ? openAICompatibleModels(configuration.paths.agentHome, id, provider).map(
+                  (candidate): CatalogAgentModel => ({
+                      providerId: id,
+                      id: candidate.id,
+                      name: candidate.name,
+                      effortLevels: candidate.efforts ?? [candidate.defaultEffort],
+                      defaultEffort: candidate.defaultEffort,
+                      contextWindow: candidate.contextWindow,
+                      autoCompactWindow: candidate.autoCompactWindow,
+                  }),
+              )
+            : CATALOG.filter((candidate) => candidate.providerId === provider.type);
     const foreign = foreignAgentRoutes(configuration)
         .filter((route) => route.providerId === id)
         .flatMap((route) =>
@@ -485,6 +499,33 @@ export function foreignAgentModelContext(
     return model === undefined
         ? undefined
         : { contextWindow: model.contextWindow, autoCompactWindow: model.contextWindow };
+}
+
+/**
+ * Context limits for one model on an OpenAI-compatible account, or on a smart provider pooling
+ * them. Unknown for every other route.
+ */
+export function openAICompatibleModelContext(
+    configuration: HappyAgentConfiguration,
+    providerId: string,
+    modelId: string,
+): AgentModelContext | undefined {
+    const provider = configuration.values.providers[providerId];
+    if (provider?.type === "smart") {
+        const candidate = smartProviderRoute(configuration, providerId)?.models.find(
+            (route) => route.model.id === modelId,
+        )?.candidates[0];
+        return candidate === undefined
+            ? undefined
+            : openAICompatibleModelContext(configuration, candidate, modelId);
+    }
+    if (provider?.type !== "openai_compatible") return undefined;
+    const model = openAICompatibleModels(configuration.paths.agentHome, providerId, provider).find(
+        (candidate) => candidate.id === modelId,
+    );
+    return model === undefined
+        ? undefined
+        : { contextWindow: model.contextWindow, autoCompactWindow: model.autoCompactWindow };
 }
 
 /** Context limits for one enabled provider/model route, when the curated catalog knows them. */
@@ -556,6 +597,7 @@ export function agentProviders(
                                   selected,
                                   retryLimit,
                                   configuration.paths.claudeWorkingDirectory,
+                                  configuration.paths.agentHome,
                                   sources,
                                   onAccountUsage,
                               );
@@ -696,6 +738,7 @@ async function createProvider(
     selectedModel: string | undefined,
     retryLimit: number | undefined,
     claudeWorkingDirectory: string,
+    agentHome: string,
     sources: CredentialDiagnosticSources,
     onAccountUsage?: (usage: ProviderUsage) => void,
 ): Promise<BaseProvider> {
@@ -948,6 +991,42 @@ async function createProvider(
         return new GrokProvider({
             credential: required(credential, id, "grok", defaultGrokLogin),
             ...(provider.baseUrl === undefined ? {} : { endpoint: provider.baseUrl }),
+            ...retries,
+        });
+    }
+
+    if (provider.type === "openai_compatible") {
+        // Only what this provider's own table names is consulted; there is no ambient login.
+        sources.configured("api_key", provider.apiKey);
+        sources.configured("api_key_env", provider.apiKeyEnv);
+        if (provider.apiKeyEnv !== undefined)
+            sources.environment(provider.apiKeyEnv, process.env[provider.apiKeyEnv]);
+        const apiKey = openAICompatibleApiKey(provider);
+        if (apiKey === undefined) {
+            throw new ProviderCredentialsUnavailableError(id, "openai_compatible", false);
+        }
+        sources.selected(
+            provider.apiKey === undefined ? "environment" : "configuration",
+            provider.apiKey === undefined ? provider.apiKeyEnv! : `providers.${id}.api_key`,
+        );
+        const models = openAICompatibleModels(agentHome, id, provider);
+        return new OpenAICompatibleProvider({
+            apiKey,
+            endpoint: provider.baseUrl,
+            vendor: provider.name ?? id,
+            models: models.map((candidate) => ({
+                id: candidate.id,
+                inputTypes: candidate.input,
+                ...(candidate.efforts === undefined ? {} : { efforts: candidate.efforts }),
+                ...(candidate.request === undefined ? {} : { request: candidate.request }),
+            })),
+            ...(selectedModel === undefined ? {} : { model: selectedModel }),
+            ...(provider.request === undefined ? {} : { request: provider.request }),
+            ...(provider.headers === undefined ? {} : { headers: provider.headers }),
+            reasoningField:
+                provider.reasoningField === undefined || provider.reasoningField === "none"
+                    ? null
+                    : provider.reasoningField,
             ...retries,
         });
     }

@@ -8,6 +8,7 @@ export const systemPromptProviderKindSchema = Type.Union([
     Type.Literal("foreign"),
     Type.Literal("grok"),
     Type.Literal("gym"),
+    Type.Literal("openai_compatible"),
 ]);
 
 /** The TypeScript type inferred from {@link systemPromptProviderKindSchema}. */

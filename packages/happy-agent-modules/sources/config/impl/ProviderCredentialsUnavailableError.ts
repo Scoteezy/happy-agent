@@ -23,11 +23,14 @@ export class ProviderCredentialsUnavailableError extends Error {
 
     constructor(
         readonly providerId: string,
-        vendor: NativeSignInVendor | "bedrock",
+        vendor: NativeSignInVendor | "bedrock" | "openai_compatible",
         /** Only the vendor's own default sign-in was consulted, so its login command is the fix. */
         defaultNativeLogin: boolean,
     ) {
-        const native = vendor === "bedrock" ? undefined : NATIVE_SIGN_IN[vendor];
+        const native =
+            vendor === "bedrock" || vendor === "openai_compatible"
+                ? undefined
+                : NATIVE_SIGN_IN[vendor];
         const command = native !== undefined && defaultNativeLogin ? native.command : null;
         super(
             native !== undefined && command !== null

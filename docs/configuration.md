@@ -650,7 +650,9 @@ Claude Code instances accept `config_dir`, `executable`, and `oauth_token`.
 Run `claude setup-token` while signed in to the additional Claude account to
 create the long-lived token used by `oauth_token`. The token applies only to
 that provider instance. Grok instances
-accept `auth_file` and `base_url`. Bedrock instances
+accept `auth_file` and `base_url`. [OpenAI-compatible](#openai-compatible-endpoints) instances
+accept `base_url`, `api_key` or `api_key_env`, `models`, `model_overrides`, `request`,
+`headers`, `reasoning_field`, and `model_metadata`. Bedrock instances
 accept `region`, `model_overrides`, `bearer_token_env_var`, `profile`,
 `config_file`, and `credentials_file`. `profile` selects the standard AWS SDK
 credential chain, including a profile's `credential_process`; the two file
@@ -925,6 +927,63 @@ and [AWS launch announcement](https://aws.amazon.com/about-aws/whats-new/2026/07
 Anthropic models use the native Messages API, prefer the Anthropic-compatible
 Mantle endpoint where available, fall back to Bedrock Runtime, and support
 Bedrock's native server-side compaction.
+
+## OpenAI-compatible endpoints
+
+Any vendor that serves OpenAI's Chat Completions API with a bearer key is configuration, not
+code: OpenRouter, Together, Fireworks, DeepSeek, vLLM, LM Studio, and the like. Give each one a
+`type = "openai_compatible"` table in the user `happy.toml`:
+
+```toml
+[providers.openrouter]
+type = "openai_compatible"
+name = "OpenRouter"
+enabled = true
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+models = ["deepseek/deepseek-v4.1-flash-1017"]
+reasoning_field = "reasoning"
+
+# Sent with every request, verbatim.
+[providers.openrouter.request]
+reasoning = { enabled = true }
+
+# Optional; each field overrides what the vendor reports.
+[providers.openrouter.model_overrides."deepseek/deepseek-v4.1-flash-1017"]
+name = "DeepSeek V4.1 Flash"
+```
+
+| Setting           | Meaning                                                                                                                                                                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base_url`        | The API base. Requests go to `<base_url>/chat/completions` with streaming and tool calls.                                                                                                                                                            |
+| `api_key_env`     | The daemon environment variable holding the key, read when a session needs it. Prefer it to `api_key`, which stores the key in the file. Set exactly one.                                                                                            |
+| `models`          | The chat models this account serves, by the vendor's own IDs. They become agent models as listed; Happy Agent never discovers models from the vendor.                                                                                                |
+| `request`         | Extra top-level request fields passed through unchanged, such as OpenRouter's `reasoning`, `provider` routing, or `temperature`. Fields the protocol owns (`model`, `messages`, `stream`, `stream_options`, `tools`, `response_format`) are refused. |
+| `headers`         | Extra request headers, such as OpenRouter's `HTTP-Referer` and `X-Title`.                                                                                                                                                                            |
+| `reasoning_field` | Where earlier assistant reasoning is replayed: `"reasoning"` (OpenRouter), `"reasoning_content"` (DeepSeek and Kimi style), or `"none"`, the default, which leaves it off the wire. Streamed reasoning is read under either name.                    |
+| `model_metadata`  | `false` stops Happy Agent from reading the vendor's `/models` details. Defaults to `true`.                                                                                                                                                           |
+
+After the daemon starts, it asks `<base_url>/models` in the background about the configured models.
+That only fills in each model's name, context window, image input, and reasoning efforts; it never
+adds or removes a model and never blocks startup or a session. A vendor without the endpoint, or
+with `model_metadata = false`, keeps the defaults: the model ID as its name, a 128,000-token window,
+text-only input, and no effort sent. `model_overrides."<model>"` wins over both, field by field:
+`name`, `context_window`, `auto_compact_window` (85% of the window by default), `input`
+(`["text"]` or `["text", "image"]`), `efforts` and `default_effort` (from `off`, `minimal`, `low`,
+`medium`, `high`, `xhigh`, `max`; sent as `reasoning_effort`, with `off` sent as `none`), and a
+per-model `request` table merged over the provider's. A text-only model rejects images before the
+request is sent.
+
+These models run on Claude Code's harness shape: its non-Claude lean system prompt, its Bash,
+Read, Edit, Write, Glob, and Grep function tools with a text-only reader, and its compaction
+prompt. That applies even when a gateway model ID looks native, such as `openai/...` on OpenRouter.
+Native Codex and Claude tools need their own protocols. Switching between two models on these
+accounts starts a fresh context. Prices are not shown; run cost stays `null`, as for every other
+provider.
+
+Repository `happy.toml` files cannot configure these providers. [Reload the
+daemon](#applying-configuration-changes) after changing them, from a shell whose environment holds
+the `api_key_env` variable.
 
 ## Theme and display
 
