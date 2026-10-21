@@ -13,7 +13,9 @@ const mutationId = Type.Optional(Type.String({ minLength: 1, maxLength: 1_024 })
 export const createStemCellRequestSchema = Type.Object(
     {
         id: Type.Optional(cuid2Schema),
-        sectionId: Type.Optional(Type.Union([cuid2Schema, Type.Null()])),
+        sectionId: Type.Optional(
+            Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
+        ),
         mutationId,
     },
     { additionalProperties: false },
@@ -50,6 +52,27 @@ export const spaceAttentionRequestSchema = Type.Object(
 
 /** A body carrying nothing but an optional mutation ID. */
 export const spaceTidyRequestSchema = Type.Object({ mutationId }, { additionalProperties: false });
+
+export const updateSpaceSidebarRequestSchema = Type.Object(
+    {
+        html: Type.String({ maxLength: 131072 }),
+        baseVersion: Type.Integer({ minimum: 1 }),
+        mutationId: Type.String({ minLength: 1, maxLength: 1024 }),
+    },
+    { additionalProperties: false },
+);
+export const spaceSidebarObservationsRequestSchema = Type.Object(
+    {
+        visibleSpaceIds: Type.Array(cuid2Schema, { maxItems: 1000, uniqueItems: true }),
+        collapsed: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 128 }), {
+                maxItems: 1000,
+                uniqueItems: true,
+            }),
+        ),
+    },
+    { additionalProperties: false },
+);
 
 /**
  * One sidebar row as clients see it: stored placement plus its content resolved live. A row whose

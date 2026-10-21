@@ -1,127 +1,83 @@
-import { createId } from "@paralleldrive/cuid2";
 import { cuid2Schema, defineAgentTool, type AnyAgentTool } from "@slopus/happy-agent-base";
 import { Type, type Static } from "@sinclair/typebox";
-
-import { spaceIconSlugSchema, spaceTextSchema, spaceVisibilitySchema } from "../Space.js";
+import { SIDEBAR_STYLES } from "../../artifacts/index.js";
+import { spaceIconSlugSchema } from "../Space.js";
 import type { SpacesModule } from "../SpacesModule.js";
 
-const textResultSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
-type TextResult = Static<typeof textResultSchema>;
-const toLLM = (result: TextResult) => [{ type: "text" as const, text: result.text }];
-
+const resultSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
+const toLLM = (result: Static<typeof resultSchema>) => [
+    { type: "text" as const, text: result.text },
+];
 const emptySchema = Type.Object({}, { additionalProperties: false });
-
-const placeSpaceSchema = Type.Object(
+const editsSchema = Type.Object(
     {
-        spaceId: cuid2Schema,
-        sectionId: Type.Union([cuid2Schema, Type.Null()], {
-            description: "The section to put the row in, or null for directly under Happy.",
-        }),
-        afterId: Type.Optional(
-            Type.Union([cuid2Schema, Type.Null()], {
-                description: "Put the row after this row of the same section. Omit for the top.",
-            }),
+        baseVersion: Type.Integer({ minimum: 1 }),
+        edits: Type.Array(
+            Type.Object(
+                {
+                    oldText: Type.String({ minLength: 1, maxLength: 131072 }),
+                    newText: Type.String({ maxLength: 131072 }),
+                },
+                { additionalProperties: false },
+            ),
+            { minItems: 1, maxItems: 64 },
         ),
     },
     { additionalProperties: false },
 );
-
-const setVisibilitySchema = Type.Object(
-    {
-        spaceId: cuid2Schema,
-        visibility: spaceVisibilitySchema,
-    },
-    { additionalProperties: false },
-);
-
-const setIconSchema = Type.Object(
+const iconSchema = Type.Object(
     { spaceId: cuid2Schema, slug: spaceIconSlugSchema },
     { additionalProperties: false },
 );
 
-const updateSectionSchema = Type.Object(
-    {
-        sectionId: Type.Optional(
-            Type.Union([cuid2Schema], { description: "Omit to create a new section." }),
-        ),
-        name: Type.Optional(spaceTextSchema),
-        visibleCount: Type.Optional(
-            Type.Union([Type.Integer({ minimum: 1, maximum: 100 }), Type.Null()], {
-                description: "Show only the first rows; null shows them all.",
-            }),
-        ),
-        afterSectionId: Type.Optional(
-            Type.Union([cuid2Schema, Type.Null()], {
-                description: "Put the section after this one; null for first. Omit to keep it.",
-            }),
-        ),
-    },
-    { additionalProperties: false },
-);
-
-const removeSectionSchema = Type.Object(
-    { sectionId: cuid2Schema },
-    { additionalProperties: false },
-);
-
-/**
- * Prioritizing's whole tool array. Everything that moves a row or a section is queued for the next
- * calm moment; only icons apply at once. Each tool restates its outcome so
- * Prioritizing never has to guess whether a change already happened.
- */
-export function prioritizingTools(spaces: SpacesModule, ownerUserId: string): AnyAgentTool[] {
+/** One fixed tool surface; layout changes all enter the existing calm batch. */
+export function prioritizingTools(
+    spaces: SpacesModule,
+    ownerUserId: string,
+    agentId: string,
+): AnyAgentTool[] {
     return [
         defineAgentTool({
             name: "list_sidebar",
-            // Prioritizing has no tool search, so its whole array is loaded at once.
             defer: false,
-            capabilities: ["Read the person's whole sidebar with row and section IDs."],
+            capabilities: ["Read the person's sidebar artifact and live spaces."],
             description:
-                "Show the person's sidebar: sections in order, the rows in each with their IDs, icons, state, and last activity, rows under Happy, Older, hidden rows, and changes already queued.",
+                "Read {artifactId, version, html, spaces, observations, manualSpaceIds}. The HTML nesting is the authoritative layout. Pending edits are included with the version your next edit must use.",
             parameters: emptySchema,
-            returnType: textResultSchema,
+            returnType: resultSchema,
             durable: true,
             shouldReviewInAutoMode: () => false,
-            execute: async (ctx) => ({ text: await spaces.prioritizingOverview(ctx, ownerUserId) }),
-            toLLM,
-        }),
-        defineAgentTool({
-            name: "place_space",
-            defer: false,
-            capabilities: ["Queue moving a sidebar row into a section."],
-            description:
-                "Queue moving a row into a section (or directly under Happy with sectionId null), at the top or after another row. Placing a row shows it and settles its placement. Applies at the next calm moment.",
-            parameters: placeSpaceSchema,
-            returnType: textResultSchema,
-            durable: true,
-            shouldReviewInAutoMode: () => false,
-            execute: async (ctx, input: Static<typeof placeSpaceSchema>) => ({
-                text: await spaces.queueChange(ctx, ownerUserId, {
-                    type: "place",
-                    spaceId: input.spaceId,
-                    sectionId: input.sectionId,
-                    ...(input.afterId === undefined ? {} : { afterId: input.afterId }),
-                }),
+            execute: async (ctx) => ({
+                text: JSON.stringify(await spaces.prioritizingSidebar(ctx, ownerUserId)),
             }),
             toLLM,
         }),
         defineAgentTool({
-            name: "set_space_visibility",
+            name: "edit_sidebar",
             defer: false,
-            capabilities: ["Queue showing, folding, or hiding a sidebar row."],
+            capabilities: ["Edit the person's sidebar artifact."],
             description:
-                'Queue showing a row, folding it into Older ("folded"), or hiding it ("hidden"). Hidden rows stay in History; nothing is deleted. Applies at the next calm moment.',
-            parameters: setVisibilitySchema,
-            returnType: textResultSchema,
+                "Apply sequential exact-text edits to the sidebar HTML. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Keep Happy first, manual moves unchanged, and recent work in place. New pending work may receive its first placement.",
+            parameters: editsSchema,
+            returnType: resultSchema,
             durable: true,
             shouldReviewInAutoMode: () => false,
-            execute: async (ctx, input: Static<typeof setVisibilitySchema>) => ({
-                text: await spaces.queueChange(ctx, ownerUserId, {
-                    type: "visibility",
-                    spaceId: input.spaceId,
-                    visibility: input.visibility,
-                }),
+            execute: async (ctx, input: Static<typeof editsSchema>, call) => ({
+                text: await spaces.editSidebar(ctx, ownerUserId, input, call.id),
             }),
+            toLLM,
+        }),
+        defineAgentTool({
+            name: "get_sidebar_styles",
+            defer: false,
+            capabilities: ["Read the sidebar's allowed elements, classes, and theme tokens."],
+            description:
+                "Read the published HTML element/attribute contract, allowed classes, and light/dark theme tokens. The sidebar inherits the app theme; do not author style elements, inline styles, or JavaScript.",
+            parameters: emptySchema,
+            returnType: resultSchema,
+            durable: true,
+            shouldReviewInAutoMode: () => false,
+            execute: async () => ({ text: JSON.stringify(SIDEBAR_STYLES) }),
             toLLM,
         }),
         defineAgentTool({
@@ -129,69 +85,16 @@ export function prioritizingTools(spaces: SpacesModule, ownerUserId: string): An
             defer: false,
             capabilities: ["Set a sidebar row's icon."],
             description:
-                "Set a row's icon to one slug of the icon library. Applies at once, because it moves nothing.",
-            parameters: setIconSchema,
-            returnType: textResultSchema,
+                "Set a row's icon from the icon library. Applies immediately because it moves nothing.",
+            parameters: iconSchema,
+            returnType: resultSchema,
             durable: true,
             shouldReviewInAutoMode: () => false,
-            execute: async (ctx, input: Static<typeof setIconSchema>) => ({
+            execute: async (ctx, input: Static<typeof iconSchema>) => ({
                 text: await spaces.setIcon(ctx, ownerUserId, input.spaceId, input.slug),
             }),
             toLLM,
         }),
-        defineAgentTool({
-            name: "update_section",
-            defer: false,
-            capabilities: ["Queue creating, renaming, or reordering a sidebar section."],
-            description:
-                "Create a section (omit sectionId and give a name) or change one: its name, visible count, or position. Returns the section ID, which place_space can use right away. Names are unique: creating a name that exists returns the existing section. Applies at the next calm moment.",
-            parameters: updateSectionSchema,
-            returnType: textResultSchema,
-            durable: true,
-            shouldReviewInAutoMode: () => false,
-            execute: async (ctx, input: Static<typeof updateSectionSchema>, call) => {
-                const create = input.sectionId === undefined;
-                if (create && input.name === undefined) {
-                    throw new Error("A new section needs a name.");
-                }
-                // A retried call creates the same section rather than a second one.
-                const sectionId =
-                    input.sectionId ??
-                    (await call.kv.getOrCreate(ctx, "sectionId", () => createId()));
-                return {
-                    text: await spaces.queueChange(ctx, ownerUserId, {
-                        type: "section",
-                        sectionId,
-                        create,
-                        ...(input.name === undefined ? {} : { name: input.name }),
-                        ...(input.visibleCount === undefined
-                            ? {}
-                            : { visibleCount: input.visibleCount }),
-                        ...(input.afterSectionId === undefined
-                            ? {}
-                            : { afterSectionId: input.afterSectionId }),
-                    }),
-                };
-            },
-            toLLM,
-        }),
-        defineAgentTool({
-            name: "remove_section",
-            defer: false,
-            capabilities: ["Queue removing a sidebar section."],
-            description:
-                "Queue removing a section. Rows still in it when the batch applies fold into Older. Applies at the next calm moment.",
-            parameters: removeSectionSchema,
-            returnType: textResultSchema,
-            durable: true,
-            shouldReviewInAutoMode: () => false,
-            execute: async (ctx, input: Static<typeof removeSectionSchema>) => ({
-                text: await spaces.queueChange(ctx, ownerUserId, {
-                    type: "remove_section",
-                    sectionId: input.sectionId,
-                }),
-            }),
-            toLLM,
-        }),
+        ...spaces.sidebarArtifactTools(agentId),
     ];
 }

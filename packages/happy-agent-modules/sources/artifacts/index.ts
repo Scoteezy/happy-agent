@@ -81,3 +81,11 @@ export {
     type ArtifactProxy,
     type ArtifactFileChanges,
 } from "./ArtifactsModule.js";
+export {
+    parseSidebar,
+    sidebarNodes,
+    escapeSidebarText,
+    SIDEBAR_STYLES,
+    SidebarValidationError,
+    type SidebarNode,
+} from "./SidebarDocument.js";

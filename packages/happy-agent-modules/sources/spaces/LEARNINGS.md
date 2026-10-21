@@ -1,5 +1,18 @@
 # Spaces — learnings
 
+## The authored document owns the experimental layout
+
+The sidebar is one versioned artifact per person. HTML nesting owns its composition; rows still
+own identity and live activity. Document edits never approximate or synchronize legacy section
+and order fields. Every writer uses CAS, and validation also runs through ordinary artifact tools.
+The first placement of new pending work is permitted after its first message; later manager moves
+respect the two-hour guard, Happy's position, and the person's moves and folds. Section + creation
+is manual placement from the outset. This preserves immediate new-work organization without
+letting repeated tidies move the work the person is doing.
+
+Maintenance notes have durable runs without provider events. Live API delivery must announce the
+terminal run as well as its message so an open chat can render exactly the note found after reload.
+
 ## Notes in Happy's chat are one factual line
 
 Kirill and the UX review asked for terse notes such as "Moved Preview viewer release to Older."

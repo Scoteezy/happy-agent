@@ -37,6 +37,7 @@ import {
 const updateArtifactToolInputSchema = Type.Object(
     {
         artifactId: cuid2Schema,
+        baseVersion: Type.Optional(Type.Integer({ minimum: 1 })),
         title: Type.Optional(artifactTitleSchema),
         url: Type.Optional(
             Type.String({
@@ -170,6 +171,7 @@ export function updateArtifactTool(
             const actor = await artifacts.actorFor(ctx, agentId);
             const updated = await artifacts.update(ctx, {
                 artifactId: input.artifactId,
+                ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
                 operationId: call.id,
                 ...(current.live === undefined ? {} : { expectedRevision: current.revision }),
                 ...(input.title === undefined ? {} : { title: input.title }),

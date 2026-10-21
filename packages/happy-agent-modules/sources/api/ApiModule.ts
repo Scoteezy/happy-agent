@@ -53,7 +53,7 @@ import {
     updateSecretRequestSchema,
     archiveBotRequestSchema,
     archiveTaskRequestSchema,
-    createArtifactRequestSchema,
+    createArtifactRequestSchema as publishedCreateArtifactRequestSchema,
     createBotRequestSchema,
     createTaskRequestSchema,
     renameTaskRequestSchema,
@@ -70,7 +70,7 @@ import {
     deleteArtifactRequestSchema,
     nodeConfigPatchSchema,
     voiceConfigPatchSchema,
-    updateArtifactRequestSchema,
+    updateArtifactRequestSchema as publishedUpdateArtifactRequestSchema,
     providerVerificationRequestSchema,
     providerUsageRefreshRequestSchema,
     userIdsSchema,
@@ -121,6 +121,8 @@ import {
     ArtifactNotFoundError,
     ArtifactsModule,
     ArtifactTooLargeError,
+    SidebarValidationError,
+    artifactTypeSchema,
     DEFAULT_ARTIFACT_PAGE_SIZE,
     MAX_ARTIFACT_PAGE_SIZE,
     type ArtifactAuthor,
@@ -354,6 +356,7 @@ import {
 } from "./projectCredentialDiagnostics.js";
 import {
     SpaceConflictError,
+    SidebarConflictError,
     SpaceInputError,
     SpaceNotFoundError,
     SpacesModule,
@@ -363,6 +366,8 @@ import {
 } from "../spaces/index.js";
 import {
     createStemCellRequestSchema,
+    updateSpaceSidebarRequestSchema,
+    spaceSidebarObservationsRequestSchema,
     updateSpaceRequestSchema,
     updateSpaceSectionRequestSchema,
     spaceBatchResource,
@@ -374,6 +379,14 @@ import {
 import { SubtaskInputError, SubtasksModule } from "../subtasks/index.js";
 
 const API_PROTOCOL_VERSION = 31;
+const createArtifactRequestSchema = Type.Composite([
+    Type.Omit(publishedCreateArtifactRequestSchema, ["type"]),
+    Type.Object({ type: artifactTypeSchema }),
+]);
+const updateArtifactRequestSchema = Type.Composite([
+    publishedUpdateArtifactRequestSchema,
+    Type.Object({ baseVersion: Type.Optional(Type.Integer({ minimum: 1 })) }),
+]);
 
 /**
  * How many archived agents the desktop bootstrap carries. Recent history is what the desktop
@@ -2724,6 +2737,25 @@ export class ApiModule implements AgentModule {
                     this.#mutationIds.getStore(),
                     async () => {
                         for (const message of eligible) {
+                            // Service notes have a durable maintenance run but no provider event.
+                            // Announce its terminal snapshot so an open chat can attach the note.
+                            if (
+                                message.runId !== undefined &&
+                                !this.#announcedTerminalRuns.has(message.runId)
+                            ) {
+                                const run = await this.#history.run(ctx, agentId, message.runId);
+                                if (run !== undefined && run.status !== "running") {
+                                    boundedAdd(
+                                        this.#announcedTerminalRuns,
+                                        run.id,
+                                        MAX_ANNOUNCED_TERMINAL_RUNS,
+                                    );
+                                    this.#journal.append("run.finished", {
+                                        agentId,
+                                        run: await this.#runResource(ctx, run),
+                                    });
+                                }
+                            }
                             // Reserved is not announced. Only a successfully journaled creation may
                             // suppress this durable fallback; a failed conversion leaves it eligible.
                             if (this.#announcedExecutionConfigurations.delete(message.recordId))
@@ -6852,6 +6884,42 @@ export class ApiModule implements AgentModule {
         if (spaces === undefined || !url.pathname.startsWith("/v0/spaces")) return false;
         const owner = this.#spaceOwner(ctx);
         try {
+            if (
+                url.pathname === "/v0/spaces/sidebar" &&
+                (request.method === "GET" || request.method === "PUT")
+            ) {
+                const document =
+                    request.method === "GET"
+                        ? await spaces.sidebar(ctx, owner)
+                        : await this.#withMutationId(undefined, async () => {
+                              const body = await bodyAs(
+                                  request,
+                                  updateSpaceSidebarRequestSchema,
+                                  "sidebar update",
+                              );
+                              return await this.#withMutationId(
+                                  body.mutationId,
+                                  async () => await spaces.updateSidebar(ctx, owner, body),
+                              );
+                          });
+                const rows: Record<string, unknown>[] = [];
+                for (const row of document.spaces) {
+                    const resource = await this.#spaceResource(ctx, row);
+                    if (resource !== undefined) rows.push(resource);
+                }
+                sendJson(response, 200, { ...document, spaces: rows });
+                return true;
+            }
+            if (url.pathname === "/v0/spaces/sidebar/observations" && request.method === "POST") {
+                const body = await bodyAs(
+                    request,
+                    spaceSidebarObservationsRequestSchema,
+                    "sidebar observations",
+                );
+                await spaces.observeSidebar(ctx, owner, body);
+                response.writeHead(204).end();
+                return true;
+            }
             if (request.method === "GET" && url.pathname === "/v0/spaces") {
                 const cursor = this.#journal.cursor();
                 const snapshot = await spaces.snapshot(ctx, owner);
@@ -6958,6 +7026,19 @@ export class ApiModule implements AgentModule {
             }
         } catch (error: unknown) {
             if (error instanceof SpaceNotFoundError) throw notFound(error.message);
+            if (error instanceof SidebarValidationError)
+                throw new ApiError(400, "invalid_request", error.message, {
+                    diagnostics: error.diagnostics,
+                });
+            if (error instanceof SidebarConflictError)
+                throw new ApiError(409, "conflict", error.message, {
+                    currentVersion: error.currentVersion,
+                });
+            if (error instanceof ArtifactConflictError)
+                throw new ApiError(409, "conflict", error.message, {
+                    currentVersion: error.artifact?.latestVersion,
+                });
+            if (error instanceof ArtifactInputError) throw invalidRequest(error.message);
             if (error instanceof SpaceInputError) throw invalidRequest(error.message);
             if (error instanceof SpaceConflictError) {
                 throw new ApiError(409, "conflict", error.message);
@@ -7207,6 +7288,9 @@ export class ApiModule implements AgentModule {
                         await artifacts.update(ctx, {
                             artifactId,
                             expectedRevision: current.revision,
+                            ...(body.baseVersion === undefined
+                                ? {}
+                                : { baseVersion: body.baseVersion }),
                             ...(body.title === undefined ? {} : { title: body.title }),
                             ...(body.background === undefined
                                 ? {}
@@ -7261,6 +7345,10 @@ export class ApiModule implements AgentModule {
             }
             return false;
         } catch (error: unknown) {
+            if (error instanceof SidebarValidationError)
+                throw new ApiError(400, "invalid_request", error.message, {
+                    diagnostics: error.diagnostics,
+                });
             if (error instanceof ArtifactInputError) throw invalidRequest(error.message);
             if (error instanceof ArtifactNotFoundError) throw notFound(error.message);
             if (error instanceof ArtifactTooLargeError) {

@@ -1,5 +1,16 @@
 # Spaces
 
+The experimental sidebar is a `sidebar` artifact. `sidebar` lazily creates it with Prioritizing,
+seeded from the existing layout; `updateSidebar` commits the person's CAS write, while
+`editSidebar` queues one exact-edit version per call for the existing calm batch. Legacy layout
+fields remain independent. Lifecycle events insert new rows after Happy and remove archived rows
+without flattening authored HTML. Observations and manual moves join the next manager brief.
+
+Prioritizing reads `list_sidebar` or the ordinary artifact tools, writes `edit_sidebar` or
+`update_artifact`, and reads the shipped element/class/theme contract with `get_sidebar_styles`.
+It no longer receives section/place/visibility tools. One applied batch records one factual note;
+the API publishes the note's maintenance run as well as its live message.
+
 One flat sidebar per person, kept tidy by Prioritizing, a subtask of Happy.
 
 ```text

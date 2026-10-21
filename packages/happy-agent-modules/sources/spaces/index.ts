@@ -22,3 +22,4 @@ export { spaceEventSchema, type SpaceEvent, type SpaceEventListener } from "./Sp
 export { spaceMigrations, SPACES_TABLE, SPACE_SECTIONS_TABLE } from "./SpaceMigrations.js";
 export { SPACE_IDLE_MS, SpacesModule } from "./SpacesModule.js";
 export { SPACE_ICON_SLUGS } from "./impl/spaceIconSlugs.js";
+export { SidebarConflictError } from "./impl/sidebarLayout.js";

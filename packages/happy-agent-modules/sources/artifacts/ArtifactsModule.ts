@@ -22,6 +22,9 @@ import { DurableFunctionsModule } from "../durableFunctions/index.js";
 import { ProjectsModule } from "../projects/index.js";
 import { TasksModule } from "../tasks/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
+import type { SpacesModule } from "../spaces/index.js";
+import { parseSidebar } from "./SidebarDocument.js";
+import { readFile } from "node:fs/promises";
 
 import {
     ARTIFACT_UPLOAD_EXPIRY_FUNCTION,
@@ -171,6 +174,32 @@ export class ArtifactsModule implements AgentModule {
     readonly #listeners = new Set<ArtifactEventListener>();
     #agents: AgentSystemRef | undefined;
     #home: Promise<void> | undefined;
+    #spaces: SpacesModule | undefined;
+
+    /** Spaces owns identity and author authority; Artifacts owns validation and immutable bytes. */
+    bindSpaces(spaces: SpacesModule): void {
+        this.#spaces = spaces;
+    }
+
+    /** An immutable committed operation, used by document transport retries. */
+    async versionForOperation(
+        ctx: Context,
+        artifactId: string,
+        operationId: string,
+    ): Promise<ArtifactVersion | undefined> {
+        const number = await queryArtifactVersionForOperation(ctx, artifactId, operationId);
+        return number === undefined
+            ? undefined
+            : await queryArtifactVersion(ctx, artifactId, number);
+    }
+
+    sidebarTools(agentId: string): AnyAgentTool[] {
+        return [
+            readArtifactTool(this),
+            readArtifactFileTool(this),
+            updateArtifactTool(this, this.#compute, agentId),
+        ];
+    }
 
     constructor(
         config: ConfigModule,
@@ -509,6 +538,13 @@ export class ArtifactsModule implements AgentModule {
                     );
                 }
             }
+            if (input.type === "sidebar") {
+                const html = await readFile(this.#config.artifactContentPath(entry.sha256), "utf8");
+                parseSidebar(html);
+                if (this.#spaces === undefined || input.id === undefined)
+                    throw new ArtifactInputError("Sidebar artifacts are created by Spaces.");
+                await this.#spaces.validateSidebarWrite(txCtx, input.id, html, input.author);
+            }
             const background = input.background?.toLowerCase();
             const display = input.display;
             const now = Date.now();
@@ -569,6 +605,19 @@ export class ArtifactsModule implements AgentModule {
      * is not made again.
      */
     async update(ctx: Context, input: UpdateArtifactInput): Promise<ArtifactRecord> {
+        return await this.#update(ctx, input, false);
+    }
+
+    /** Spaces calls this only after the calm check and revalidation of its durable proposal. */
+    async commitSidebar(ctx: Context, input: UpdateArtifactInput): Promise<ArtifactRecord> {
+        return await this.#update(ctx, input, true);
+    }
+
+    async #update(
+        ctx: Context,
+        input: UpdateArtifactInput,
+        sidebarBatch: boolean,
+    ): Promise<ArtifactRecord> {
         if (!Value.Check(updateArtifactInputSchema, input)) {
             throw new ArtifactInputError(
                 "The artifact update is invalid. Check its title and file paths.",
@@ -641,6 +690,15 @@ export class ArtifactsModule implements AgentModule {
                     );
                 }
             }
+            if (current.type === "sidebar") {
+                if (input.baseVersion === undefined)
+                    throw new ArtifactInputError("Sidebar writes require baseVersion.");
+                if (input.baseVersion !== current.latestVersion)
+                    throw new ArtifactConflictError(
+                        "The sidebar changed. Read its current version before editing.",
+                        current,
+                    );
+            }
             const latest = await queryArtifactVersion(txCtx, current.id, current.latestVersion);
             if (latest === undefined) throw new Error("Artifact storage lost the latest version.");
             const kept = new Map(
@@ -660,8 +718,26 @@ export class ArtifactsModule implements AgentModule {
                 current.type,
                 [...kept.values()],
                 input.files ?? [],
+                current.type !== "sidebar" || sidebarBatch || input.author.kind !== "agent",
             );
             const now = Math.max(Date.now(), current.updatedAt + 1);
+            if (current.type === "sidebar") {
+                const html = await readFile(this.#config.artifactContentPath(entry.sha256), "utf8");
+                parseSidebar(html);
+                if (this.#spaces === undefined)
+                    throw new ArtifactInputError("Spaces is unavailable.");
+                await this.#spaces.validateSidebarWrite(txCtx, current.id, html, input.author);
+                if (!sidebarBatch && input.author.kind === "agent") {
+                    await this.#spaces.queueSidebarArtifact(
+                        txCtx,
+                        current.id,
+                        html,
+                        input.baseVersion!,
+                        input.operationId ?? createId(),
+                    );
+                    return current;
+                }
+            }
             const title = input.title ?? current.title;
             const background =
                 input.background === undefined
@@ -1023,6 +1099,7 @@ export class ArtifactsModule implements AgentModule {
         type: ArtifactType,
         kept: readonly ArtifactFile[],
         placements: readonly ArtifactPlacement[],
+        consume = true,
     ): Promise<{ readonly files: ArtifactFile[]; readonly entry: ArtifactFile }> {
         if (new Set(placements.map((placement) => placement.path)).size !== placements.length) {
             throw new ArtifactInputError("Each path can be written only once per version.");
@@ -1057,7 +1134,7 @@ export class ArtifactsModule implements AgentModule {
             compareArtifactPaths(left.path, right.path),
         );
         const entry = checkArtifactFiles(type, files, notUtf8);
-        for (const placement of placements) {
+        for (const placement of consume ? placements : []) {
             await deleteArtifactUpload(ctx, placement.uploadId);
             await this.#durableFunctions.cancel(ctx, uploadOperationId(placement.uploadId));
         }

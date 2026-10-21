@@ -162,7 +162,7 @@ export const spacePendingChangeSchema = Type.Union([
 
 const spacePositionSchema = Type.Object(
     {
-        sectionId: Type.Union([cuid2Schema, Type.Null()]),
+        sectionId: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
         sectionName: Type.Union([Type.String(), Type.Null()]),
         /** The row's position in its section, under Happy, or in Older. */
         index: Type.Integer({ minimum: 0 }),
@@ -184,7 +184,7 @@ export const spaceBatchChangeSchema = Type.Object(
 
 export const spaceBatchSectionChangeSchema = Type.Object(
     {
-        sectionId: cuid2Schema,
+        sectionId: Type.String({ minLength: 1, maxLength: 128 }),
         name: Type.String(),
         change: Type.Union([
             Type.Literal("created"),
@@ -213,6 +213,34 @@ export const spaceBatchSchema = Type.Object(
 export const spaceOwnerStateSchema = Type.Object(
     {
         ownerUserId: spaceOwnerIdSchema,
+        sidebarArtifactId: Type.Optional(cuid2Schema),
+        sidebarManualIds: Type.Optional(Type.Array(cuid2Schema, { maxItems: 1000 })),
+        sidebarPlacedIds: Type.Optional(Type.Array(cuid2Schema, { maxItems: 1000 })),
+        sidebarPending: Type.Optional(
+            Type.Array(
+                Type.Object(
+                    {
+                        html: Type.String({ maxLength: 131072 }),
+                        baseVersion: spaceVersionSchema,
+                        operationId: Type.String({ minLength: 1, maxLength: 256 }),
+                    },
+                    { additionalProperties: false },
+                ),
+                { maxItems: 32 },
+            ),
+        ),
+        sidebarObservations: Type.Optional(
+            Type.Object(
+                {
+                    visibleSpaceIds: Type.Array(cuid2Schema, { maxItems: 1000 }),
+                    collapsed: Type.Optional(
+                        Type.Array(Type.String({ maxLength: 128 }), { maxItems: 1000 }),
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+        ),
+        sidebarBrief: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 32 })),
         prioritizingAgentId: Type.Optional(cuid2Schema),
         /**
          * The person asked for something to happen now — a move in their own words, or a new sidebar to organise —
