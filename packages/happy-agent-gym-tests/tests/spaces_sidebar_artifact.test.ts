@@ -1,6 +1,7 @@
 import { createAgentGym, frameEvent, type AgentGym } from "@slopus/happy-agent-gym";
 import { afterEach, expect, it } from "vitest";
 import { sidebarGym } from "./support/sidebarGym.js";
+import { surfaceTeamClients } from "./support/surfaceTeamClients.js";
 
 it("keeps queued HTML when ordinary artifact tools change only metadata", async () => {
     const h = await sidebarGym();
@@ -68,6 +69,37 @@ it("keeps queued HTML when ordinary artifact tools change only metadata", async 
 }, 120000);
 
 const running = new Set<AgentGym>();
+
+it("keeps each person's sidebar references and ordinary writes owner-authorized", async () => {
+    const { gym, alice, bob, aliceHttp, bobHttp } = await surfaceTeamClients({
+        inference: () => ({ content: [{ type: "text", text: "Done." }] }),
+    });
+    running.add(gym);
+    const own = await aliceHttp.ok<Sidebar>("GET", "/v0/spaces/sidebar");
+    const other = await bobHttp.ok<Sidebar>("GET", "/v0/spaces/sidebar");
+    expect(own.artifactId).not.toBe(other.artifactId);
+    const resource = (await alice.getArtifact(own.artifactId)).artifact;
+    const change = {
+        baseVersion: own.version,
+        files: [
+            { path: "index.html", text: own.html.replace("</nav>", "<p>Unauthorized</p></nav>") },
+        ],
+    };
+    await expect(
+        bob.updateArtifact(own.artifactId, change, { ifMatch: resource.version }),
+    ).rejects.toMatchObject({ status: 404 });
+    const unknown = await bobHttp.request("PUT", "/v0/spaces/sidebar", {
+        baseVersion: other.version,
+        mutationId: "other-ref",
+        html: other.html.replace(
+            "</nav>",
+            `<happy-space ref="${own.spaces[0]!.id}"></happy-space></nav>`,
+        ),
+    });
+    expect(unknown.status).toBe(400);
+    expect(unknown.body).toHaveProperty("diagnostics");
+    expect((await aliceHttp.ok<Sidebar>("GET", "/v0/spaces/sidebar")).html).toBe(own.html);
+}, 120000);
 afterEach(async () => {
     await Promise.all([...running].map((gym) => gym.dispose()));
     running.clear();
@@ -133,6 +165,13 @@ it("validates every write, preserves CAS, replays mutations and persists sidebar
     };
     await expect(
         gym.client.updateArtifact(initial.artifactId, ordinary, { ifMatch: artifact.version }),
+    ).rejects.toMatchObject({ status: 400, body: { diagnostics: expect.any(Array) } });
+    const extraFile = {
+        baseVersion: committed.version,
+        files: [{ path: "extra.html", text: "<p>extra</p>" }],
+    };
+    await expect(
+        gym.client.updateArtifact(initial.artifactId, extraFile, { ifMatch: artifact.version }),
     ).rejects.toMatchObject({ status: 400, body: { diagnostics: expect.any(Array) } });
     expect((await get()).html).toBe(html);
     await gym.restart();

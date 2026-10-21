@@ -24,7 +24,7 @@ import { ProjectsModule } from "../projects/index.js";
 import { TasksModule } from "../tasks/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
 import type { SpacesModule } from "../spaces/index.js";
-import { parseSidebar } from "./SidebarDocument.js";
+import { parseSidebar, SidebarValidationError } from "./SidebarDocument.js";
 import { readFile } from "node:fs/promises";
 import {
     insertArtifactInline,
@@ -1215,7 +1215,14 @@ export class ArtifactsModule implements AgentModule {
         const files = [...byPath.values()].sort((left, right) =>
             compareArtifactPaths(left.path, right.path),
         );
-        const entry = checkArtifactFiles(type, files, notUtf8);
+        let entry: ArtifactFile;
+        try {
+            entry = checkArtifactFiles(type, files, notUtf8);
+        } catch (error: unknown) {
+            if (type === "sidebar" && error instanceof ArtifactInputError)
+                throw new SidebarValidationError(error.message);
+            throw error;
+        }
         for (const placement of consume ? placements : []) {
             await deleteArtifactUpload(ctx, placement.uploadId);
             await this.#durableFunctions.cancel(ctx, uploadOperationId(placement.uploadId));

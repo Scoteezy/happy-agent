@@ -7349,6 +7349,7 @@ export class ApiModule implements AgentModule {
                 throw new ApiError(400, "invalid_request", error.message, {
                     diagnostics: error.diagnostics,
                 });
+            if (error instanceof SpaceNotFoundError) throw notFound(error.message);
             if (error instanceof ArtifactInputError) throw invalidRequest(error.message);
             if (error instanceof ArtifactNotFoundError) throw notFound(error.message);
             if (error instanceof ArtifactTooLargeError) {
