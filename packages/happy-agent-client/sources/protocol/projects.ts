@@ -132,8 +132,6 @@ export const cloneProjectRequestSchema = Type.Object({
     mutationId: Type.Optional(mutationIdSchema),
     /** The runner to clone onto, chosen as in registration. Requires protocol 26. */
     runnerId: Type.Optional(runnerIdSchema),
-    /** Names the stored credential kind to clone with. */
-    secret: Type.Optional(Type.Object({ kind: Type.Literal("github") })),
     source: remoteSourceSchema,
 });
 export type CloneProjectRequest = Static<typeof cloneProjectRequestSchema>;

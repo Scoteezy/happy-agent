@@ -227,6 +227,9 @@ capabilities instead of requiring equality with their own protocol number. A cli
 a newer protocol for a capability it needs and must explain that an upgrade is required when the
 daemon is too old. The `daemon` product version is for display and diagnostics only.
 
+The retired GitHub credential selector on project cloning is an explicit compatibility exception:
+clients must omit `secret` from `POST /v0/projects/clone`.
+
 Protocol 24 guarantees bot creation without a supplied name and the automatic naming behavior
 described below. A client that depends on unnamed bot creation requires protocol 24 or newer;
 with an older compatible daemon it must supply a deliberate name or leave that feature unavailable.
@@ -3895,7 +3898,6 @@ Request:
 {
     "name": "rig",
     "source": { "kind": "github", "repository": "slopus/rig" },
-    "secret": { "kind": "github" },
     "projectId": "k2h4j5l6"
 }
 ```
@@ -3903,10 +3905,11 @@ Request:
 - `name` — the folder name for the clone.
 - `source` — `{ "kind": "github", "repository": "owner/name" }` or `{ "kind": "git", "url":
 "https://..." }`. Only plain HTTPS remotes without embedded credentials are accepted.
-- `secret` — optional; names the stored credential kind to clone with (currently
-  `{ "kind": "github" }`).
 - `runnerId` — optional; the runner to clone onto, chosen as in registration.
 - `projectId` — optional client-supplied ID, as in registration.
+
+Clones use ordinary Git authentication configured on the machine that runs Git. The former
+`secret` selector is no longer accepted; requests containing it return `400 invalid_request`.
 
 Response — `202`: `{ "project": { ... } }`. The clone runs in the background: the project row
 exists immediately with `initialization.status` `"initializing"`, and settles through events
