@@ -197,6 +197,7 @@ describe("SkillsModule", () => {
         });
         expect(metadataUpdate).toEqual({
             lastMode: expect.objectContaining({ modelId: "openai/gpt-5.6-sol" }),
+            initialMode: null,
         });
 
         const values = new Map<string, unknown>();

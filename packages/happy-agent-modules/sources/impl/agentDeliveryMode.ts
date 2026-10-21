@@ -18,12 +18,12 @@ import type { Context } from "@steve.kite/stdlib";
  *
  * Agent Base holds no model for a new agent: the first message names it, and a person's message
  * always does. When an agent speaks first instead — a task's opening text, or the first word to an
- * unstarted task seeded with an idle draft, or the first word to a bot nobody has talked to yet — the
- * conversation runs on the seeded selection or sender's own selection while this installation still
- * offers it. If a seeded model is no longer offered by the installation (e.g. removed from the catalog
- * or deprecated), it falls back to the sender's own selection if offered, or the installation's
- * default model. A conversation that already has a mode and is not unstarted keeps it, so a later
- * message never overrides a person's choice. The permission mode is the one Agent Base gives a new
+ * idle task seeded with an initial creation mode, or the first word to a bot nobody has talked to yet — the
+ * conversation runs on the initial creation choice if one was explicitly chosen, or on the sender's own
+ * selection while this installation still offers it, and otherwise on the installation's default model.
+ * If an explicitly chosen creation model or its chosen effort/tier is no longer offered by the installation,
+ * an actionable error is thrown. A conversation that already has a lastMode keeps it, so a later
+ * message never overrides an accepted choice. The permission mode is the one Agent Base gives a new
  * agent, sent explicitly so the recorded mode is what the conversation actually runs with.
  *
  * `ctx` is the sender's: its agent context carries the selection the sender is running on.
@@ -35,69 +35,89 @@ export async function agentDeliveryMode(
     toAgentId: string,
 ): Promise<AgentDeliveryMode | undefined> {
     const config = await agents.config(ctx, toAgentId);
-    if (
-        config?.metadata?.["unstarted"] !== true &&
-        Value.Check(messageModeSchema, config?.metadata?.["lastMode"])
-    ) {
+    if (Value.Check(messageModeSchema, config?.metadata?.["lastMode"])) {
         return undefined;
     }
-    const lastMode = config?.metadata?.["lastMode"];
-    const draft = config?.metadata?.["draft"];
-    const seededMode =
-        (Value.Check(messageModeSchema, lastMode) ? (lastMode as MessageMode) : undefined) ??
-        (Value.Check(messageModeSchema, draft) ? (draft as MessageMode) : undefined);
-    const seeded =
-        seededMode !== undefined
-            ? models.find(
-                  (model) =>
-                      model.providerId === seededMode.providerId && model.id === seededMode.modelId,
-              )
-            : undefined;
+    const initialModeRaw = config?.metadata?.["initialMode"];
+    if (Value.Check(messageModeSchema, initialModeRaw)) {
+        const initialMode = initialModeRaw as MessageMode;
+        const model = models.find(
+            (candidate) =>
+                candidate.providerId === initialMode.providerId &&
+                candidate.id === initialMode.modelId,
+        );
+        if (model === undefined) {
+            throw new Error(
+                `The model "${initialMode.modelId}" from provider "${initialMode.providerId}" chosen at task creation is no longer available.`,
+            );
+        }
+        const requestedEffort = initialMode.effort as SessionReasoningEffort;
+        if (!model.effortLevels.includes(requestedEffort)) {
+            throw new Error(
+                `The effort "${requestedEffort}" chosen at task creation is no longer available for model "${model.id}".`,
+            );
+        }
+        const requestedTier = initialMode.serviceTier;
+        if (
+            requestedTier !== null &&
+            requestedTier !== undefined &&
+            model.serviceTiers?.includes(requestedTier) !== true
+        ) {
+            throw new Error(
+                `The service tier "${requestedTier}" chosen at task creation is no longer available for model "${model.id}".`,
+            );
+        }
+        const serviceTier = requestedTier ?? null;
+        return {
+            mode: {
+                providerId: model.providerId,
+                modelId: model.id,
+                effort: requestedEffort,
+                serviceTier,
+                permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
+            },
+            options: {
+                provider: model.providerId,
+                model: model.id,
+                effort: requestedEffort,
+                serviceTier,
+                permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
+            },
+        };
+    }
     const providerId = agentProvider(ctx);
     const modelId = agentModel(ctx);
-    const inherited =
-        seeded ?? models.find((model) => model.providerId === providerId && model.id === modelId);
+    const inherited = models.find(
+        (model) => model.providerId === providerId && model.id === modelId,
+    );
     const model = inherited ?? models[0];
     if (model === undefined) return undefined;
-    const requestedEffort: SessionReasoningEffort | undefined =
-        seededMode !== undefined
-            ? (seededMode.effort as SessionReasoningEffort)
-            : inherited === undefined
-              ? undefined
-              : agentEffort(ctx);
+    const requestedEffort = inherited === undefined ? undefined : agentEffort(ctx);
     const effort: SessionReasoningEffort =
         requestedEffort !== undefined && model.effortLevels.includes(requestedEffort)
             ? requestedEffort
             : model.defaultEffort;
-    const requestedTier =
-        seededMode !== undefined
-            ? seededMode.serviceTier
-            : inherited === undefined
-              ? undefined
-              : agentServiceTier(ctx);
+    const requestedTier = inherited === undefined ? undefined : agentServiceTier(ctx);
     const serviceTier =
         requestedTier !== undefined &&
         requestedTier !== null &&
         model.serviceTiers?.includes(requestedTier) === true
             ? requestedTier
             : null;
-    const permissionMode =
-        (seededMode !== undefined ? seededMode.permissionMode : undefined) ??
-        DEFAULT_AGENT_PERMISSION_MODE;
     return {
         mode: {
             providerId: model.providerId,
             modelId: model.id,
             effort,
             serviceTier,
-            permissionMode,
+            permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
         },
         options: {
             provider: model.providerId,
             model: model.id,
             effort,
             serviceTier,
-            permissionMode,
+            permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
         },
     };
 }

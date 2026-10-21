@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import type { Context } from "@steve.kite/stdlib";
+
 import type { SessionMessage } from "@/core/SessionContext.js";
 
 /**
@@ -59,9 +61,32 @@ export async function acpSessionRecordWrite(
 }
 
 /** Forget where the conversation stood, so a later process cannot continue a session it replaced. */
-export async function acpSessionRecordClear(directory: string, id: string): Promise<void> {
-    // Failing to clear a stale session record should not fail the session opening or turn.
-    await rm(recordPath(directory, id), { force: true }).catch(() => undefined);
+export async function acpSessionRecordClear(
+    directory: string,
+    id: string,
+    ctx?: Context,
+): Promise<void> {
+    const path = recordPath(directory, id);
+    try {
+        await rm(path, { force: true });
+    } catch (error) {
+        if ((error as { code?: string })?.code !== "ENOENT") {
+            ctx?.log.warn(
+                "Could not remove replaced ACP session record; writing tombstone.",
+                { id, path },
+                error,
+            );
+            // Overwrite with an invalid tombstone record so a stale pre-compaction session cannot be resumed.
+            try {
+                await writeFile(path, "{}", { mode: 0o600 });
+            } catch (tombstoneError) {
+                throw new Error(
+                    `Failed to clear or invalidate ACP session record for ${id}: ${String(tombstoneError)}`,
+                    { cause: error },
+                );
+            }
+        }
+    }
 }
 
 /**

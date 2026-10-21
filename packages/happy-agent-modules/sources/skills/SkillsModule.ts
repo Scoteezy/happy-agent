@@ -200,7 +200,10 @@ export class SkillsModule implements AgentModule {
                 serviceTier: input.mode.serviceTier as never,
             },
         );
-        await agents.updateMetadata(ctx, agentId, { lastMode: input.mode });
+        await agents.updateMetadata(ctx, agentId, {
+            lastMode: input.mode,
+            initialMode: null,
+        });
     }
 
     /** Discover a bounded page from the current skill catalog. */

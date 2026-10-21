@@ -1600,6 +1600,7 @@ export class HappyConnection implements HappySessionOperations, HappySpawnOperat
         // than the sender: it is what every composer opened on this session falls back to.
         await system.updateMetadata(ctx, agentId, {
             lastMode: modeForSelection(next) as never,
+            initialMode: null as never,
         });
     }
 

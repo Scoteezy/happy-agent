@@ -115,7 +115,12 @@ Chief, which owns Desktop tests and fixes.
 On the daemon side, `create_task` now accepts optional `model`, `effort`, `harness`, `provider`, and
 `serviceTier`, resolved through `CollaborationModule.selectAgentModel` identically to `create_agent`
 and `create_subtask`. When created with opening text, the chosen mode is stamped directly onto the
-opening message and persisted as `lastMode`. When created idle, the chosen mode is seeded as both
-`lastMode` and an empty-text draft in the agent's metadata (`draft` and `draftUpdatedAt`), marked
-`unstarted: true`. Subsequent agent messages to the idle task preserve and run on that seeded mode,
-clearing the `unstarted` state so later agent messages carry no override.
+opening message and persisted as `lastMode`. When created idle, `lastMode` stays unset until an
+accepted message arrives; the explicit creation choice is stored as internal `initialMode` metadata,
+and an empty-text composer draft is seeded atomically in agent metadata on standalone installations
+or in `TeamModule` per-user draft storage for the task owner on team installations. When the first
+accepted message arrives, it records its actual mode to `lastMode` and clears `initialMode`; the
+first agent-role delivery does not clear the creation draft (only user draft saves mutate draft
+storage). If an
+agent sends the first message to an idle task whose explicitly chosen model, effort, or service tier
+is no longer available, delivery fails with an actionable error rather than silently mixing modes.

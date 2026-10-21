@@ -1,11 +1,11 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Type } from "@sinclair/typebox";
-import { createRootContext, withLifetime } from "@steve.kite/stdlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { createRootContext, withLifetime, withLogger } from "@steve.kite/stdlib";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionAssistantMessageAccumulator } from "@/core/SessionAssistantMessageAccumulator.js";
 import type { SessionMessage } from "@/core/SessionContext.js";
@@ -18,7 +18,11 @@ import {
 import type { AcpSession } from "@/protocol/acp/AcpSession.js";
 import { acpDiscoverModels } from "@/protocol/acp/acpDiscoverModels.js";
 import { acpConnectionSpawn } from "@/protocol/acp/impl/acpConnectionSpawn.js";
-import { acpSessionRecordRead } from "@/protocol/acp/impl/acpSessionStore.js";
+import {
+    acpSessionRecordClear,
+    acpSessionRecordRead,
+    acpSessionRecordWrite,
+} from "@/protocol/acp/impl/acpSessionStore.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import { acpConfigOptionId } from "@/protocol/acp/impl/acpConfigOptions.js";
 import { acpGenericAgent } from "@/vendors/foreignAgents/acpGenericAgent.js";
@@ -440,6 +444,7 @@ describe("AcpSession", () => {
         expect(log.filter((entry) => entry.method === "loadSession")).toHaveLength(0);
     }, 30_000);
 
+    // Characterizes existing base behavior: a first prompt that rejects with prompt_error before settling never writes a session record.
     it("does not write a resume record to disk when a first prompt ends in prompt_error and replays on retry", async () => {
         const h = harness();
         const session = await h.session();
@@ -688,4 +693,49 @@ describe("AcpSession", () => {
         ).toBeUndefined();
         expect(acpConfigOptionId([], { configId: "mode", value: "plan" })).toBe("mode");
     });
+
+    it.skipIf(process.getuid?.() === 0)(
+        "invalidates the session record with a tombstone or throws when acpSessionRecordClear cannot unlink",
+        async () => {
+            const directory = mkdtempSync(join(tmpdir(), "acp-clear-"));
+            const sessionsDir = join(directory, "sessions");
+            await acpSessionRecordWrite(directory, "agent-1", {
+                acpSessionId: "s-old",
+                cwd: directory,
+                consumed: 1,
+                fingerprint: "fp1",
+            });
+            expect(await acpSessionRecordRead(directory, "agent-1")).toMatchObject({
+                acpSessionId: "s-old",
+            });
+
+            const warnSpy = vi.fn();
+            const noop = () => undefined;
+            const ctx = withLogger(createRootContext().named("acp-clear-test"), {
+                trace: noop,
+                debug: noop,
+                info: noop,
+                warn: warnSpy,
+                error: noop,
+                fatal: noop,
+            });
+
+            // Removing write permission on the parent directory makes rm() fail with EACCES while the
+            // writable file itself can still be overwritten with a "{}" tombstone.
+            chmodSync(sessionsDir, 0o500);
+            try {
+                await acpSessionRecordClear(directory, "agent-1", ctx);
+                expect(warnSpy).toHaveBeenCalledTimes(1);
+                expect(await acpSessionRecordRead(directory, "agent-1")).toBeUndefined();
+            } finally {
+                chmodSync(sessionsDir, 0o700);
+            }
+
+            // When both rm() and the tombstone write fail (e.g. target path is a directory), it throws.
+            mkdirSync(join(sessionsDir, "dir-collision.json"));
+            await expect(acpSessionRecordClear(directory, "dir-collision", ctx)).rejects.toThrow(
+                /Failed to clear or invalidate ACP session record for dir-collision/,
+            );
+        },
+    );
 });

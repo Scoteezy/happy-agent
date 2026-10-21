@@ -227,7 +227,7 @@ export class AcpSession extends BaseSession {
             } else {
                 this.#abandonTurn();
                 await settleWithin(this.#previousPrompt, PREVIOUS_PROMPT_GRACE_MS);
-                const prompt = await this.#prepareSession(connection, environment, request);
+                const prompt = await this.#prepareSession(ctx, connection, environment, request);
                 await this.#applyOptions(connection, request, environment);
                 turn = this.#startTurn(connection, prompt);
             }
@@ -495,6 +495,7 @@ export class AcpSession extends BaseSession {
 
     /** Open, restore, or keep the foreign session, and return the prompt this run sends. */
     async #prepareSession(
+        ctx: Context,
         connection: AcpConnection,
         environment: AcpTurnEnvironment,
         request: SessionRunRequest,
@@ -526,7 +527,7 @@ export class AcpSession extends BaseSession {
         this.#applied.clear();
         this.#record = undefined;
         // The replaced session must not be continued by a later process before this one is kept.
-        await acpSessionRecordClear(this.#options.stateDirectory, this.id);
+        await acpSessionRecordClear(this.#options.stateDirectory, this.id, ctx);
         this.#unprompted = true;
         let lastResponse = -1;
         messages.forEach((message, index) => {

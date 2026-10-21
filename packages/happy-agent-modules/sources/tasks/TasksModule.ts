@@ -116,6 +116,7 @@ export class TasksModule implements AgentModule {
     readonly #titles: TitlesModule;
     readonly #workspaces: WorkspacesModule;
     readonly #collaboration: CollaborationModule;
+    readonly #transactionalListeners = new Set<TaskEventListener>();
     readonly #listeners = new Set<TaskEventListener>();
     readonly #namingTasks = new Map<string, Promise<void>>();
     readonly #botSettings: BotSettingsModule | undefined;
@@ -243,6 +244,11 @@ export class TasksModule implements AgentModule {
         this.#backgroundScope.emitDestroy();
     }
 
+    onEventTransactional(listener: TaskEventListener): TaskUnsubscribe {
+        this.#transactionalListeners.add(listener);
+        return () => this.#transactionalListeners.delete(listener);
+    }
+
     onEvent(listener: TaskEventListener): TaskUnsubscribe {
         this.#listeners.add(listener);
         return () => this.#listeners.delete(listener);
@@ -317,7 +323,7 @@ export class TasksModule implements AgentModule {
             const existing = await readMembership(txCtx, taskId, memberId);
             if (existing === undefined) return undefined;
             await deleteMembership(txCtx, taskId, memberId);
-            this.#publish(txCtx, {
+            await this.#publish(txCtx, {
                 eventId: globalThis.crypto.randomUUID(),
                 at: Date.now(),
                 type: "task_left",
@@ -366,7 +372,7 @@ export class TasksModule implements AgentModule {
             );
             const moved: TaskMembership = { ...current, orderKey };
             await updateMembershipOrder(txCtx, moved);
-            this.#publish(txCtx, {
+            await this.#publish(txCtx, {
                 eventId: globalThis.crypto.randomUUID(),
                 at: Date.now(),
                 type: "task_reordered",
@@ -499,17 +505,20 @@ export class TasksModule implements AgentModule {
                     version: 1,
                     ...(input.mode !== undefined && input.text === undefined
                         ? {
-                              lastMode: input.mode,
-                              draft: {
-                                  effort: input.mode.effort,
-                                  modelId: input.mode.modelId,
-                                  permissionMode: input.mode.permissionMode,
-                                  providerId: input.mode.providerId,
-                                  serviceTier: input.mode.serviceTier,
-                                  text: "",
-                              },
-                              draftUpdatedAt: now,
-                              unstarted: true,
+                              initialMode: input.mode,
+                              ...(input.ownerUserId === undefined
+                                  ? {
+                                        draft: {
+                                            effort: input.mode.effort,
+                                            modelId: input.mode.modelId,
+                                            permissionMode: input.mode.permissionMode,
+                                            providerId: input.mode.providerId,
+                                            serviceTier: input.mode.serviceTier,
+                                            text: "",
+                                        },
+                                        draftUpdatedAt: now,
+                                    }
+                                  : {}),
                           }
                         : {}),
                 },
@@ -574,7 +583,7 @@ export class TasksModule implements AgentModule {
                     input.mode,
                 );
             }
-            this.#publish(txCtx, {
+            await this.#publish(txCtx, {
                 eventId: globalThis.crypto.randomUUID(),
                 at: now,
                 type: "task_created",
@@ -768,7 +777,7 @@ export class TasksModule implements AgentModule {
             joinedAt: Date.now(),
         };
         await insertMembership(ctx, membership);
-        this.#publish(ctx, {
+        await this.#publish(ctx, {
             eventId: globalThis.crypto.randomUUID(),
             at: membership.joinedAt,
             type: "task_joined",
@@ -799,6 +808,9 @@ export class TasksModule implements AgentModule {
         const agents = this.#requireAgents();
         await ctx.inTx(async (txCtx) => {
             const config = await agents.config(txCtx, task.agentId);
+            const hasInitialMode =
+                config?.metadata?.["initialMode"] !== undefined &&
+                config?.metadata?.["initialMode"] !== null;
             const delivery =
                 explicitMode !== undefined
                     ? {
@@ -835,10 +847,10 @@ export class TasksModule implements AgentModule {
             if (accepted.id !== messageId) {
                 throw new Error("Agent Base did not preserve the requested message ID.");
             }
-            if (delivery !== undefined || config?.metadata?.["unstarted"] === true) {
+            if (delivery !== undefined || hasInitialMode) {
                 await this.#updateAgentMetadata(txCtx, task.agentId, {
                     ...(delivery === undefined ? {} : { lastMode: delivery.mode }),
-                    unstarted: null,
+                    initialMode: null,
                 });
             }
         });
@@ -888,7 +900,7 @@ export class TasksModule implements AgentModule {
         }
         if (!Value.Check(taskRecordSchema, next)) throw new Error("The task mutation is invalid.");
         const stored = await updateTask(ctx, next, current.version);
-        this.#publish(ctx, {
+        await this.#publish(ctx, {
             eventId: globalThis.crypto.randomUUID(),
             at: stored.updatedAt,
             type: "task_updated",
@@ -956,9 +968,12 @@ export class TasksModule implements AgentModule {
         if (task.version !== expectedVersion) throw new TaskConflictError("The task has changed.");
     }
 
-    #publish(ctx: Context, event: TaskEvent): void {
+    async #publish(ctx: Context, event: TaskEvent): Promise<void> {
         if (!Value.Check(taskEventSchema, event)) throw new Error("The task event is invalid.");
         const frozen = deepFreeze(structuredClone(event)) as TaskEvent;
+        for (const listener of [...this.#transactionalListeners]) {
+            await listener(ctx, frozen);
+        }
         afterCommit(ctx, async (eventCtx) => {
             for (const listener of [...this.#listeners]) {
                 try {

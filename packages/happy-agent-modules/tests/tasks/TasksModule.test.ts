@@ -22,12 +22,14 @@ import { sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
 import { AbortModule } from "../../sources/abort/index.js";
+import { agentModeFromConfig } from "../../sources/api/ApiResourceProjection.js";
 import { botMigrations, BotsModule } from "../../sources/bots/index.js";
 import { CollaborationModule } from "../../sources/collaboration/index.js";
 import { ComputeModule } from "../../sources/compute/index.js";
 import { DurableFunctionsModule } from "../../sources/durableFunctions/index.js";
 import { GitModule } from "../../sources/git/index.js";
 import { HistoryModule } from "../../sources/history/index.js";
+import { ProfileModule } from "../../sources/profile/index.js";
 import { projectMigrations } from "../../sources/projects/index.js";
 import { SecretsModule } from "../../sources/secrets/index.js";
 import {
@@ -43,6 +45,7 @@ import {
     type TaskEvent,
     type TaskRecord,
 } from "../../sources/tasks/index.js";
+import { TeamModule } from "../../sources/team/index.js";
 import { TitlesModule } from "../../sources/titles/index.js";
 import { WorkspacesModule, workspaceMigrations } from "../../sources/workspaces/index.js";
 import { temporaryTestConfig } from "../support/configModule.js";
@@ -76,6 +79,7 @@ class TaskAgents {
     readonly configs = new Map<string, AgentConfig>();
     readonly parents = new Map<string, string | null>();
     readonly aborted: string[] = [];
+    sendFailure: Error | undefined;
     readonly sent: {
         readonly agentId: string;
         readonly message: AgentQueuedMessage;
@@ -119,10 +123,20 @@ class TaskAgents {
         message: AgentQueuedMessage,
         options: AgentBaseMessageOptions = {},
     ) {
+        if (this.sendFailure !== undefined) throw this.sendFailure;
         if (!this.configs.has(agentId)) throw new Error("Agent missing.");
         this.sent.push({ agentId, message: structuredClone(message), id: options.id });
         if (options.id !== undefined) this.options.set(options.id, structuredClone(options));
         return { id: options.id ?? "generatedmessage" };
+    }
+
+    async steer(
+        ctx: Context,
+        agentId: string,
+        message: AgentQueuedMessage,
+        options: AgentBaseMessageOptions = {},
+    ) {
+        return await this.send(ctx, agentId, message, options);
     }
 
     async childOf(_ctx: Context, agentId: string): Promise<readonly string[]> {
@@ -990,7 +1004,7 @@ describe("TasksModule", () => {
         }
     });
 
-    it("creates an idle task with model selection, seeding draft in agent metadata", async () => {
+    it("creates an idle task with model selection, seeding draft and initialMode while keeping lastMode null", async () => {
         const fixture = await started("tasks-create-idle-model");
         try {
             const ctx = fixture.database.context;
@@ -1015,20 +1029,135 @@ describe("TasksModule", () => {
                 text: "",
             });
             expect(typeof config?.metadata?.["draftUpdatedAt"]).toBe("number");
-            expect(config?.metadata?.["lastMode"]).toEqual({
+            expect(config?.metadata?.["initialMode"]).toEqual({
                 modelId: "scripted/deep",
                 effort: "high",
                 providerId: "scripted",
                 serviceTier: null,
                 permissionMode: "auto",
             });
-            expect(config?.metadata?.["unstarted"]).toBe(true);
+            expect(config?.metadata?.["lastMode"]).toBeUndefined();
+            expect(agentModeFromConfig(config!)).toBeNull();
+            expect(config?.metadata?.["unstarted"]).toBeUndefined();
         } finally {
             await fixture.close();
         }
     });
 
-    it("preserves the seeded draft mode when a follow-up is delivered to an idle task", async () => {
+    it("seeds the owner's team draft atomically on idle task creation without touching other users or overwriting newer drafts", async () => {
+        const fixture = await started("tasks-create-idle-team-draft", { team: true });
+        try {
+            const ctx = fixture.database.context;
+            const bot = await fixture.bots.create(ctx, { name: "Creator" });
+            await fixture.accept(bot.agentId, { role: "user", userId: OWNER });
+
+            const task = await fixture.executeCreate(bot.agentId, {
+                name: "Team Idle Task",
+                model: "scripted/deep",
+                effort: "high",
+                serviceTier: "priority",
+            });
+
+            const config = fixture.agents.configs.get(task.agentId);
+            expect(config?.metadata?.["draft"]).toBeUndefined();
+            expect(config?.metadata?.["lastMode"]).toBeUndefined();
+            expect(agentModeFromConfig(config!)).toBeNull();
+            expect(config?.metadata?.["initialMode"]).toEqual({
+                modelId: "scripted/deep",
+                effort: "high",
+                providerId: "scripted",
+                serviceTier: "priority",
+                permissionMode: "auto",
+            });
+
+            const ownerDraft = await fixture.team.draft(ctx, task.agentId, OWNER);
+            expect(ownerDraft).toEqual({
+                value: {
+                    modelId: "scripted/deep",
+                    effort: "high",
+                    providerId: "scripted",
+                    serviceTier: "priority",
+                    permissionMode: "auto",
+                    text: "",
+                },
+                updatedAt: task.createdAt,
+            });
+            const otherDraft = await fixture.team.draft(ctx, task.agentId, OTHER_OWNER);
+            expect(otherDraft).toEqual({ value: null, updatedAt: null });
+
+            // A pre-existing user draft is never overwritten when task_created seeding runs.
+            const preseededAgentId = "preseededagent1234567890";
+            await fixture.team.saveDraft(ctx, preseededAgentId, OWNER, {
+                draft: {
+                    modelId: "scripted/default",
+                    effort: "low",
+                    providerId: "scripted",
+                    serviceTier: null,
+                    permissionMode: "read_only",
+                    text: "Working on this",
+                },
+                updatedAt: task.createdAt + 100,
+            });
+            await fixture.tasks.create(ctx, {
+                agentId: preseededAgentId,
+                name: "Preseeded Draft Task",
+                ownerUserId: OWNER,
+                mode: {
+                    modelId: "scripted/deep",
+                    effort: "high",
+                    providerId: "scripted",
+                    serviceTier: "priority",
+                    permissionMode: "auto",
+                },
+            });
+            expect(await fixture.team.draft(ctx, preseededAgentId, OWNER)).toEqual({
+                value: {
+                    modelId: "scripted/default",
+                    effort: "low",
+                    providerId: "scripted",
+                    serviceTier: null,
+                    permissionMode: "read_only",
+                    text: "Working on this",
+                },
+                updatedAt: task.createdAt + 100,
+            });
+
+            // If a transactional listener aborts task creation, the seeded team draft rolls back with it.
+            const rolledBackAgentId = "rolledbackagent1234567890";
+            const stop = fixture.tasks.onEventTransactional((_txCtx, event) => {
+                if (
+                    event.type === "task_joined" &&
+                    event.membership.taskId === "rolledbacktask1234567890"
+                ) {
+                    throw new Error("Simulated creation rollback");
+                }
+            });
+            await expect(
+                fixture.tasks.create(ctx, {
+                    id: "rolledbacktask1234567890",
+                    agentId: rolledBackAgentId,
+                    name: "Rolled Back Task",
+                    ownerUserId: OWNER,
+                    mode: {
+                        modelId: "scripted/deep",
+                        effort: "high",
+                        providerId: "scripted",
+                        serviceTier: null,
+                        permissionMode: "auto",
+                    },
+                }),
+            ).rejects.toThrow("Simulated creation rollback");
+            stop();
+            expect(await fixture.team.draft(ctx, rolledBackAgentId, OWNER)).toEqual({
+                value: null,
+                updatedAt: null,
+            });
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it("preserves initialMode across failed sends and draft edits, then records lastMode and clears initialMode on first accepted message", async () => {
         const fixture = await started("tasks-idle-followup-preservation");
         try {
             const ctx = fixture.database.context;
@@ -1039,7 +1168,40 @@ describe("TasksModule", () => {
                 effort: "high",
             });
 
+            // Editing the composer draft never changes the immutable creation choice or grants permissions.
+            await fixture.agents.updateMetadata(ctx, task.agentId, {
+                draft: {
+                    modelId: "scripted/default",
+                    effort: "low",
+                    providerId: "scripted",
+                    serviceTier: null,
+                    permissionMode: "full_access",
+                    text: "Unsent user draft",
+                },
+                draftUpdatedAt: Date.now() + 1000,
+            });
+
+            // A rejected/failed send must not consume initialMode or write lastMode.
             const sendTool = await fixture.tool(bot.agentId, "send_task_message");
+            fixture.agents.sendFailure = new Error("Simulated delivery failure");
+            await expect(
+                sendTool.execute(ctx, { taskId: task.id, text: "Failed attempt" }, {
+                    id: "send-failed",
+                    kv: { getOrCreate: async () => "msg-failed" },
+                } as never),
+            ).rejects.toThrow("Simulated delivery failure");
+            fixture.agents.sendFailure = undefined;
+
+            const afterFailed = fixture.agents.configs.get(task.agentId);
+            expect(afterFailed?.metadata?.["lastMode"]).toBeUndefined();
+            expect(afterFailed?.metadata?.["initialMode"]).toEqual({
+                modelId: "scripted/deep",
+                effort: "high",
+                providerId: "scripted",
+                serviceTier: null,
+                permissionMode: "auto",
+            });
+
             await sendTool.execute(ctx, { taskId: task.id, text: "Follow-up instructions" }, {
                 id: "send-1",
                 kv: { getOrCreate: async () => "msg-1" },
@@ -1064,22 +1226,64 @@ describe("TasksModule", () => {
             });
 
             const config = fixture.agents.configs.get(task.agentId);
-            expect(config?.metadata?.["lastMode"]).toMatchObject({
+            expect(config?.metadata?.["lastMode"]).toEqual({
                 modelId: "scripted/deep",
                 effort: "high",
                 providerId: "scripted",
+                serviceTier: null,
+                permissionMode: "auto",
             });
-            expect(config?.metadata?.["unstarted"]).toBeNull();
+            expect(config?.metadata?.["initialMode"]).toBeNull();
+            expect(config?.metadata?.["unstarted"]).toBeUndefined();
 
-            // A subsequent agent message to the now-started task carries no model override.
+            // A subsequent agent message to the now-started task carries no model override and issues no metadata write.
+            const versionAfterFirst = config?.metadata?.["version"];
+            const updateMetadataSpy = vi.spyOn(fixture.agents, "updateMetadata");
             await sendTool.execute(ctx, { taskId: task.id, text: "Second message" }, {
                 id: "send-2",
                 kv: { getOrCreate: async () => "msg-2" },
             } as never);
+            expect(updateMetadataSpy).not.toHaveBeenCalled();
+            updateMetadataSpy.mockRestore();
+            expect(fixture.agents.configs.get(task.agentId)?.metadata?.["version"]).toBe(
+                versionAfterFirst,
+            );
             const secondOptions = fixture.agents.options.get("send-2");
             expect(secondOptions?.model).toBeUndefined();
             expect(secondOptions?.provider).toBeUndefined();
             expect(secondOptions?.metadata?.["mode"]).toBeUndefined();
+
+            // Collaboration sendMessage (steer) and human explicit lastMode also consume initialMode cleanly.
+            const steeredTask = await fixture.executeCreate(bot.agentId, {
+                name: "Steered Idle Task",
+                model: "scripted/deep",
+                effort: "high",
+            });
+            await fixture.collaboration.sendMessage(
+                ctx,
+                bot.agentId,
+                { toAgentId: steeredTask.agentId, text: "Steered opening" },
+                "steer-1",
+            );
+            expect(fixture.agents.options.get("steer-1")).toMatchObject({
+                model: "scripted/deep",
+                effort: "high",
+                provider: "scripted",
+                serviceTier: null,
+                permissionMode: "auto",
+            });
+            expect(fixture.agents.configs.get(steeredTask.agentId)?.metadata?.["lastMode"]).toEqual(
+                {
+                    modelId: "scripted/deep",
+                    effort: "high",
+                    providerId: "scripted",
+                    serviceTier: null,
+                    permissionMode: "auto",
+                },
+            );
+            expect(
+                fixture.agents.configs.get(steeredTask.agentId)?.metadata?.["initialMode"],
+            ).toBeNull();
         } finally {
             await fixture.close();
         }
@@ -1173,32 +1377,104 @@ describe("TasksModule", () => {
         }
     });
 
-    it("falls back to creator model when seeded model is no longer offered", async () => {
-        const fixture = await started("tasks-model-fallback");
+    it("throws an actionable error when an explicitly chosen initial model, effort, or service tier is no longer offered", async () => {
+        const fixture = await started("tasks-model-retired");
         try {
             const ctx = fixture.database.context;
             const bot = await fixture.bots.create(ctx, { name: "Creator" });
             const task = await fixture.executeCreate(bot.agentId, {
-                name: "Fallback Task",
+                name: "Retired Model Task",
                 model: "scripted/deep",
                 effort: "high",
+                serviceTier: "priority",
             });
 
-            // Simulate the seeded model being removed from available models
-            Object.defineProperty(fixture.config, "models", {
-                value: [MODELS[0]],
-                configurable: true,
-            });
+            // 1. Model retired from catalog
+            const withoutDeep = await fixture.tasksWithModels([MODELS[0]!]);
+            await expect(
+                withoutDeep.sendMessage(
+                    ctx,
+                    bot.agentId,
+                    task.id,
+                    "Follow-up after model retired",
+                    "send-retired-model",
+                ),
+            ).rejects.toThrow(
+                'The model "scripted/deep" from provider "scripted" chosen at task creation is no longer available.',
+            );
+            expect(
+                fixture.agents.configs.get(task.agentId)?.metadata?.["lastMode"],
+            ).toBeUndefined();
+            expect(
+                fixture.agents.configs.get(task.agentId)?.metadata?.["initialMode"],
+            ).toBeDefined();
 
-            const sendTool = await fixture.tool(bot.agentId, "send_task_message");
-            await sendTool.execute(
-                ctx,
-                { taskId: task.id, text: "Follow-up after model retired" },
-                { id: "send-fallback", kv: { getOrCreate: async () => "msg-fallback" } } as never,
+            // 2. Effort retired from model
+            const withoutHighEffort = await fixture.tasksWithModels([
+                MODELS[0]!,
+                {
+                    providerId: "scripted",
+                    id: "scripted/deep",
+                    name: "Deep",
+                    effortLevels: ["medium"],
+                    defaultEffort: "medium",
+                    serviceTiers: ["priority"],
+                },
+            ]);
+            await expect(
+                withoutHighEffort.sendMessage(
+                    ctx,
+                    bot.agentId,
+                    task.id,
+                    "Follow-up after effort retired",
+                    "send-retired-effort",
+                ),
+            ).rejects.toThrow(
+                'The effort "high" chosen at task creation is no longer available for model "scripted/deep".',
             );
 
-            const options = fixture.agents.options.get("send-fallback");
-            expect(options).toMatchObject({
+            // 3. Service tier retired from model
+            const withoutPriorityTier = await fixture.tasksWithModels([
+                MODELS[0]!,
+                {
+                    providerId: "scripted",
+                    id: "scripted/deep",
+                    name: "Deep",
+                    effortLevels: ["medium", "high"],
+                    defaultEffort: "medium",
+                },
+            ]);
+            await expect(
+                withoutPriorityTier.sendMessage(
+                    ctx,
+                    bot.agentId,
+                    task.id,
+                    "Follow-up after tier retired",
+                    "send-retired-tier",
+                ),
+            ).rejects.toThrow(
+                'The service tier "priority" chosen at task creation is no longer available for model "scripted/deep".',
+            );
+
+            // 4. Legacy task with no explicit creation choice still falls back to default model
+            const unchosen = await fixture.executeCreate(bot.agentId, {
+                name: "Unchosen Idle Task",
+            });
+            const senderOnRetired = withAgentContext(ctx, {
+                id: bot.agentId,
+                provider: "scripted",
+                model: "scripted/deep",
+                effort: "high",
+                permissionMode: "auto",
+            });
+            await withoutDeep.sendMessage(
+                senderOnRetired,
+                bot.agentId,
+                unchosen.id,
+                "First message to task without explicit model choice",
+                "send-legacy-fallback",
+            );
+            expect(fixture.agents.options.get("send-legacy-fallback")).toMatchObject({
                 model: "scripted/default",
                 effort: "medium",
                 provider: "scripted",
@@ -1301,28 +1577,41 @@ interface AcceptedSender {
     readonly synthetic?: boolean;
 }
 
-async function started(name: string, options: { readonly team?: boolean } = {}) {
-    const config = await temporaryTestConfig(
-        [
-            "[providers.scripted]",
-            'type = "codex"',
-            "enabled = true",
-            "[features]",
-            "workspaces = false",
-            ...(options.team === true
-                ? [
-                      "[feature.team]",
-                      "enabled = true",
-                      'workos_organization_id = "org_test"',
-                      'owner_workos_user_id = "user_test"',
-                  ]
-                : []),
-            "",
-        ].join("\n"),
-        { inference: { models: MODELS, providers: new AgentProviders() } },
-    );
+async function started(
+    name: string,
+    options: { readonly team?: boolean; readonly models?: readonly AgentModel[] } = {},
+) {
+    const configToml = [
+        "[providers.scripted]",
+        'type = "codex"',
+        "enabled = true",
+        "[features]",
+        "workspaces = false",
+        ...(options.team === true
+            ? [
+                  "[feature.team]",
+                  "enabled = true",
+                  'workos_organization_id = "org_test"',
+                  'owner_workos_user_id = "user_test"',
+              ]
+            : []),
+        "",
+    ].join("\n");
+    const config = await temporaryTestConfig(configToml, {
+        inference: { models: options.models ?? MODELS, providers: new AgentProviders() },
+    });
+    const extraHomes: string[] = [];
+    const extraTasks: TasksModule[] = [];
+    const teamMigrations = new TeamModule(config, new ProfileModule(config, undefined as never))
+        .migrations;
     const database = moduleDatabase(
-        [...projectMigrations, ...workspaceMigrations, ...botMigrations, ...taskMigrations],
+        [
+            ...projectMigrations,
+            ...workspaceMigrations,
+            ...botMigrations,
+            ...taskMigrations,
+            ...teamMigrations,
+        ],
         name,
     );
     await database.ready;
@@ -1359,6 +1648,9 @@ async function started(name: string, options: { readonly team?: boolean } = {}) 
     const taskHooks = tasks.beforeStart(database.context, agents.asRef());
     const bots = new BotsModule(config, abort, titles, projects, workspaces, runners, tasks);
     const botHooks = await bots.beforeStart(database.context, agents.asRef());
+    const profile = new ProfileModule(config, bots);
+    const team = new TeamModule(config, profile, tasks);
+    team.beforeStart(database.context, agents.asRef());
     const events: TaskEvent[] = [];
     tasks.onEvent((_ctx, event) => {
         events.push(event);
@@ -1384,13 +1676,46 @@ async function started(name: string, options: { readonly team?: boolean } = {}) 
     return {
         agents,
         bots,
+        collaboration,
         config,
         database,
         durable,
         events,
         naming,
         tasks,
+        team,
         tool,
+        tasksWithModels: async (nextModels: readonly AgentModel[]): Promise<TasksModule> => {
+            const nextConfig = await temporaryTestConfig(configToml, {
+                inference: { models: nextModels, providers: new AgentProviders() },
+            });
+            extraHomes.push(dirname(nextConfig.configuration.paths.publicHome));
+            const nextCollaboration = new CollaborationModule(
+                nextConfig,
+                abort,
+                new HistoryModule(),
+                compute,
+            );
+            nextCollaboration.beforeStart(database.context, agents.asRef());
+            const nextTasks = new TasksModule(
+                nextConfig,
+                abort,
+                titles,
+                projects,
+                workspaces,
+                runners,
+                compute,
+                {
+                    register: vi.fn(),
+                    invoke: vi.fn(),
+                    cancel: vi.fn(),
+                } as unknown as DurableFunctionsModule,
+                nextCollaboration,
+            );
+            nextTasks.beforeStart(database.context, agents.asRef());
+            extraTasks.push(nextTasks);
+            return nextTasks;
+        },
         acceptText: async (
             agentId: string,
             role: "user" | "agent",
@@ -1480,14 +1805,18 @@ async function started(name: string, options: { readonly team?: boolean } = {}) 
                 .filter((part) => part !== "")
                 .join("\n\n"),
         close: async () => {
+            for (const extra of extraTasks) await extra.close();
+            team.close();
             await tasks.close();
             await bots.close();
             await titles.close();
             database.close();
-            await rm(dirname(config.configuration.paths.publicHome), {
-                force: true,
-                recursive: true,
-            });
+            for (const home of [dirname(config.configuration.paths.publicHome), ...extraHomes]) {
+                await rm(home, {
+                    force: true,
+                    recursive: true,
+                });
+            }
         },
     };
 }

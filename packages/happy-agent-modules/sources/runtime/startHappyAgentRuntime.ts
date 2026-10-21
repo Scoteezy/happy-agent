@@ -529,7 +529,7 @@ export async function startHappyAgentRuntime(
             tasks,
         );
         const profile = new ProfileModule<LibSQLDatabase>(config, bots);
-        const team = new TeamModule<LibSQLDatabase>(config, profile);
+        const team = new TeamModule<LibSQLDatabase>(config, profile, tasks);
         registerShutdown("team", async () => team.close());
         const userSettings = new UserSettingsModule(team);
         const surfaces = new SurfacesModule(

@@ -1,7 +1,7 @@
 import { createHash, createPublicKey } from "node:crypto";
 
 import { createId } from "@paralleldrive/cuid2";
-import { userIdsSchema } from "@slopus/happy-agent-client";
+import { messageModeSchema, userIdsSchema } from "@slopus/happy-agent-client";
 import {
     agentDatabaseRows,
     agentDatabaseRun,
@@ -9,6 +9,7 @@ import {
     type AgentModule,
     type AgentModuleHooks,
     type AgentModuleMigration,
+    type AgentSystemRef,
 } from "@slopus/happy-agent-base";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
@@ -17,6 +18,7 @@ import { sql } from "drizzle-orm";
 
 import type { ConfigModule } from "../config/index.js";
 import type { ProfileModule, ProfilePhotoContentType } from "../profile/index.js";
+import type { TasksModule } from "../tasks/index.js";
 import { createTeamUserVersion } from "./createTeamUserVersion.js";
 import { TeamAuthenticationError } from "./TeamAuthenticationError.js";
 import { teamIdentity, withTeamIdentity, withTeamUser, type TeamIdentity } from "./TeamContext.js";
@@ -125,13 +127,19 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
      * Guests reach this installation in both modes, so their sender notifications run in both.
      * Member sign-in and its key refresh exist only in team mode.
      */
-    readonly beforeStart = (): AgentModuleHooks<never, Database> => ({
-        systemNotificationsTransact: (ctx, scope, boundary) =>
-            teamSenderNotifications(ctx, this, scope, boundary),
-        afterStart: (ctx) => {
-            this.#startJwksRefresh(ctx);
-        },
-    });
+    readonly beforeStart = (
+        _ctx?: Context,
+        agents?: AgentSystemRef,
+    ): AgentModuleHooks<never, Database> => {
+        this.#agents = agents;
+        return {
+            systemNotificationsTransact: (ctx, scope, boundary) =>
+                teamSenderNotifications(ctx, this, scope, boundary),
+            afterStart: (ctx) => {
+                this.#startJwksRefresh(ctx);
+            },
+        };
+    };
     readonly migrations: readonly AgentModuleMigration<Database>[] = [
         [
             TEAM_USERS_MIGRATION_KEY,
@@ -367,10 +375,32 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
     readonly #verify: ((accessToken: string) => Promise<string>) | undefined;
     readonly #jwks: RefreshingJwks | undefined;
     readonly #lifetime = new AbortController();
+    #agents: AgentSystemRef | undefined;
 
-    constructor(config: ConfigModule, profile: ProfileModule) {
+    constructor(config: ConfigModule, profile: ProfileModule, tasks?: TasksModule) {
         this.#config = config;
         this.#profile = profile;
+        tasks?.onEventTransactional(async (txCtx, event) => {
+            if (event.type !== "task_created" || event.task.ownerUserId === undefined) return;
+            const agents = this.#agents;
+            if (agents === undefined) return;
+            const agentConfig = await agents.config(txCtx, event.task.agentId);
+            const initialMode = agentConfig?.metadata?.["initialMode"];
+            if (!Value.Check(messageModeSchema, initialMode)) return;
+            const existing = await this.draft(txCtx, event.task.agentId, event.task.ownerUserId);
+            if (existing.updatedAt !== null) return;
+            await this.saveDraft(txCtx, event.task.agentId, event.task.ownerUserId, {
+                draft: {
+                    effort: initialMode.effort,
+                    modelId: initialMode.modelId,
+                    permissionMode: initialMode.permissionMode,
+                    providerId: initialMode.providerId,
+                    serviceTier: initialMode.serviceTier,
+                    text: "",
+                },
+                updatedAt: event.at,
+            });
+        });
         const team = config.configuration.values.feature.team;
         this.#authentication = team.authentication;
         this.#ownerSubject =

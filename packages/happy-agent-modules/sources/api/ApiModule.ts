@@ -4875,7 +4875,7 @@ export class ApiModule implements AgentModule {
                     : messageResource(accepted);
             await this.#updateAgentMetadata(ctx, agentId, {
                 lastMode: body.mode,
-                unstarted: null,
+                initialMode: null,
             });
             this.#journal.append("message.created", {
                 agentId,

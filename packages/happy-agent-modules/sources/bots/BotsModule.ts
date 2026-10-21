@@ -546,7 +546,10 @@ export class BotsModule implements AgentModule {
                 throw new Error("Agent Base did not preserve the requested message ID.");
             }
             if (delivery !== undefined) {
-                await this.#updateAgentMetadata(txCtx, bot.agentId, { lastMode: delivery.mode });
+                await this.#updateAgentMetadata(txCtx, bot.agentId, {
+                    lastMode: delivery.mode,
+                    initialMode: null,
+                });
             }
         });
         return structuredClone(bot);

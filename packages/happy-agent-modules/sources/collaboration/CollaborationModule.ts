@@ -1,5 +1,6 @@
 import {
     agentConfig,
+    agentDatabase,
     DEFAULT_AGENT_PERMISSION_MODE,
     type AgentBaseAcceptedMessage,
     type AgentBasePersistedEvent,
@@ -25,6 +26,7 @@ import type { BotSettingsModule } from "../botSettings/index.js";
 import type { ComputeModule } from "../compute/index.js";
 import { HistoryModule } from "../history/index.js";
 import type { ConfigModule } from "../config/index.js";
+import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
 import { senderAgentIdMetadata } from "../impl/messageOrigin.js";
 import {
     collaborationAgentIdSchema,
@@ -691,61 +693,79 @@ export class CollaborationModule implements AgentModule {
         selection: (CollaborationAgentSelection & { readonly provider: string }) | undefined,
     ): Promise<void> {
         const agents = this.#requireAgents();
-        if (isArchived((await agents.config(ctx, toAgentId))?.metadata)) {
-            throw new Error("The agent is archived and cannot receive messages.");
-        }
-        const message = {
-            role: "agent" as const,
-            author: { id: fromAgentId, description: `Agent ${fromAgentId}` },
-            content: [
-                { type: "text" as const, text: `Message from agent ${fromAgentId}:\n\n${text}` },
-            ],
-        };
-        // The opening task is the collaborator's first message, so its selection is the mode
-        // the collaborator runs with. It is stamped on the message the way an API message
-        // carries its mode, and recorded as the agent's last mode, so a person who joins a
-        // user-visible collaborator composes on top of the coordinator's choice instead of the
-        // daemon defaults. The permission mode is the one Agent Base gives a new agent, sent
-        // explicitly so the recorded mode is what the collaborator actually runs with.
-        const mode =
-            selection === undefined
-                ? undefined
-                : {
-                      effort: selection.effort,
-                      modelId: selection.model,
-                      permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
-                      providerId: selection.provider,
-                      serviceTier: selection.serviceTier ?? null,
-                  };
-        const options = {
-            id: messageId,
-            metadata: {
-                collaboration: { fromAgentId, toAgentId },
-                ...senderAgentIdMetadata(fromAgentId),
-                ...(mode === undefined ? {} : { mode }),
-            },
-            ...(selection === undefined
-                ? {}
-                : {
-                      model: selection.model,
-                      effort: selection.effort,
-                      permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
-                      provider: selection.provider,
-                      ...(selection.serviceTier === undefined
-                          ? {}
-                          : { serviceTier: selection.serviceTier }),
-                  }),
-        };
-        const accepted =
-            delivery === "steer"
-                ? await agents.steer(ctx, toAgentId, message, options)
-                : await agents.send(ctx, toAgentId, message, options);
-        if (accepted.id !== messageId) {
-            throw new Error("Agent Base did not preserve the requested message ID.");
-        }
-        if (mode !== undefined) {
-            await agents.updateMetadata(ctx, toAgentId, { lastMode: mode });
-        }
+        const run = async (work: (workCtx: Context) => Promise<void>): Promise<void> =>
+            agentDatabase(ctx) === undefined ? await work(ctx) : await ctx.inTx(work);
+        await run(async (txCtx) => {
+            const target = await agents.config(txCtx, toAgentId);
+            if (isArchived(target?.metadata)) {
+                throw new Error("The agent is archived and cannot receive messages.");
+            }
+            const hasInitialMode =
+                target?.metadata?.["initialMode"] !== undefined &&
+                target?.metadata?.["initialMode"] !== null;
+            const fallback =
+                selection === undefined && hasInitialMode
+                    ? await agentDeliveryMode(txCtx, agents, this.#config.models, toAgentId)
+                    : undefined;
+            const message = {
+                role: "agent" as const,
+                author: { id: fromAgentId, description: `Agent ${fromAgentId}` },
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `Message from agent ${fromAgentId}:\n\n${text}`,
+                    },
+                ],
+            };
+            // The opening task is the collaborator's first message, so its selection is the mode
+            // the collaborator runs with. It is stamped on the message the way an API message
+            // carries its mode, and recorded as the agent's last mode, so a person who joins a
+            // user-visible collaborator composes on top of the coordinator's choice instead of the
+            // daemon defaults. The permission mode is the one Agent Base gives a new agent, sent
+            // explicitly so the recorded mode is what the collaborator actually runs with.
+            const mode =
+                selection === undefined
+                    ? fallback?.mode
+                    : {
+                          effort: selection.effort,
+                          modelId: selection.model,
+                          permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
+                          providerId: selection.provider,
+                          serviceTier: selection.serviceTier ?? null,
+                      };
+            const options = {
+                id: messageId,
+                metadata: {
+                    collaboration: { fromAgentId, toAgentId },
+                    ...senderAgentIdMetadata(fromAgentId),
+                    ...(mode === undefined ? {} : { mode }),
+                },
+                ...(selection === undefined
+                    ? fallback?.options
+                    : {
+                          model: selection.model,
+                          effort: selection.effort,
+                          permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
+                          provider: selection.provider,
+                          ...(selection.serviceTier === undefined
+                              ? {}
+                              : { serviceTier: selection.serviceTier }),
+                      }),
+            };
+            const accepted =
+                delivery === "steer"
+                    ? await agents.steer(txCtx, toAgentId, message, options)
+                    : await agents.send(txCtx, toAgentId, message, options);
+            if (accepted.id !== messageId) {
+                throw new Error("Agent Base did not preserve the requested message ID.");
+            }
+            if (mode !== undefined || hasInitialMode) {
+                await agents.updateMetadata(txCtx, toAgentId, {
+                    ...(mode === undefined ? {} : { lastMode: mode }),
+                    initialMode: null,
+                });
+            }
+        });
     }
 
     /** Direct ancestry remains the whole authorization policy for destructive operations. */

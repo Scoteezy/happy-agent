@@ -1283,6 +1283,7 @@ export class ExportedBotsModule implements AgentModule {
         let agentId: string;
         let opening: OpeningMode | undefined;
         let mode: MessageMode | undefined;
+        let shouldUpdateMetadata = false;
         if (
             existing !== undefined &&
             existingConfig !== undefined &&
@@ -1294,8 +1295,12 @@ export class ExportedBotsModule implements AgentModule {
             const lastMode = existingConfig.metadata?.["lastMode"];
             if (Value.Check(messageModeSchema, lastMode)) {
                 mode = { ...lastMode, permissionMode: GUEST_PERMISSION_MODE };
-                if (lastMode.permissionMode !== GUEST_PERMISSION_MODE) {
-                    await agents.updateMetadata(ctx, agentId, { lastMode: mode });
+                if (
+                    lastMode.permissionMode !== GUEST_PERMISSION_MODE ||
+                    (existingConfig.metadata?.["initialMode"] !== undefined &&
+                        existingConfig.metadata?.["initialMode"] !== null)
+                ) {
+                    shouldUpdateMetadata = true;
                 }
             }
             if (
@@ -1357,6 +1362,12 @@ export class ExportedBotsModule implements AgentModule {
                 permissionMode: GUEST_PERMISSION_MODE,
             },
         );
+        if (shouldUpdateMetadata && mode !== undefined) {
+            await agents.updateMetadata(ctx, agentId, {
+                lastMode: mode,
+                initialMode: null,
+            });
+        }
         return agentId;
     }
 
