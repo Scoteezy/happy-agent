@@ -327,7 +327,7 @@ jobs:
                       if [[ "$runtime" == node ]]; then
                           command=(node --expose-gc)
                       else
-                          command=(pnpm dlx bun@1.4.2)
+                          command=(pnpm dlx bun@1.4.3)
                       fi
                       "${command[@]}" packages/happy-agent/scripts/verify-native-libsql.mjs
                   done

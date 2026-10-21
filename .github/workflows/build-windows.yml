@@ -127,7 +127,7 @@ jobs:
               run: pnpm build
             - name: Verify source named-pipe transports before signing and compiling
               run: |
-                  pnpm --filter @slopus/happy-agent exec pnpm dlx bun@1.4.2 scripts/verify-windows-sockets.ts
+                  pnpm --filter @slopus/happy-agent exec pnpm dlx bun@1.4.3 scripts/verify-windows-sockets.ts
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             - name: Stage the published sandbox SDK for its native regression checks
               run: |
@@ -186,11 +186,11 @@ jobs:
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                   node --expose-gc packages/happy-agent/scripts/verify-native-libsql.mjs
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                  pnpm --filter @slopus/happy-agent exec pnpm dlx bun@1.4.2 scripts/verify-native-libsql.mjs
+                  pnpm --filter @slopus/happy-agent exec pnpm dlx bun@1.4.3 scripts/verify-native-libsql.mjs
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                   node packages/happy-agent/scripts/verify-native-fff.mjs
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                  pnpm --filter @slopus/happy-agent exec pnpm dlx bun@1.4.2 scripts/verify-native-fff.mjs
+                  pnpm --filter @slopus/happy-agent exec pnpm dlx bun@1.4.3 scripts/verify-native-fff.mjs
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             - name: Provision once on this disposable CI machine
               # Hosted Windows runners are already elevated. Never run this step on a

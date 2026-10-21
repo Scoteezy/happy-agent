@@ -47,9 +47,10 @@ thread, and interpreted code turned schema checks, JSON handling and history
 projection into multi-second event-loop stalls on busy team nodes. The settings were
 also inherited by every child, so a user's own Bun commands in agent shells ran
 without JIT. At the user's direction the guard is removed and the daemon runs with
-Bun's default tiers. Bun 1.4.2 remains the minimum because Bun 1.4.0 aborts while
-resuming optimized async functions after caught exceptions, and `test:bun:runtime`
-still gates every platform build on that regression.
+Bun's default tiers. Bun 1.4.3 is the minimum. Bun 1.4.0 aborts while resuming
+optimized async functions after caught exceptions, and `test:bun:runtime` still gates
+every platform build on that regression. Bun 1.4.2 crashes the bytecode executable when
+a debugger client connects after `/v0/debug/inspector` opened the inspector.
 
 Verify the selected managed executable, its build revision, resolved published
 SDKs, and native binding before testing a recovery. Reloading an older local

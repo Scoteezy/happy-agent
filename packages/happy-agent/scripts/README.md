@@ -7,7 +7,9 @@ target-specific Bun executables. The binary compiler owns all platform asset
 discovery and adapts third-party runtime-selected native packages at the bundle
 boundary; product code remains runtime-neutral.
 
-Standalone builds require Bun 1.4.2 or newer. Bun 1.4.0 can abort inside
+Standalone builds require Bun 1.4.3 or newer. Bun 1.4.2 crashes a `--bytecode`
+executable when a debugger client connects after `inspector.open()`, which the
+`/v0/debug/inspector` endpoint does on a live daemon. Bun 1.4.0 can abort inside
 JavaScriptCore while resuming optimized async functions after caught exceptions.
 `test:bun:runtime` exercises this failure in a child process using the release
 runtime, since the ordinary Node tests cannot detect it. Every platform build
@@ -28,7 +30,7 @@ available. Every target requires its patched libSQL binding built on the matchin
 host with `pnpm --filter @slopus/happy-agent build:native:libsql`; see
 [`../native/libsql/README.md`](../native/libsql/README.md). Other Windows native
 assets must also be built on Windows first, as described below.
-Bun 1.4.2 is pinned by `mise.toml` and invoked at that exact version through
+Bun 1.4.3 is pinned by `mise.toml` and invoked at that exact version through
 `pnpm dlx`. Output names are `dist/bin/happy-agent-<platform>-<arch>`; Windows adds
 `.exe`. Windows helpers are embedded only in the Windows executable.
 
