@@ -790,7 +790,11 @@ describe("Foreign harness live transcript visibility", () => {
         } finally {
             await world.close();
         }
-    }, 120_000);
+        // Inherently expensive: 2,048 tool calls in one inference. The Events module rewrites
+        // the whole active run and journals a partial of every block produced so far for each
+        // provider event, so this one turn costs time quadratic in its length (about 30 s on a
+        // fast laptop, and over 120 s on a CI runner). History itself splits at 2,048 blocks.
+    }, 600_000);
 
     it("splits an active inference onto a continuation assistant message when MAX_HISTORY_MESSAGE_JSON_BYTES would be exceeded", async () => {
         const world = await setupHookWorld("byte-cap-continuation");
