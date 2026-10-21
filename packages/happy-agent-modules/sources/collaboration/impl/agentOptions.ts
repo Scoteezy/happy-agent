@@ -121,7 +121,7 @@ export function formatAgentOptionsUsage(options: AgentOptions): string {
         harness.providers.flatMap((provider) =>
             (provider.usage ?? []).map(
                 (window) =>
-                    `${provider.id}: ${window.scope}, ${window.window}: ${String(window.remainingPercent)}% left${
+                    `${provider.id}: ${window.scope === "" ? "" : `${window.scope}, `}${window.window}: ${String(window.remainingPercent)}% left${
                         window.resetsAt === null ? "" : `, resets ${window.resetsAt}`
                     }`,
             ),

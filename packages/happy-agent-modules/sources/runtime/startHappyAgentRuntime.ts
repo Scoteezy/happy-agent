@@ -574,6 +574,7 @@ export async function startHappyAgentRuntime(
             history,
             compute.computeModule,
             botSettings,
+            providerUsage,
         );
         const subtasks = new SubtasksModule(
             bots,

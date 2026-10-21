@@ -119,7 +119,8 @@ that does. Their descriptions list the models the agent can start agents on, one
 with its harness, accounts, and efforts, as they were when the conversation began; they never
 change, so the prompt cache holds. When the list changes, the agent gets a hidden system notice
 with the lines removed and added. `agent_options` lists the current models, and
-`agent_options({ usage: true })` adds the quota Antigravity reports for its account.
+`agent_options({ usage: true })` adds each account's quota: the daemon's latest reading for
+Claude, Codex, and Grok accounts, and what Antigravity reports for its own.
 
 By default Happy's own loop reaches only foreign harnesses whose models it cannot run itself,
 which today is `antigravity`; Claude Code, Codex CLI, and OpenCode run models Happy already runs.

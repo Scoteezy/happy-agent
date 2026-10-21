@@ -44,7 +44,10 @@ import {
     formatAgentOptionsChange,
     formatAgentOptionsUsage,
     type AgentOptions,
+    type AgentOptionsUsageWindow,
 } from "./impl/agentOptions.js";
+import type { ProviderUsageModule } from "../providerUsage/ProviderUsageModule.js";
+import type { ProviderUsage } from "@slopus/happy-providers";
 import { agentOptionsTool } from "./tools/agent_options.js";
 import { collaborationMigrations } from "./CollaborationMigrations.js";
 import { archiveAgentTool } from "./tools/archive_agent.js";
@@ -81,6 +84,7 @@ export class CollaborationModule implements AgentModule {
     readonly #compute: ComputeModule;
     readonly #crossWorkspace: boolean;
     readonly #botSettings: BotSettingsModule | undefined;
+    readonly #providerUsage: ProviderUsageModule | undefined;
     #agents: AgentSystemRef | undefined;
     #toolCreationTail: Promise<void> = Promise.resolve();
 
@@ -94,12 +98,14 @@ export class CollaborationModule implements AgentModule {
         history: HistoryModule,
         compute: ComputeModule,
         botSettings?: BotSettingsModule,
+        providerUsage?: ProviderUsageModule,
     ) {
         this.#config = config;
         this.#abort = abort;
         this.#history = history;
         this.#compute = compute;
         this.#botSettings = botSettings;
+        this.#providerUsage = providerUsage;
         this.#crossWorkspace = config.configuration.values.features.crossWorkspace;
     }
 
@@ -127,16 +133,24 @@ export class CollaborationModule implements AgentModule {
         return formatAgentOptions(this.#agentOptions(creator));
     }
 
-    /** The quota each of `creator`'s accounts reports, for agent_options to show on request. */
+    /**
+     * The quota each of `creator`'s accounts reports, for agent_options to show on request: the
+     * daemon's latest vendor reading, or what a foreign agent with its own login reports.
+     */
     async agentOptionsUsage(creator: CollaborationCreator): Promise<string> {
         const options = this.#agentOptions(creator);
+        const readings = new Map(
+            (this.#providerUsage?.list() ?? []).map((entry) => [entry.providerId, entry.usage]),
+        );
         const harnesses = await Promise.all(
             options.harnesses.map(async (harness) => ({
                 ...harness,
                 providers: await Promise.all(
                     harness.providers.map(async (provider) => {
-                        const usage = await this.#config.harnessUsage(provider.id);
-                        return usage === undefined ? provider : { ...provider, usage };
+                        const usage =
+                            (await this.#config.harnessUsage(provider.id)) ??
+                            vendorUsageWindows(readings.get(provider.id) ?? null);
+                        return usage.length === 0 ? provider : { ...provider, usage };
                     }),
                 ),
             })),
@@ -975,6 +989,30 @@ export class CollaborationModule implements AgentModule {
     #assert(schema: TSchema, value: unknown, label: string): void {
         if (!Value.Check(schema, value)) throw new Error(`Invalid collaboration ${label}.`);
     }
+}
+
+/** A vendor reading's windows, as share left; none without a reading. */
+function vendorUsageWindows(usage: ProviderUsage | null): AgentOptionsUsageWindow[] {
+    if (usage === null) return [];
+    const named = [
+        ["5-hour", usage.windows.fiveHour],
+        ["weekly", usage.windows.weekly],
+        ["monthly", usage.windows.monthly],
+        ["Fable weekly", usage.windows.fableWeekly ?? null],
+    ] as const;
+    return named.flatMap(([window, value]) =>
+        value === null
+            ? []
+            : [
+                  {
+                      scope: "",
+                      window,
+                      remainingPercent: Math.max(0, Math.round(100 - value.usedPercent)),
+                      resetsAt:
+                          value.resetsAt === null ? null : new Date(value.resetsAt).toISOString(),
+                  },
+              ],
+    );
 }
 
 /** Points a model that chose wrong at the one place listing what it can choose. */

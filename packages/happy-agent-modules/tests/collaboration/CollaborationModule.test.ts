@@ -1889,6 +1889,10 @@ function kvScope(agent: { readonly provider: string; readonly model: string }) {
     };
 }
 
+function ctx0(): Context {
+    return createRootContext().named("usage-test");
+}
+
 /** The notice reads nothing from the turn itself. */
 const TURN = {} as never;
 
@@ -2017,6 +2021,42 @@ describe("sub-agent harnesses", () => {
         expect(await module.agentOptionsUsage(ON_HAPPY)).toBe(
             "antigravity: Gemini Models, Weekly Limit Remaining: 95% left, resets 2026-10-27T00:00:00Z",
         );
+    });
+
+    it("adds every account's latest vendor reading to usage, beside Antigravity's own", async () => {
+        const collection = new ForeignCollection();
+        const usage = {
+            list: () => [
+                {
+                    providerId: "claude",
+                    usage: {
+                        windows: {
+                            fiveHour: {
+                                usedPercent: 30,
+                                resetsAt: Date.parse("2026-10-21T00:00:00Z"),
+                            },
+                            weekly: { usedPercent: 100, resetsAt: null },
+                            monthly: null,
+                        },
+                    },
+                },
+            ],
+        };
+        const module = new CollaborationModule(
+            await harnessConfig(),
+            abortModule(),
+            new HistoryModule(),
+            computeModule(),
+            undefined,
+            usage as never,
+        );
+        await resolveModuleHooks(ctx0(), module, collection.asRef());
+
+        expect((await module.agentOptionsUsage(ON_HAPPY)).split("\n")).toEqual([
+            "claude: 5-hour: 70% left, resets 2026-10-21T00:00:00.000Z",
+            "claude: weekly: 0% left",
+            "antigravity: Gemini Models, Weekly Limit Remaining: 95% left, resets 2026-10-27T00:00:00Z",
+        ]);
     });
 
     it("keeps tool definitions byte-identical when the options change", async () => {
