@@ -32,11 +32,24 @@ export interface ChatCompletionsSessionOptions extends SessionOptions, Inference
         context: SessionContext,
         summary: string,
     ) => { context: SessionContext; preservedMessages: readonly SessionMessage[] };
+    /** Where assistant reasoning is replayed; Kimi and GLM use `reasoning_content`. */
+    reasoningField?: "reasoning_content" | "reasoning" | null;
+    /** How the vendor is named in errors people read. Bedrock when omitted. */
+    vendor?: ChatCompletionsVendor;
 }
+
+/** The vendor's short name for sentences and its full name for headline failures. */
+export interface ChatCompletionsVendor {
+    readonly name: string;
+    readonly fullName: string;
+}
+
+const BEDROCK_VENDOR: ChatCompletionsVendor = { name: "Bedrock", fullName: "Amazon Bedrock" };
 
 export class ChatCompletionsSession extends BaseSession {
     private readonly options: ChatCompletionsSessionOptions;
     private readonly retries: () => number;
+    private readonly vendor: ChatCompletionsVendor;
     private activeModel: string;
     private destroyed = false;
     private readonly shutdown = new AbortController();
@@ -44,6 +57,7 @@ export class ChatCompletionsSession extends BaseSession {
     constructor(id: string, options: ChatCompletionsSessionOptions) {
         super(id);
         this.options = options;
+        this.vendor = options.vendor ?? BEDROCK_VENDOR;
         this.retries = createInferenceMaxRetriesResolver(options);
         this.activeModel = options.model;
     }
@@ -62,7 +76,7 @@ export class ChatCompletionsSession extends BaseSession {
                 type: "done",
                 state: "error",
                 kind: "unknown",
-                message: "This Bedrock session is closed.",
+                message: `This ${this.vendor.name} session is closed.`,
             };
             return;
         }
@@ -72,7 +86,9 @@ export class ChatCompletionsSession extends BaseSession {
         let body: object;
         try {
             if (request.serviceTier !== undefined)
-                throw new Error("These Bedrock models do not support inference speed tiers.");
+                throw new Error(
+                    `These ${this.vendor.name} models do not support inference speed tiers.`,
+                );
             body = createChatCompletionsRequest({
                 context:
                     configuration === undefined
@@ -82,9 +98,13 @@ export class ChatCompletionsSession extends BaseSession {
                 tools,
                 request,
                 generation: this.options.generation(request),
+                ...(this.options.reasoningField === undefined
+                    ? {}
+                    : { reasoningField: this.options.reasoningField }),
+                vendor: this.vendor.name,
             });
         } catch (error) {
-            yield errorDone(error, 1);
+            yield errorDone(error, 1, this.vendor);
             return;
         }
         this.activeModel = selectedModel;
@@ -95,6 +115,7 @@ export class ChatCompletionsSession extends BaseSession {
                 for await (const event of mapChatCompletionsStream(
                     this.options.connection.run(body, signal),
                     tools,
+                    this.vendor.name,
                 )) {
                     if (event.type === "done") terminal = event;
                     else yield event;
@@ -109,14 +130,14 @@ export class ChatCompletionsSession extends BaseSession {
                     yield { type: "done", state: "cancelled" };
                     return;
                 }
-                if (attempt >= this.retries() || !retryable(error)) {
-                    yield errorDone(error, attempt + 1);
+                if (attempt >= this.retries() || !retryable(error, this.vendor.name)) {
+                    yield errorDone(error, attempt + 1, this.vendor);
                     return;
                 }
                 yield {
                     type: "retrying",
                     attempt: attempt + 1,
-                    reason: "Retrying the Bedrock inference request.",
+                    reason: `Retrying the ${this.vendor.name} inference request.`,
                 };
                 try {
                     await (this.options.waitForInferenceRetry ?? waitForInferenceRetry)(
@@ -126,7 +147,7 @@ export class ChatCompletionsSession extends BaseSession {
                 } catch (error) {
                     yield signal.aborted
                         ? { type: "done", state: "cancelled" }
-                        : errorDone(error, attempt + 1);
+                        : errorDone(error, attempt + 1, this.vendor);
                     return;
                 }
             }
@@ -189,7 +210,7 @@ export class ChatCompletionsSession extends BaseSession {
                 message:
                     terminal?.state === "error"
                         ? terminal.message
-                        : "Bedrock did not complete the conversation summary.",
+                        : `${this.vendor.name} did not complete the conversation summary.`,
             };
         const summary = assistant
             .message()
@@ -200,7 +221,7 @@ export class ChatCompletionsSession extends BaseSession {
             return {
                 status: "failed",
                 kind: "invalid_summary",
-                message: "Bedrock returned an empty conversation summary.",
+                message: `${this.vendor.name} returned an empty conversation summary.`,
             };
         const replacement = this.options.createCompactedContext(options.context, summary);
         return {
@@ -217,7 +238,7 @@ export class ChatCompletionsSession extends BaseSession {
     }
 }
 
-function retryable(error: unknown): boolean {
+function retryable(error: unknown, vendor: string): boolean {
     if (error instanceof APIConnectionError || error instanceof EmptyResponseError) return true;
     if (error instanceof APIError)
         return (
@@ -228,18 +249,19 @@ function retryable(error: unknown): boolean {
         );
     return (
         error instanceof Error &&
-        error.message === "Bedrock closed the chat stream before reporting completion."
+        error.message === `${vendor} closed the chat stream before reporting completion.`
     );
 }
 
 function errorDone(
     error: unknown,
     attempts: number,
+    vendor: ChatCompletionsVendor,
 ): Extract<SessionEvent, { type: "done"; state: "error" }> {
     const diagnostics = extractProviderErrorDiagnostics(error, { attempts });
     const status = error instanceof APIError ? error.status : undefined;
     const message =
-        error instanceof Error ? error.message : "The Bedrock inference request failed.";
+        error instanceof Error ? error.message : `The ${vendor.name} inference request failed.`;
     const contextOverflow =
         /context[_ ](?:window|length|limit)|too many (?:input )?tokens|input is too long/iu.test(
             message,
@@ -271,11 +293,11 @@ function errorDone(
                 : "unknown",
         message:
             type === "authentication"
-                ? "Authentication with Amazon Bedrock failed."
+                ? `Authentication with ${vendor.fullName} failed.`
                 : type === "rate_limit"
-                  ? "The Amazon Bedrock rate limit was reached."
+                  ? `The ${vendor.fullName} rate limit was reached.`
                   : type === "server_overloaded"
-                    ? "Amazon Bedrock is temporarily overloaded."
+                    ? `${vendor.fullName} is temporarily overloaded.`
                     : message,
         providerError: {
             type,

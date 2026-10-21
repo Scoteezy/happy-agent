@@ -44,6 +44,8 @@ Supported providers:
 - **OpenAI API** — any generic Responses-compatible endpoint with your own key
 - **Grok Build** — xAI's Responses-compatible protocol
 - **Kimi K3 and GLM 5.3** — OpenAI-compatible Chat Completions on Bedrock Runtime
+- **OpenAI-compatible endpoints** — any Chat Completions endpoint with a bearer key, such as
+  OpenRouter, Together, or vLLM
 
 If you only remember one thing, make it the last section of this document:
 [a session is a stateful, managed endpoint](#the-most-important-part-sessions-are-stateful-and-managed).
@@ -142,14 +144,15 @@ needed for the next turn.
 
 ## Providers and credentials
 
-| Provider            | Talks to                                               | Credential options                                                                |
-| ------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `AnthropicProvider` | Claude Code SDK or Anthropic Messages on Bedrock       | Claude Code, OAuth, auth token, API key, Bedrock bearer token, or AWS credentials |
-| `CodexProvider`     | OpenAI Responses, Responses Lite, or OpenAI on Bedrock | Codex session, OpenAI API key, Bedrock bearer token, or AWS credentials           |
-| `GrokProvider`      | Grok Responses-compatible protocol                     | Grok session or xAI API key                                                       |
-| `ResponsesProvider` | Any generic Responses-compatible endpoint              | Explicit endpoint and API key                                                     |
-| `KimiProvider`      | Kimi K3 on Bedrock Runtime                             | Bedrock bearer token or AWS credentials                                           |
-| `GlmProvider`       | GLM 5.3 on Bedrock Runtime                             | Bedrock bearer token or AWS credentials                                           |
+| Provider                   | Talks to                                               | Credential options                                                                |
+| -------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `AnthropicProvider`        | Claude Code SDK or Anthropic Messages on Bedrock       | Claude Code, OAuth, auth token, API key, Bedrock bearer token, or AWS credentials |
+| `CodexProvider`            | OpenAI Responses, Responses Lite, or OpenAI on Bedrock | Codex session, OpenAI API key, Bedrock bearer token, or AWS credentials           |
+| `GrokProvider`             | Grok Responses-compatible protocol                     | Grok session or xAI API key                                                       |
+| `ResponsesProvider`        | Any generic Responses-compatible endpoint              | Explicit endpoint and API key                                                     |
+| `KimiProvider`             | Kimi K3 on Bedrock Runtime                             | Bedrock bearer token or AWS credentials                                           |
+| `GlmProvider`              | GLM 5.3 on Bedrock Runtime                             | Bedrock bearer token or AWS credentials                                           |
+| `OpenAICompatibleProvider` | Any Chat Completions endpoint                          | Explicit endpoint and API key                                                     |
 
 You always choose the credential; the library never picks an account for you. Each vendor
 credential class has a `tryLoad()` that accepts explicit values or reads the native client's
@@ -191,6 +194,12 @@ Kimi and GLM currently support Bedrock Runtime only. Both accept `credential`, o
 explicit profile IDs. Both always reason, with `low`, `high`, and `max` effort (default `max`).
 Kimi accepts text and images; GLM accepts text only. Compaction uses each documented harness's
 summary prompt and continuation contract. AWS determines account and regional availability.
+
+`OpenAICompatibleProvider` takes an explicit `endpoint`, `apiKey`, `vendor` display name, and the
+exact `models` the caller serves, each with its input types, accepted efforts, and extra request
+fields. Provider-wide `request` extras, such as OpenRouter's `reasoning`, are sent verbatim;
+protocol-owned fields are refused. See
+[the endpoint notes](sources/vendors/openaiCompatible/README.md).
 
 ### Native Claude credentials during history resume
 

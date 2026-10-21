@@ -13,6 +13,8 @@ const chunkSchema = Type.Object({
             delta: Type.Object({
                 content: Type.Optional(Type.Union([Type.String(), Type.Null()])),
                 reasoning_content: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+                /** OpenRouter and several gateways stream reasoning under this name instead. */
+                reasoning: Type.Optional(Type.Union([Type.String(), Type.Null()])),
                 tool_calls: Type.Optional(
                     Type.Array(
                         Type.Object({
@@ -69,17 +71,53 @@ class BedrockChatClient extends OpenAI {
     }
 }
 
+/** A Bedrock Runtime route, signed with SigV4 or sent with a Bedrock bearer token. */
+export interface BedrockChatCompletionsConnectionOptions {
+    credential: BedrockCredential;
+    endpoint: string;
+    region: string;
+    userAgent: string;
+    fetch?: typeof fetch;
+}
+
+/** Any other OpenAI-compatible endpoint, authenticated with a plain bearer API key. */
+export interface ApiKeyChatCompletionsConnectionOptions {
+    apiKey: string;
+    endpoint: string;
+    /** Extra headers sent with every request, such as a gateway's attribution headers. */
+    headers?: Readonly<Record<string, string>>;
+    /** Replaces the SDK's own user agent only when set. */
+    userAgent?: string;
+    /** How the vendor is named in error text. */
+    vendor: string;
+    fetch?: typeof fetch;
+}
+
+export type ChatCompletionsConnectionOptions =
+    | BedrockChatCompletionsConnectionOptions
+    | ApiKeyChatCompletionsConnectionOptions;
+
 /** One reusable SDK client; each stream owns and releases its HTTP response. */
 export class ChatCompletionsConnection {
     private readonly client: OpenAI;
+    private readonly vendor: string;
 
-    constructor(options: {
-        credential: BedrockCredential;
-        endpoint: string;
-        region: string;
-        userAgent: string;
-        fetch?: typeof fetch;
-    }) {
+    constructor(options: ChatCompletionsConnectionOptions) {
+        if ("apiKey" in options) {
+            this.vendor = options.vendor;
+            this.client = new OpenAI({
+                apiKey: options.apiKey,
+                baseURL: options.endpoint,
+                defaultHeaders: {
+                    ...options.headers,
+                    ...(options.userAgent === undefined ? {} : { "user-agent": options.userAgent }),
+                },
+                maxRetries: 0,
+                ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+            });
+            return;
+        }
+        this.vendor = "Bedrock";
         const credential = options.credential;
         const underlyingFetch = options.fetch ?? globalThis.fetch;
         const signer =
@@ -139,7 +177,7 @@ export class ChatCompletionsConnection {
         try {
             for await (const chunk of stream) {
                 if (!Value.Check(chunkSchema, chunk)) {
-                    throw new Error("Bedrock returned an invalid chat response chunk.");
+                    throw new Error(`${this.vendor} returned an invalid chat response chunk.`);
                 }
                 yield chunk;
             }

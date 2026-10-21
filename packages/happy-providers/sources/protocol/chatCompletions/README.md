@@ -1,17 +1,17 @@
 # Chat Completions protocol
 
-Kimi K3 and GLM 5.3 on Bedrock Runtime share this OpenAI-compatible wire protocol. Vendor
-providers select model IDs, reasoning parameters, and their documented compaction contracts.
-Callers supply instructions, tools, and immutable history.
+Kimi K3 and GLM 5.3 on Bedrock Runtime, and every configured OpenAI-compatible endpoint, share
+this wire protocol. Vendor providers select model IDs, reasoning parameters, and their documented
+compaction contracts. Callers supply instructions, tools, and immutable history.
 
 ```text
-KimiProvider / GlmProvider
+KimiProvider / GlmProvider / OpenAICompatibleProvider
         |
 ChatCompletionsSession --- vendor compaction prompt + replacement context
         |
 createChatCompletionsRequest
         |
-ChatCompletionsConnection --- OpenAI SSE + bearer token or Bedrock SigV4
+ChatCompletionsConnection --- OpenAI SSE + Bedrock SigV4/bearer, or a plain API key
         |
 mapChatCompletionsStream --- ordered blocks, parallel tool IDs, usage, completion
 ```
@@ -30,6 +30,11 @@ Compaction is an explicit summary inference with the vendor's instructions, no t
 original system prompt. Kimi retains a bounded selection of user messages and its native
 continuation reminder; GLM uses Claude Code's summary formatter and continuation text. Both return
 a replacement context for the caller to adopt and preserve input history unchanged.
+
+The session names its vendor in every error and retry message; Bedrock is the default. Streamed
+reasoning is read from `reasoning_content` or OpenRouter's `reasoning`. Replay of assistant
+reasoning is a session option: Kimi and GLM always send `reasoning_content`, while generic
+endpoints send `reasoning`, `reasoning_content`, or nothing, as configured.
 
 Tests exercise the complete SDK request/stream path through mocked HTTP responses. Live tests
 are opt-in; deterministic tests do not establish live account eligibility or golden-trace fidelity.

@@ -20,7 +20,14 @@ export function createChatCompletionsRequest(options: {
     tools: readonly SessionTool[];
     request: SessionRunRequest;
     generation?: Readonly<Record<string, unknown>>;
+    /** Where assistant reasoning is replayed, or null to leave it off the wire. */
+    reasoningField?: "reasoning_content" | "reasoning" | null;
+    vendor?: string;
 }): object {
+    // Kimi and GLM replay reasoning_content on every assistant turn, even when it is empty.
+    const reasoningField =
+        options.reasoningField === undefined ? "reasoning_content" : options.reasoningField;
+    const vendor = options.vendor ?? "Bedrock";
     const messages: object[] = [];
     if (options.context.instructions)
         messages.push({ role: "system", content: options.context.instructions });
@@ -51,7 +58,10 @@ export function createChatCompletionsRequest(options: {
                     (calls.length > 0 && textBlocks.every((block) => !block.text.trim()))
                         ? {}
                         : { content: inputContent(textBlocks) }),
-                    reasoning_content: reasoning,
+                    ...(reasoningField === null ||
+                    (reasoningField !== "reasoning_content" && !reasoning)
+                        ? {}
+                        : { [reasoningField]: reasoning }),
                     ...(calls.length === 0
                         ? {}
                         : {
@@ -83,7 +93,7 @@ export function createChatCompletionsRequest(options: {
     }
     const tools = options.tools.map((tool) => {
         if (tool.server !== undefined || tool.grammar !== undefined) {
-            throw new Error("This Bedrock model supports ordinary function tools only.");
+            throw new Error(`This ${vendor} model supports ordinary function tools only.`);
         }
         return {
             type: "function",

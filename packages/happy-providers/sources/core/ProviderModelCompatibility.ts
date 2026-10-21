@@ -6,7 +6,8 @@ export type ProviderModelCompatibilityType =
     | "codex"
     | "foreign"
     | "grok"
-    | "gym";
+    | "gym"
+    | "openai_compatible";
 
 export type ProviderModelFamily = "claude" | "codex" | "foreign" | "grok" | "kimi" | "glm";
 
@@ -47,6 +48,10 @@ export const PROVIDER_MODEL_COMPATIBILITY_MATRIX: Readonly<
     gym: {
         gym: ["claude", "codex", "grok", "kimi", "glm"],
     },
+    // A configured endpoint's model IDs name no family Happy Agent knows, and an ID that looks like
+    // a native one (`openai/...` on a gateway) is still not that vendor's transcript. A different
+    // model on one of these always starts a fresh context.
+    openai_compatible: {},
 };
 
 export function areProviderModelsCompatible(

@@ -111,6 +111,11 @@ export { GrokProvider, type GrokProviderOptions } from "@/vendors/grok/GrokProvi
 export { KimiProvider, type KimiProviderOptions } from "@/vendors/kimi/KimiProvider.js";
 export { GlmProvider, type GlmProviderOptions } from "@/vendors/glm/GlmProvider.js";
 export {
+    OpenAICompatibleProvider,
+    type OpenAICompatibleModel,
+    type OpenAICompatibleProviderOptions,
+} from "@/vendors/openaiCompatible/OpenAICompatibleProvider.js";
+export {
     AnthropicProvider,
     type AnthropicCredentialProviderOptions,
     type AnthropicProviderOptions,

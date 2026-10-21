@@ -9,6 +9,7 @@ import { toolName } from "./createChatCompletionsRequest.js";
 export async function* mapChatCompletionsStream(
     stream: AsyncIterable<ChatCompletionsChunk>,
     tools: readonly SessionTool[],
+    vendor = "Bedrock",
 ): AsyncGenerator<SessionEvent> {
     let active: "text" | "reasoning" | undefined;
     let finish: string | undefined;
@@ -33,7 +34,7 @@ export async function* mapChatCompletionsStream(
         if (choice === undefined) continue;
         if (choice.finish_reason !== null) finish = choice.finish_reason;
         for (const [kind, delta] of [
-            ["reasoning", choice.delta.reasoning_content],
+            ["reasoning", choice.delta.reasoning_content ?? choice.delta.reasoning],
             ["text", choice.delta.content],
         ] as const) {
             if (!delta) continue;
@@ -57,12 +58,12 @@ export async function* mapChatCompletionsStream(
                 calls.set(update.index, call);
             }
             if (call.id !== undefined && update.id !== undefined && update.id !== call.id) {
-                throw new Error("Bedrock changed a tool call's identity while streaming.");
+                throw new Error(`${vendor} changed a tool call's identity while streaming.`);
             }
             if (update.id !== undefined) call.id = update.id;
             if (update.function?.name) {
                 if (call.started && update.function.name !== call.name)
-                    throw new Error("Bedrock changed a tool call's name while streaming.");
+                    throw new Error(`${vendor} changed a tool call's name while streaming.`);
                 if (!call.started) call.name += update.function.name;
             }
             const delta = update.function?.arguments;
@@ -93,12 +94,12 @@ export async function* mapChatCompletionsStream(
         }
     }
     if (finish === undefined)
-        throw new Error("Bedrock closed the chat stream before reporting completion.");
-    if (!hasContent) throw new EmptyResponseError("Bedrock");
+        throw new Error(`${vendor} closed the chat stream before reporting completion.`);
+    if (!hasContent) throw new EmptyResponseError(vendor);
     if (active !== undefined) yield { type: active === "text" ? "text_end" : "reasoning_end" };
     for (const call of calls.values()) {
         if (!call.id || !call.name)
-            throw new Error("Bedrock returned a tool call without an identity or name.");
+            throw new Error(`${vendor} returned a tool call without an identity or name.`);
         if (!call.started) {
             const definition = definitions.get(call.name);
             yield {
@@ -118,10 +119,10 @@ export async function* mapChatCompletionsStream(
         };
     }
     if (!["stop", "tool_calls", "length"].includes(finish)) {
-        throw new Error(`Bedrock could not finish the response (${finish}).`);
+        throw new Error(`${vendor} could not finish the response (${finish}).`);
     }
     if (finish === "tool_calls" && calls.size === 0)
-        throw new Error("Bedrock requested tool execution without returning a tool call.");
+        throw new Error(`${vendor} requested tool execution without returning a tool call.`);
     yield { type: "token_usage", usage };
     yield {
         type: "done",
