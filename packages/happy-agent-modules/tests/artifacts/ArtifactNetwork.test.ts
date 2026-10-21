@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
     artifactAddressLoopback,
     artifactAddressPublic,
-    artifactNetworkDestinations,
     artifactNetworkHost,
+} from "@slopus/happy-agent-client";
+import {
+    artifactNetworkDestinations,
     connectArtifactNetwork,
 } from "../../sources/artifacts/impl/artifactNetwork.js";
 

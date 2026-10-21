@@ -192,7 +192,9 @@ CONNECT, exposed through the artifact proxy route. Each new connection reads the
 current URL. Only public addresses are allowed, except the exact recorded localhost or literal
 loopback host and port; private LAN and link-local addresses never receive an exception.
 
-The classifier in `impl/artifactNetwork.ts` stays aligned with Desktop. An IPv6 blocklist missed
+The address classifier and numeric-host normalization come from the published client package,
+shared by the daemon and Desktop; `impl/artifactNetwork.ts` remains the one connection-policy
+boundary and owns no duplicate classifier. An IPv6 blocklist missed
 reserved and special-purpose space, and treating every embedded IPv4 as loopback granted
 transition addresses the local exception. Public IPv6 now requires `2000::/3` outside
 `2001::/23`, `2001:db8::/32`, `2002::/16`, and `3fff::/20`, or a public IPv4 embedded in a mapped,
