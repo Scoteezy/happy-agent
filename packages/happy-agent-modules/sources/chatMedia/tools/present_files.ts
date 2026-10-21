@@ -44,11 +44,13 @@ export function presentFilesTool(
     return defineAgentTool({
         name: "present_files",
         defer: true,
-        capabilities: ["Show files, documents, images, and videos to the user inline in the chat."],
+        capabilities: [
+            "Show images, videos, PDFs, and downloadable files to the user inline in the chat.",
+        ],
         searchKeywords: ["show file", "present image", "share video", "display pdf", "send file"],
         description: `Show files from your machine to the user, inline in this chat: images appear as pictures, videos as players, PDFs as documents, and any other file as a file the user can open or download.
 
-Use it when the user should see or receive a file you made or found, such as a chart, a screenshot, a rendered video, a PDF report, or an exported spreadsheet. Generated images and artifacts are already shown when you make them, so do not present them again in the same chat.
+Use it when the user should see or receive a file you made or found, such as a chart, a screenshot, a rendered video, a PDF report, or an exported spreadsheet, including when the reader is not on this machine. Do not present text, code, or Markdown files; link them instead, because a link opens the live file in the viewer. Generated images and artifacts are already shown when you make them, so do not present them again in the same chat.
 
 The files are copied when you call this, so later changes to them do not change what the user sees. An image may be at most 32 MiB, a video 256 MiB, and a document or other file 64 MiB, with at most 256 MiB per call.`,
         parameters: presentFilesArgumentsSchema,
@@ -71,7 +73,7 @@ The files are copied when you call this, so later changes to them do not change 
                 text: [
                     `Presented ${String(items.length)} ${items.length === 1 ? "file" : "files"} to the user in this chat: ${items.map(describeItem).join(", ")}.`,
                     "The user sees them inline now, so do not repeat their paths or describe them as if the user cannot see them.",
-                    "They appear only in this chat's history, not in any parent or child chat; if a user should see them in another chat, the agent in that chat must present them there.",
+                    "They appear only in this chat's history, not in any parent or child chat; the agent in another chat should link text files and present only media there.",
                 ].join(" "),
             },
         ],

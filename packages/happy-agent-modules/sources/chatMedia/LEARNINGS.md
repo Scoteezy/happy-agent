@@ -14,8 +14,15 @@ and outside this module.
 
 A presentation belongs to the call that made it, in the conversation of the agent that ran it.
 Parents and children do not see it, so the module's instructions and every presenting tool's
-reply tell the model so: an agent working for another agent must hand over paths or artifact IDs
-for the agent the user talks to to present again.
+reply tell the model so: an agent working for another agent must hand over paths or artifact IDs.
+The parent links text files, presents media, and mentions artifacts by their reference tags.
+
+## Text files stay live through file links
+
+Broad instructions to present files made agents publish Markdown snapshots that the desktop
+could not preview. Instructions and the presenting tool now reserve presentations for images,
+videos, PDFs, and downloads. Text, code, and Markdown use file links, which open the live file;
+the same distinction applies when handing work to a parent agent.
 
 ## A failed snapshot never costs a generated image
 

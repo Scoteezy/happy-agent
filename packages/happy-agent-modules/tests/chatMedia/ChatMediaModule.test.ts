@@ -162,9 +162,16 @@ describe("ChatMediaModule", () => {
         expect(hooks.instructions?.(ctx, {} as AgentModuleScope)).toContain(
             "not in any parent or child chat",
         );
+        expect(hooks.instructions?.(ctx, {} as AgentModuleScope)).toContain(
+            "Link text, code, and Markdown files instead",
+        );
+        expect(hooks.instructions?.(ctx, {} as AgentModuleScope)).toContain(
+            "the parent should link text files and present only media",
+        );
         const tools = await hooks.tools!(ctx, { agent: { id: "agent-one" } } as AgentModuleScope);
         expect(tools.map((tool) => tool.name)).toEqual(["present_files"]);
         const [tool] = tools;
+        expect(tool!.description).toContain("Do not present text, code, or Markdown files");
         expect(tool!.durable).toBe(true);
         expect(await tool!.shouldReviewInAutoMode({ filepaths: ["note.txt"] }, ctx)).toBe(false);
         expect(await tool!.shouldReviewInAutoMode({ filepaths: ["/etc/passwd"] }, ctx)).toBe(true);
@@ -195,7 +202,7 @@ describe("ChatMediaModule", () => {
         expect(tool!.toLLM(result)).toEqual([
             {
                 type: "text",
-                text: 'Presented 1 file to the user in this chat: "note.txt" (file, text/plain, 4 bytes). The user sees them inline now, so do not repeat their paths or describe them as if the user cannot see them. They appear only in this chat\'s history, not in any parent or child chat; if a user should see them in another chat, the agent in that chat must present them there.',
+                text: 'Presented 1 file to the user in this chat: "note.txt" (file, text/plain, 4 bytes). The user sees them inline now, so do not repeat their paths or describe them as if the user cannot see them. They appear only in this chat\'s history, not in any parent or child chat; the agent in another chat should link text files and present only media there.',
             },
         ]);
     });
