@@ -17,10 +17,13 @@ import {
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { computePermissions, RunnerUnavailableError } from "@slopus/happy-agent-compute";
+import { type MessageMode } from "@slopus/happy-agent-client";
+import type { SessionReasoningEffort, SessionServiceTier } from "@slopus/happy-providers";
 import { afterCommit, backoff, detach, type Context, type RootContext } from "@steve.kite/stdlib";
 
 import { AbortModule } from "../abort/index.js";
 import type { BotSettingsModule } from "../botSettings/index.js";
+import { CollaborationModule } from "../collaboration/index.js";
 import { ComputeModule } from "../compute/index.js";
 import { ConfigModule } from "../config/index.js";
 import { DurableFunctionsModule } from "../durableFunctions/index.js";
@@ -112,6 +115,7 @@ export class TasksModule implements AgentModule {
     readonly #runners: RunnersModule;
     readonly #titles: TitlesModule;
     readonly #workspaces: WorkspacesModule;
+    readonly #collaboration: CollaborationModule;
     readonly #listeners = new Set<TaskEventListener>();
     readonly #namingTasks = new Map<string, Promise<void>>();
     readonly #botSettings: BotSettingsModule | undefined;
@@ -128,8 +132,10 @@ export class TasksModule implements AgentModule {
         runners: RunnersModule,
         compute: ComputeModule,
         durableFunctions: DurableFunctionsModule,
+        collaboration: CollaborationModule,
         botSettings?: BotSettingsModule,
     ) {
+        this.#collaboration = collaboration;
         this.#botSettings = botSettings;
         this.#config = config;
         this.#abort = abort;
@@ -179,8 +185,16 @@ export class TasksModule implements AgentModule {
             // subtask is one pair of hands inside work it was given.
             if ((await readTaskByAgent(ctx, scope.agent.id)) !== undefined) return [];
             if (!(await this.#offersTools(ctx, scope.agent.id))) return [];
+            const creator = { provider: scope.agent.provider, model: scope.agent.model };
             return [
-                createTaskTool(this, scope.agent.id, scope.kv),
+                createTaskTool(
+                    this,
+                    this.#collaboration,
+                    scope.agent.id,
+                    scope.kv,
+                    creator,
+                    await this.#collaboration.shownAgentOptions(ctx, scope.kv, creator),
+                ),
                 listTasksTool(this, scope.kv),
                 sendTaskMessageTool(this, scope.agent.id),
                 archiveTaskTool(this, scope.agent.id),
@@ -479,7 +493,26 @@ export class TasksModule implements AgentModule {
                 },
                 // A task's conversation is the task, so it is called what the task is called
                 // and chat naming never writes over it; an unnamed task names both itself.
-                metadata: { title: name, updatedAt: now, version: 1 },
+                metadata: {
+                    title: name,
+                    updatedAt: now,
+                    version: 1,
+                    ...(input.mode !== undefined && input.text === undefined
+                        ? {
+                              lastMode: input.mode,
+                              draft: {
+                                  effort: input.mode.effort,
+                                  modelId: input.mode.modelId,
+                                  permissionMode: input.mode.permissionMode,
+                                  providerId: input.mode.providerId,
+                                  serviceTier: input.mode.serviceTier,
+                                  text: "",
+                              },
+                              draftUpdatedAt: now,
+                              unstarted: true,
+                          }
+                        : {}),
+                },
                 modules: {
                     compute: {
                         cwd: path,
@@ -532,7 +565,14 @@ export class TasksModule implements AgentModule {
             if (input.text !== undefined && input.creatorAgentId !== undefined) {
                 // The agent ID doubles as the opening message's identity: it is new, and it is
                 // never reused, so the opening is delivered exactly once with the task.
-                await this.#deliver(txCtx, input.creatorAgentId, task, input.text, agentId);
+                await this.#deliver(
+                    txCtx,
+                    input.creatorAgentId,
+                    task,
+                    input.text,
+                    agentId,
+                    input.mode,
+                );
             }
             this.#publish(txCtx, {
                 eventId: globalThis.crypto.randomUUID(),
@@ -754,15 +794,24 @@ export class TasksModule implements AgentModule {
         task: TaskRecord,
         text: string,
         messageId: string,
+        explicitMode?: MessageMode,
     ): Promise<void> {
         const agents = this.#requireAgents();
         await ctx.inTx(async (txCtx) => {
-            const delivery = await agentDeliveryMode(
-                txCtx,
-                agents,
-                this.#config.models,
-                task.agentId,
-            );
+            const config = await agents.config(txCtx, task.agentId);
+            const delivery =
+                explicitMode !== undefined
+                    ? {
+                          mode: explicitMode,
+                          options: {
+                              effort: explicitMode.effort as SessionReasoningEffort,
+                              model: explicitMode.modelId,
+                              permissionMode: explicitMode.permissionMode,
+                              provider: explicitMode.providerId,
+                              serviceTier: explicitMode.serviceTier as SessionServiceTier,
+                          },
+                      }
+                    : await agentDeliveryMode(txCtx, agents, this.#config.models, task.agentId);
             const accepted = await agents.send(
                 txCtx,
                 task.agentId,
@@ -786,8 +835,11 @@ export class TasksModule implements AgentModule {
             if (accepted.id !== messageId) {
                 throw new Error("Agent Base did not preserve the requested message ID.");
             }
-            if (delivery !== undefined) {
-                await this.#updateAgentMetadata(txCtx, task.agentId, { lastMode: delivery.mode });
+            if (delivery !== undefined || config?.metadata?.["unstarted"] === true) {
+                await this.#updateAgentMetadata(txCtx, task.agentId, {
+                    ...(delivery === undefined ? {} : { lastMode: delivery.mode }),
+                    unstarted: null,
+                });
             }
         });
     }

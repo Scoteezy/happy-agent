@@ -39,6 +39,7 @@ function fixture() {
         {
             unreportedAgentMetadata: () => ({ collaboration: { reportToCreator: false } }),
             selectModel: () => ({ model: "test-model", effort: "high", provider: "codex" }),
+            selectAgentModel: () => ({ model: "test-model", effort: "high", provider: "codex" }),
         } as never,
         { onEventTransactional: vi.fn(), get: vi.fn() } as never,
         durableFunctions as never,

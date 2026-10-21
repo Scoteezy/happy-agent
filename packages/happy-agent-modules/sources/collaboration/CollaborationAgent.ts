@@ -59,6 +59,21 @@ export const collaborationCreateInputSchema = Type.Object(
 );
 
 /**
+ * What an agent asks a new conversation to run on, before it is checked against what is offered:
+ * the model-facing fields of `create_agent`, shared by every tool that opens a conversation.
+ */
+export const collaborationModelChoiceSchema = Type.Object(
+    {
+        model: Type.String({ minLength: 1, maxLength: 256 }),
+        effort: collaborationEffortSchema,
+        harness: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+        provider: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+        serviceTier: Type.Optional(collaborationServiceTierSchema),
+    },
+    { additionalProperties: false },
+);
+
+/**
  * What a collaborator runs on. It is chosen once, when the collaborator is created, and never
  * again: a later message may ask a collaborator to do something, but not to become a different
  * model, think harder, or run with wider permissions.
@@ -117,6 +132,7 @@ export type CollaborationAgentId = Static<typeof collaborationAgentIdSchema>;
 export type CollaborationEffort = Static<typeof collaborationEffortSchema>;
 export type CollaborationServiceTier = Static<typeof collaborationServiceTierSchema>;
 export type CollaborationAgentSelection = Static<typeof collaborationAgentSelectionSchema>;
+export type CollaborationModelChoice = Static<typeof collaborationModelChoiceSchema>;
 export type CollaborationCreateInput = Static<typeof collaborationCreateInputSchema>;
 export type CollaborationCreateOptions = Static<typeof collaborationCreateOptionsSchema>;
 export type CollaborationSendInput = Static<typeof collaborationSendInputSchema>;

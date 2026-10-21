@@ -4873,7 +4873,10 @@ export class ApiModule implements AgentModule {
                 accepted === undefined
                     ? pendingMessageResource(pending)
                     : messageResource(accepted);
-            await this.#updateAgentMetadata(ctx, agentId, { lastMode: body.mode });
+            await this.#updateAgentMetadata(ctx, agentId, {
+                lastMode: body.mode,
+                unstarted: null,
+            });
             this.#journal.append("message.created", {
                 agentId,
                 runId: null,

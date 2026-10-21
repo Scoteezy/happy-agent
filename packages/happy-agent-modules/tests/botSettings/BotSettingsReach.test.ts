@@ -135,6 +135,11 @@ describe("bot settings reach", () => {
                 {
                     unreportedAgentMetadata: () => ({ collaboration: { reportToCreator: false } }),
                     selectModel: () => ({ model: "test-model", effort: "high", provider: "codex" }),
+                    selectAgentModel: () => ({
+                        model: "test-model",
+                        effort: "high",
+                        provider: "codex",
+                    }),
                 } as never,
                 { onEventTransactional: vi.fn(), get: vi.fn(), createWorkspace } as never,
                 { register: vi.fn(), invoke: vi.fn(), cancel: vi.fn() } as never,

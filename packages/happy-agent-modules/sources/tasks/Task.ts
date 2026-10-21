@@ -1,4 +1,5 @@
 import { cuid2Schema } from "@slopus/happy-agent-base";
+import { messageModeSchema } from "@slopus/happy-agent-client";
 import { Type, type Static } from "@sinclair/typebox";
 
 export const taskStatusSchema = Type.Union([Type.Literal("active"), Type.Literal("archived")]);
@@ -95,6 +96,8 @@ export const createTaskInputSchema = Type.Object(
         creatorAgentId: Type.Optional(cuid2Schema),
         /** The opening message, delivered from `creatorAgentId` in the creating transaction. */
         text: Type.Optional(Type.String({ minLength: 1, maxLength: 100_000 })),
+        /** What the task's conversation runs on: seeds an idle draft, or delivered with opening text. */
+        mode: Type.Optional(messageModeSchema),
     },
     { additionalProperties: false },
 );

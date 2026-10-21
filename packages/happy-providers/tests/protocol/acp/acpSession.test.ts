@@ -18,6 +18,7 @@ import {
 import type { AcpSession } from "@/protocol/acp/AcpSession.js";
 import { acpDiscoverModels } from "@/protocol/acp/acpDiscoverModels.js";
 import { acpConnectionSpawn } from "@/protocol/acp/impl/acpConnectionSpawn.js";
+import { acpSessionRecordRead } from "@/protocol/acp/impl/acpSessionStore.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import { acpConfigOptionId } from "@/protocol/acp/impl/acpConfigOptions.js";
 import { acpGenericAgent } from "@/vendors/foreignAgents/acpGenericAgent.js";
@@ -85,6 +86,9 @@ function harness(options: { steerable?: boolean; profile?: AcpAgentProfile } = {
     const messages: SessionMessage[] = [];
     return {
         messages,
+        directory,
+        stateDirectory: join(directory, "state"),
+        launch,
         setPermissionMode: (mode: AcpPermissionMode) => {
             permissionMode = mode;
         },
@@ -93,6 +97,23 @@ function harness(options: { steerable?: boolean; profile?: AcpAgentProfile } = {
                 .trim()
                 .split("\n")
                 .map((line) => JSON.parse(line) as Record<string, unknown>),
+        async waitForLog(predicate: (entry: Record<string, unknown>) => boolean): Promise<void> {
+            for (let i = 0; i < 200; i++) {
+                try {
+                    if (
+                        readFileSync(logPath, "utf8")
+                            .trim()
+                            .split("\n")
+                            .map((line) => JSON.parse(line) as Record<string, unknown>)
+                            .some(predicate)
+                    ) {
+                        return;
+                    }
+                } catch {}
+                await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+            throw new Error("Timed out waiting for expected log entry.");
+        },
         async session(): Promise<AcpSession> {
             const session = await provider.session("agent-1", { instructions: "Be Happy.", tools });
             open.push(session);
@@ -355,6 +376,133 @@ describe("AcpSession", () => {
         const prompts = h.log().filter((entry) => entry.method === "prompt");
         expect(prompts.at(-1)).toMatchObject({ text: "change of plan" });
         expect(h.log().filter((entry) => entry.method === "newSession")).toHaveLength(1);
+    }, 30_000);
+
+    it("replays the opening into a new session when steering stops a first prompt the agent never ended", async () => {
+        const h = harness();
+        const session = await h.session();
+        h.user("stubborn opening task");
+        const steering = new AbortController();
+        const running = h.run(session, undefined, steering.signal);
+        await h.waitForLog((e) => e.method === "prompt" && String(e.text).includes("stubborn"));
+        steering.abort();
+        expect(done(await running)).toMatchObject({ state: "normal" });
+
+        // The stopped agent never saved the session it bound, so restoring it would continue an
+        // empty conversation with only the steering. The opening must reach the agent again.
+        h.user("follow-up facts");
+        const reply = text(await h.run(session));
+        expect(reply).toContain("<happy-instructions>\nBe Happy.");
+        expect(reply).toContain("User: stubborn opening task");
+        expect(reply).toContain("follow-up facts");
+        const log = h.log();
+        expect(log.filter((entry) => entry.method === "newSession")).toHaveLength(2);
+        expect(log.filter((entry) => entry.method === "loadSession")).toHaveLength(0);
+        expect(new Set(log.map((entry) => entry.pid)).size).toBe(2);
+    }, 30_000);
+
+    it("replays the opening after a daemon reload when the previous process was stopped unanswered", async () => {
+        const h = harness();
+        const session = await h.session();
+        h.user("stubborn opening task");
+        const steering = new AbortController();
+        const running = h.run(session, undefined, steering.signal);
+        await h.waitForLog((e) => e.method === "prompt" && String(e.text).includes("stubborn"));
+        steering.abort();
+        expect(done(await running)).toMatchObject({ state: "normal" });
+
+        // Simulate a daemon restart: destroy current session and create a fresh provider and session
+        // against the exact same stateDirectory and command.
+        await session.destroy();
+        const reloadedProvider = new AcpProvider({
+            launch: h.launch,
+            stateDirectory: h.stateDirectory,
+            environment: () => ({ cwd: h.directory, permissionMode: "auto" }),
+            profile: {
+                modelOptions: (model) =>
+                    model === undefined ? [] : [{ configId: "model", value: model }],
+                permissionOptions: (mode) => [{ configId: "mode", value: mode }],
+            },
+        });
+        const reloadedSession = await reloadedProvider.session("agent-1", {
+            instructions: "Be Happy.",
+            tools,
+        });
+        open.push(reloadedSession);
+
+        h.user("follow-up after reload");
+        const reply = text(await h.run(reloadedSession));
+        expect(reply).toContain("<happy-instructions>\nBe Happy.");
+        expect(reply).toContain("User: stubborn opening task");
+        expect(reply).toContain("follow-up after reload");
+        const log = h.log();
+        expect(log.filter((entry) => entry.method === "newSession")).toHaveLength(2);
+        expect(log.filter((entry) => entry.method === "loadSession")).toHaveLength(0);
+    }, 30_000);
+
+    it("does not write a resume record to disk when a first prompt ends in prompt_error and replays on retry", async () => {
+        const h = harness();
+        const session = await h.session();
+        h.user("fail late prompt");
+        const events = await h.run(session);
+        expect(done(events)).toMatchObject({
+            state: "error",
+            message: expect.stringContaining("internal agent error after update"),
+        });
+
+        // Verify that no unconfirmed session record was persisted to disk.
+        await expect(acpSessionRecordRead(h.stateDirectory, "agent-1")).resolves.toBeUndefined();
+
+        h.user("recovery attempt");
+        const reply = text(await h.run(session));
+        expect(reply).toContain("<happy-instructions>\nBe Happy.");
+        expect(reply).toContain("fail late prompt");
+        expect(reply).toContain("recovery attempt");
+    }, 30_000);
+
+    it("replays the opening when user abort cancels a first prompt before the agent ends it", async () => {
+        const h = harness();
+        const session = await h.session();
+        h.user("stubborn opening task");
+        const abortController = new AbortController();
+        const running = h.run(session, abortController.signal);
+        await h.waitForLog((e) => e.method === "prompt" && String(e.text).includes("stubborn"));
+        abortController.abort();
+        const result = await running;
+        expect(done(result)).toMatchObject({ state: "cancelled" });
+
+        // Assert nothing is on disk
+        await expect(acpSessionRecordRead(h.stateDirectory, "agent-1")).resolves.toBeUndefined();
+
+        h.user("follow-up after cancel");
+        const reply = text(await h.run(session));
+        expect(reply).toContain("<happy-instructions>\nBe Happy.");
+        expect(reply).toContain("User: stubborn opening task");
+        expect(reply).toContain("follow-up after cancel");
+        const log = h.log();
+        expect(log.filter((entry) => entry.method === "newSession")).toHaveLength(2);
+        expect(log.filter((entry) => entry.method === "loadSession")).toHaveLength(0);
+    }, 30_000);
+
+    it("keeps continuing a session that already answered when a later prompt is stopped unanswered", async () => {
+        const h = harness();
+        const session = await h.session();
+        h.user("first");
+        await h.run(session);
+        h.user("stubborn second");
+        const steering = new AbortController();
+        const running = h.run(session, undefined, steering.signal);
+        await h.waitForLog(
+            (e) => e.method === "prompt" && String(e.text).includes("stubborn second"),
+        );
+        steering.abort();
+        await running;
+
+        h.user("third");
+        expect(text(await h.run(session))).toBe("echo:third");
+        const log = h.log();
+        expect(log.filter((entry) => entry.method === "newSession")).toHaveLength(1);
+        expect(log.filter((entry) => entry.method === "loadSession")).toHaveLength(1);
     }, 30_000);
 
     it("hands steering to an agent that takes input mid-turn without stopping it", async () => {

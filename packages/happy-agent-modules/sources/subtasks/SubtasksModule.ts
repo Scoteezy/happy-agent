@@ -269,6 +269,7 @@ export class SubtasksModule implements AgentModule {
             throw new Error("A workspace-bound subtask needs its own workspace identity.");
         }
         const { workspace: requestedWorkspace, ...task } = input;
+        const { title: _title, text: _text, ...choice } = task;
         const agents = this.#requireAgents();
         return await ctx.inTx(async (txCtx) => {
             const existing = await agents.config(txCtx, agentId);
@@ -292,7 +293,7 @@ export class SubtasksModule implements AgentModule {
                     "This bot's settings keep its subtasks in the bot's own folder, so a subtask cannot work in a project workspace.",
                 );
             }
-            const selection = this.#collaboration.selectModel(task, creator);
+            const selection = this.#collaboration.selectAgentModel(choice, creator);
             const resolvedInput = { ...input, ...selection };
             const workspace =
                 requestedWorkspace === undefined

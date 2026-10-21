@@ -15,11 +15,13 @@ differs from a bot in four ways:
 const tasks = new TasksModule(
     config,
     abort,
+    titles,
     projects,
     workspaces,
     runners,
     compute,
     durableFunctions,
+    collaboration,
 );
 ```
 

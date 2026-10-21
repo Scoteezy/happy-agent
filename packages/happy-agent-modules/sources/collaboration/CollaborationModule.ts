@@ -30,12 +30,14 @@ import {
     collaborationAgentIdSchema,
     collaborationCreateInputSchema,
     collaborationCreateOptionsSchema,
+    collaborationModelChoiceSchema,
     collaborationSendInputSchema,
     type CollaborationAgentSelection,
     type CollaborationCreateInput,
     type CollaborationCreateOptions,
     type CollaborationCreateResult,
     type CollaborationCreator,
+    type CollaborationModelChoice,
     type CollaborationSendInput,
 } from "./CollaborationAgent.js";
 import {
@@ -196,6 +198,20 @@ export class CollaborationModule implements AgentModule {
         creator?: CollaborationCreator,
     ): CollaborationAgentSelection & { readonly provider: string } {
         this.#assert(collaborationCreateInputSchema, input, "create agent");
+        const { title: _title, text: _text, ...choice } = input;
+        return this.selectAgentModel(choice, creator);
+    }
+
+    /**
+     * Resolve what a new conversation runs on, by the rules `create_agent` follows: the harness
+     * named or the creator's own when it serves the model, the provider named or the creator's own
+     * when it serves the model, and only what this installation offers new agents.
+     */
+    selectAgentModel(
+        input: CollaborationModelChoice,
+        creator?: CollaborationCreator,
+    ): CollaborationAgentSelection & { readonly provider: string } {
+        this.#assert(collaborationModelChoiceSchema, input, "model choice");
         const models = this.#onHarness(this.#availableModels(), input, creator);
         const currentProviderId = creator?.provider;
         const provider =
@@ -876,7 +892,7 @@ export class CollaborationModule implements AgentModule {
      */
     #onHarness(
         models: readonly AgentModel[],
-        input: CollaborationCreateInput,
+        input: CollaborationModelChoice,
         creator: CollaborationCreator | undefined,
     ): readonly AgentModel[] {
         const harnessOf = (model: AgentModel) => this.#config.harnessOf(model.providerId, model.id);
@@ -921,7 +937,7 @@ export class CollaborationModule implements AgentModule {
     /** Reject a model, effort, provider, or tier the collection does not actually offer. */
     #validateSelection(
         models: readonly AgentModel[],
-        input: CollaborationCreateInput,
+        input: CollaborationModelChoice,
     ): CollaborationAgentSelection {
         if (input.provider === undefined) {
             const providers = new Set(

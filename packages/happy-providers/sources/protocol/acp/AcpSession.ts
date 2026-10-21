@@ -27,6 +27,7 @@ import {
 } from "@/protocol/acp/impl/acpPromptFromMessages.js";
 import { ACP_BRIDGE_NAME, AcpResponseEvents } from "@/protocol/acp/impl/acpResponseEvents.js";
 import {
+    acpSessionRecordClear,
     acpSessionRecordRead,
     acpSessionRecordWrite,
     acpTranscriptFingerprint,
@@ -118,6 +119,13 @@ export class AcpSession extends BaseSession {
     #cwd: string | undefined;
     #record: AcpSessionRecord | undefined;
     #recordLoaded = false;
+    /**
+     * The foreign session known to keep what it was sent: one that answered a prompt, or one
+     * restored from a stored record. An agent may save a new session only once it ends a prompt,
+     * so a session stopped before answering its first one may come back empty. Until a session is
+     * known here, where it stands is kept in memory only and is dropped when its agent stops.
+     */
+    #keptSessionId: string | undefined;
     #turn: LiveTurn | undefined;
     #previousPrompt: Promise<unknown> = Promise.resolve();
     /** Settles once a stopped agent process has exited, so its successor never overlaps it. */
@@ -446,6 +454,7 @@ export class AcpSession extends BaseSession {
                     this.#connection = undefined;
                     this.#acpSessionId = undefined;
                     this.#applied.clear();
+                    this.#forgetUnkeptRecord();
                 });
                 return connection;
             },
@@ -516,6 +525,8 @@ export class AcpSession extends BaseSession {
         this.#cwd = environment.cwd;
         this.#applied.clear();
         this.#record = undefined;
+        // The replaced session must not be continued by a later process before this one is kept.
+        await acpSessionRecordClear(this.#options.stateDirectory, this.id);
         this.#unprompted = true;
         let lastResponse = -1;
         messages.forEach((message, index) => {
@@ -565,6 +576,7 @@ export class AcpSession extends BaseSession {
             return false;
         }
         this.#acpSessionId = record.acpSessionId;
+        this.#keptSessionId = record.acpSessionId;
         this.#cwd = environment.cwd;
         this.#applied.clear();
         return true;
@@ -687,7 +699,27 @@ export class AcpSession extends BaseSession {
         }
         this.#unprompted = false;
         this.#previousPrompt = send().then(
-            (response) => turn.items.push({ kind: "prompt_end", response }),
+            async (response) => {
+                // An agent that answered a prompt has saved its session, so where this
+                // conversation stands in it may now outlive the agent's process.
+                //
+                // Replay tradeoff: If an agent process was stopped or died before ending its first
+                // prompt, the opening prompt will be replayed in a fresh session. The new session
+                // may repeat external work (such as tool calls or mutations) that the previous dead
+                // process began before hanging or stopping. This duplicate-work tradeoff is preferred
+                // over silent loss of opening instructions.
+                //
+                // Prompts that complete with stopReason "cancelled" (via graceful prompt cancellation)
+                // successfully resolve `send()` and therefore count as kept by design: the foreign agent
+                // acknowledged and saved the session state before closing the turn.
+                if (this.#keptSessionId !== sessionId) {
+                    this.#keptSessionId = sessionId;
+                    if (this.#record?.acpSessionId === sessionId) {
+                        await this.#writeRecord(this.#record).catch(() => undefined);
+                    }
+                }
+                turn.items.push({ kind: "prompt_end", response });
+            },
             (error: unknown) => turn.items.push({ kind: "prompt_error", error }),
         );
     }
@@ -718,7 +750,17 @@ export class AcpSession extends BaseSession {
         this.#stopping = settleWithin(prompt, CANCEL_GRACE_MS).then(async () => {
             connection.terminate(groups);
             await settleWithin(connection.exited, CANCEL_GRACE_MS);
+            // A session stopped before it answered any prompt may never have been saved; the next
+            // run opens a new one and replays the conversation rather than lose its start.
+            this.#forgetUnkeptRecord();
         });
+    }
+
+    /** Drop where the conversation stands in a session its agent may not have kept. */
+    #forgetUnkeptRecord(): void {
+        if (this.#record !== undefined && this.#record.acpSessionId !== this.#keptSessionId) {
+            this.#record = undefined;
+        }
     }
 
     #abandonTurn(): void {
@@ -750,7 +792,14 @@ export class AcpSession extends BaseSession {
             consumed: inputs.length,
             fingerprint: acpTranscriptFingerprint(inputs),
         };
-        await acpSessionRecordWrite(this.#options.stateDirectory, this.id, this.#record);
+        // Stored once the agent is known to keep the session; until then it lives only here.
+        if (this.#record.acpSessionId === this.#keptSessionId) {
+            await this.#writeRecord(this.#record);
+        }
+    }
+
+    async #writeRecord(record: AcpSessionRecord): Promise<void> {
+        await acpSessionRecordWrite(this.#options.stateDirectory, this.id, record);
     }
 
     #answerPermission(params: acp.RequestPermissionRequest): acp.RequestPermissionResponse {

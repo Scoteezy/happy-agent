@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { SessionMessage } from "@/core/SessionContext.js";
@@ -56,6 +56,12 @@ export async function acpSessionRecordWrite(
     const temporary = `${path}.${process.pid}.tmp`;
     await writeFile(temporary, JSON.stringify(record), { mode: 0o600 });
     await rename(temporary, path);
+}
+
+/** Forget where the conversation stood, so a later process cannot continue a session it replaced. */
+export async function acpSessionRecordClear(directory: string, id: string): Promise<void> {
+    // Failing to clear a stale session record should not fail the session opening or turn.
+    await rm(recordPath(directory, id), { force: true }).catch(() => undefined);
 }
 
 /**

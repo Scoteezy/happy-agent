@@ -20,6 +20,7 @@ import {
 } from "../../sources/botSettings/index.js";
 import { botMigrations, BotConflictError, BotsModule } from "../../sources/bots/index.js";
 import { ComputeModule } from "../../sources/compute/index.js";
+import { CollaborationModule } from "../../sources/collaboration/index.js";
 import { DurableFunctionsModule } from "../../sources/durableFunctions/index.js";
 import { GitModule } from "../../sources/git/index.js";
 import { HistoryModule } from "../../sources/history/index.js";
@@ -42,6 +43,7 @@ const LOCKED: BotSettings = {
 
 /** An agent collection that keeps configurations and ancestry in memory. */
 class Agents {
+    readonly models = [];
     readonly configs = new Map<string, AgentConfig>();
     readonly parents = new Map<string, string | null>();
 
@@ -149,6 +151,7 @@ async function started(name: string) {
         botSettings,
     );
     const titles = new TitlesModule(config, new HistoryModule(), workspaces);
+    const collaboration = new CollaborationModule(config, abort, new HistoryModule(), compute);
     const tasks = new TasksModule(
         config,
         abort,
@@ -162,6 +165,7 @@ async function started(name: string) {
             invoke: vi.fn(),
             cancel: vi.fn(),
         } as unknown as DurableFunctionsModule,
+        collaboration,
         botSettings,
     );
     const bots = new BotsModule(
@@ -175,6 +179,7 @@ async function started(name: string) {
         botSettings,
     );
     const hooks: Record<string, AgentModuleHooks> = {
+        collaboration: collaboration.beforeStart(ctx, agents.asRef()),
         projects: projects.beforeStart(ctx, agents.asRef()),
         workspaces: workspaces.beforeStart(ctx, agents.asRef()),
         tasks: tasks.beforeStart(ctx, agents.asRef()),

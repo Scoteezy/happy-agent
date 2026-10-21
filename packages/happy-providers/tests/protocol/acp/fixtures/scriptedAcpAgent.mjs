@@ -5,7 +5,7 @@
 // Prompt directives: "use happy" calls the bridged happy_secret tool and replies with its answer;
 // "wait" holds the prompt open until cancelled or steered; "throttled" is refused as too many
 // requests the first time it is sent, and "throttled late" only after reporting a tool call;
-// "over quota" fails with a 429 that names a weekly limit;
+// "over quota" fails with a 429 that names a weekly limit; "stubborn" never ends its first prompt;
 // anything else is echoed back.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { Readable, Writable } from "node:stream";
@@ -20,6 +20,8 @@ const log = (entry) =>
         `${JSON.stringify({ ...entry, pid: process.pid })}\n`,
     );
 const sessionsFile = `${process.env.SCRIPTED_ACP_LOG}.sessions`;
+const stubbornFile = `${process.env.SCRIPTED_ACP_LOG}.stubborn`;
+const failedFile = `${process.env.SCRIPTED_ACP_LOG}.failed`;
 const known = () =>
     existsSync(sessionsFile) ? JSON.parse(readFileSync(sessionsFile, "utf8")) : {};
 
@@ -124,6 +126,16 @@ class ScriptedAgent {
             });
         if (text.includes("throttled late")) {
             throw new Error("exceeded retry limit, last status: 429 Too Many Requests");
+        }
+        if (text.includes("fail late") && !existsSync(failedFile)) {
+            writeFileSync(failedFile, "");
+            throw new Error("internal agent error after update");
+        }
+        // "stubborn" holds the first such prompt open and ignores cancellation, as an agent that
+        // saves a new session only when its prompt ends can be stopped before saving it.
+        if (text.includes("stubborn") && !existsSync(stubbornFile)) {
+            writeFileSync(stubbornFile, "");
+            await new Promise(() => undefined);
         }
         if (text.includes("wait")) {
             const steered = await new Promise((resolve) =>

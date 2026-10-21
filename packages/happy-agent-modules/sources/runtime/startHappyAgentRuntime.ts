@@ -489,6 +489,14 @@ export async function startHappyAgentRuntime(
             botSettings,
         );
         const titles = new TitlesModule(config, history, workspaces);
+        const collaboration = new CollaborationModule(
+            config,
+            abort,
+            history,
+            compute.computeModule,
+            botSettings,
+            providerUsage,
+        );
         const tasks = new TasksModule(
             config,
             abort,
@@ -498,6 +506,7 @@ export async function startHappyAgentRuntime(
             runners,
             compute.computeModule,
             durableFunctions,
+            collaboration,
             botSettings,
         );
         const bots = new BotsModule(
@@ -567,14 +576,6 @@ export async function startHappyAgentRuntime(
         registerShutdown(
             "artifact-data",
             async (shutdownCtx) => await artifactData.close(shutdownCtx),
-        );
-        const collaboration = new CollaborationModule(
-            config,
-            abort,
-            history,
-            compute.computeModule,
-            botSettings,
-            providerUsage,
         );
         const subtasks = new SubtasksModule(
             bots,

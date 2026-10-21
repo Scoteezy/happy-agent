@@ -102,3 +102,20 @@ Tasks are root agents, so working through a task would have escaped the opening 
 A task created by an agent is linked to its creator's tree in the creation transaction, and the bot
 settings module treats it as part of that tree from then on. A bot kept inside its own tree is also
 not offered the task tools, since tasks belong outside any one tree.
+
+## Native task model selection seeds idle drafts and stamps opening text
+
+Tasks previously ran on whatever model the creating agent was running on, with no way to choose a
+model at creation time. An idle task recorded no model at all until a message was sent; a working
+hypothesis is that Desktop's composer fell back to its default model (such as GPT-6.1 Sol) because
+neither stored mode nor draft was populated in agent metadata on creation. Verification of Desktop
+model picker, draft, and team-mode behavior belongs to a separate Desktop workstream coordinated by
+Chief, which owns Desktop tests and fixes.
+
+On the daemon side, `create_task` now accepts optional `model`, `effort`, `harness`, `provider`, and
+`serviceTier`, resolved through `CollaborationModule.selectAgentModel` identically to `create_agent`
+and `create_subtask`. When created with opening text, the chosen mode is stamped directly onto the
+opening message and persisted as `lastMode`. When created idle, the chosen mode is seeded as both
+`lastMode` and an empty-text draft in the agent's metadata (`draft` and `draftUpdatedAt`), marked
+`unstarted: true`. Subsequent agent messages to the idle task preserve and run on that seeded mode,
+clearing the `unstarted` state so later agent messages carry no override.

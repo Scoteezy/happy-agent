@@ -23,6 +23,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AbortModule } from "../../sources/abort/index.js";
 import { botMigrations, BotsModule } from "../../sources/bots/index.js";
+import { CollaborationModule } from "../../sources/collaboration/index.js";
 import { ComputeModule } from "../../sources/compute/index.js";
 import { DurableFunctionsModule } from "../../sources/durableFunctions/index.js";
 import { GitModule } from "../../sources/git/index.js";
@@ -71,6 +72,7 @@ const MODELS: readonly AgentModel[] = [
 const OTHER_OWNER = "ownerusero9p8q7r6s5t4u3v2";
 
 class TaskAgents {
+    readonly models: readonly AgentModel[] = MODELS;
     readonly configs = new Map<string, AgentConfig>();
     readonly parents = new Map<string, string | null>();
     readonly aborted: string[] = [];
@@ -940,6 +942,301 @@ describe("TasksModule", () => {
         }
     });
 
+    it("creates a task with model selection and opening text, stamping the chosen mode on the message", async () => {
+        const fixture = await started("tasks-create-model-text");
+        try {
+            const ctx = fixture.database.context;
+            const bot = await fixture.bots.create(ctx, { name: "Creator" });
+            const task = await fixture.executeCreate(bot.agentId, {
+                name: "Task With Model",
+                text: "Start working with deep model",
+                model: "scripted/deep",
+                effort: "high",
+                serviceTier: "priority",
+            });
+            expect(task.name).toBe("Task With Model");
+
+            const sent = fixture.agents.sent.find((entry) => entry.agentId === task.agentId);
+            expect(sent).toBeDefined();
+            expect(sent?.id).toBe(task.agentId);
+            const options = fixture.agents.options.get(task.agentId);
+            expect(options).toMatchObject({
+                model: "scripted/deep",
+                effort: "high",
+                provider: "scripted",
+                serviceTier: "priority",
+                permissionMode: "auto",
+            });
+            expect(options?.metadata).toMatchObject({
+                mode: {
+                    modelId: "scripted/deep",
+                    effort: "high",
+                    providerId: "scripted",
+                    serviceTier: "priority",
+                    permissionMode: "auto",
+                },
+            });
+
+            const config = fixture.agents.configs.get(task.agentId);
+            expect(config?.metadata?.["lastMode"]).toEqual({
+                modelId: "scripted/deep",
+                effort: "high",
+                providerId: "scripted",
+                serviceTier: "priority",
+                permissionMode: "auto",
+            });
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it("creates an idle task with model selection, seeding draft in agent metadata", async () => {
+        const fixture = await started("tasks-create-idle-model");
+        try {
+            const ctx = fixture.database.context;
+            const bot = await fixture.bots.create(ctx, { name: "Creator" });
+            const task = await fixture.executeCreate(bot.agentId, {
+                name: "Idle Deep Task",
+                model: "scripted/deep",
+                effort: "high",
+            });
+            expect(task.name).toBe("Idle Deep Task");
+
+            const sent = fixture.agents.sent.filter((entry) => entry.agentId === task.agentId);
+            expect(sent).toHaveLength(0);
+
+            const config = fixture.agents.configs.get(task.agentId);
+            expect(config?.metadata?.["draft"]).toEqual({
+                modelId: "scripted/deep",
+                effort: "high",
+                providerId: "scripted",
+                serviceTier: null,
+                permissionMode: "auto",
+                text: "",
+            });
+            expect(typeof config?.metadata?.["draftUpdatedAt"]).toBe("number");
+            expect(config?.metadata?.["lastMode"]).toEqual({
+                modelId: "scripted/deep",
+                effort: "high",
+                providerId: "scripted",
+                serviceTier: null,
+                permissionMode: "auto",
+            });
+            expect(config?.metadata?.["unstarted"]).toBe(true);
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it("preserves the seeded draft mode when a follow-up is delivered to an idle task", async () => {
+        const fixture = await started("tasks-idle-followup-preservation");
+        try {
+            const ctx = fixture.database.context;
+            const bot = await fixture.bots.create(ctx, { name: "Creator" });
+            const task = await fixture.executeCreate(bot.agentId, {
+                name: "Idle Deep Task",
+                model: "scripted/deep",
+                effort: "high",
+            });
+
+            const sendTool = await fixture.tool(bot.agentId, "send_task_message");
+            await sendTool.execute(ctx, { taskId: task.id, text: "Follow-up instructions" }, {
+                id: "send-1",
+                kv: { getOrCreate: async () => "msg-1" },
+            } as never);
+
+            const options = fixture.agents.options.get("send-1");
+            expect(options).toMatchObject({
+                model: "scripted/deep",
+                effort: "high",
+                provider: "scripted",
+                serviceTier: null,
+                permissionMode: "auto",
+            });
+            expect(options?.metadata).toMatchObject({
+                mode: {
+                    modelId: "scripted/deep",
+                    effort: "high",
+                    providerId: "scripted",
+                    serviceTier: null,
+                    permissionMode: "auto",
+                },
+            });
+
+            const config = fixture.agents.configs.get(task.agentId);
+            expect(config?.metadata?.["lastMode"]).toMatchObject({
+                modelId: "scripted/deep",
+                effort: "high",
+                providerId: "scripted",
+            });
+            expect(config?.metadata?.["unstarted"]).toBeNull();
+
+            // A subsequent agent message to the now-started task carries no model override.
+            await sendTool.execute(ctx, { taskId: task.id, text: "Second message" }, {
+                id: "send-2",
+                kv: { getOrCreate: async () => "msg-2" },
+            } as never);
+            const secondOptions = fixture.agents.options.get("send-2");
+            expect(secondOptions?.model).toBeUndefined();
+            expect(secondOptions?.provider).toBeUndefined();
+            expect(secondOptions?.metadata?.["mode"]).toBeUndefined();
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it("rejects invalid model or effort combinations in create_task", async () => {
+        const fixture = await started("tasks-create-validation");
+        try {
+            const ctx = fixture.database.context;
+            const bot = await fixture.bots.create(ctx, { name: "Creator" });
+
+            await expect(
+                fixture.executeCreate(bot.agentId, {
+                    name: "Bad Model",
+                    model: "scripted/unknown",
+                    effort: "high",
+                }),
+            ).rejects.toThrow('Model "scripted/unknown" is not available');
+
+            await expect(
+                fixture.executeCreate(bot.agentId, {
+                    name: "Bad Effort",
+                    model: "scripted/deep",
+                    effort: "low",
+                }),
+            ).rejects.toThrow(
+                'Effort "low" is not available for collaborator model "scripted/deep".',
+            );
+
+            await expect(
+                fixture.executeCreate(bot.agentId, {
+                    name: "Missing Effort",
+                    model: "scripted/deep",
+                }),
+            ).rejects.toThrow("Effort is required when a model is selected.");
+
+            await expect(
+                fixture.executeCreate(bot.agentId, {
+                    name: "Missing Model",
+                    effort: "high",
+                }),
+            ).rejects.toThrow(
+                "A model must be selected to specify effort, harness, provider, or service tier.",
+            );
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it("rejects provider mismatch, unavailable service tiers, and non-serving harnesses", async () => {
+        const fixture = await started("tasks-create-resolver-checks");
+        try {
+            const ctx = fixture.database.context;
+            const bot = await fixture.bots.create(ctx, { name: "Creator" });
+
+            // Provider mismatch: model exists, but not from this provider
+            await expect(
+                fixture.executeCreate(bot.agentId, {
+                    name: "Wrong Provider",
+                    model: "scripted/deep",
+                    effort: "high",
+                    provider: "nonexistent",
+                }),
+            ).rejects.toThrow(
+                'Model "scripted/deep" is not available from provider "nonexistent".',
+            );
+
+            // Service tier not offered on model
+            await expect(
+                fixture.executeCreate(bot.agentId, {
+                    name: "Unsupported Tier",
+                    model: "scripted/default",
+                    effort: "medium",
+                    serviceTier: "priority",
+                }),
+            ).rejects.toThrow(
+                'Service tier "priority" is not available for collaborator model "scripted/default".',
+            );
+
+            // Harness that does not run this model
+            await expect(
+                fixture.executeCreate(bot.agentId, {
+                    name: "Wrong Harness",
+                    model: "scripted/deep",
+                    effort: "high",
+                    harness: "disabled-harness",
+                }),
+            ).rejects.toThrow('Model "scripted/deep" does not run on harness "disabled-harness"');
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it("falls back to creator model when seeded model is no longer offered", async () => {
+        const fixture = await started("tasks-model-fallback");
+        try {
+            const ctx = fixture.database.context;
+            const bot = await fixture.bots.create(ctx, { name: "Creator" });
+            const task = await fixture.executeCreate(bot.agentId, {
+                name: "Fallback Task",
+                model: "scripted/deep",
+                effort: "high",
+            });
+
+            // Simulate the seeded model being removed from available models
+            Object.defineProperty(fixture.config, "models", {
+                value: [MODELS[0]],
+                configurable: true,
+            });
+
+            const sendTool = await fixture.tool(bot.agentId, "send_task_message");
+            await sendTool.execute(
+                ctx,
+                { taskId: task.id, text: "Follow-up after model retired" },
+                { id: "send-fallback", kv: { getOrCreate: async () => "msg-fallback" } } as never,
+            );
+
+            const options = fixture.agents.options.get("send-fallback");
+            expect(options).toMatchObject({
+                model: "scripted/default",
+                effort: "medium",
+                provider: "scripted",
+            });
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it("preserves backward compatibility when model is omitted", async () => {
+        const fixture = await started("tasks-create-omitted-model");
+        try {
+            const ctx = fixture.database.context;
+            const bot = await fixture.bots.create(ctx, { name: "Creator" });
+            const task = await fixture.executeCreate(bot.agentId, {
+                name: "Legacy Task",
+                text: "Opening message without explicit model",
+            });
+            expect(task.name).toBe("Legacy Task");
+
+            const options = fixture.agents.options.get(task.agentId);
+            expect(options).toMatchObject({
+                model: "scripted/default",
+                effort: "medium",
+                provider: "scripted",
+            });
+            const config = fixture.agents.configs.get(task.agentId);
+            expect(config?.metadata?.["lastMode"]).toMatchObject({
+                modelId: "scripted/default",
+                effort: "medium",
+                providerId: "scripted",
+            });
+            expect(config?.metadata?.["draft"]).toBeUndefined();
+        } finally {
+            await fixture.close();
+        }
+    });
+
     it("keeps tasks named before automatic naming existed as chosen names", async () => {
         const database = moduleDatabase(taskMigrations.slice(0, 3), "tasks-naming-migration");
         try {
@@ -1007,6 +1304,9 @@ interface AcceptedSender {
 async function started(name: string, options: { readonly team?: boolean } = {}) {
     const config = await temporaryTestConfig(
         [
+            "[providers.scripted]",
+            'type = "codex"',
+            "enabled = true",
             "[features]",
             "workspaces = false",
             ...(options.team === true
@@ -1043,6 +1343,8 @@ async function started(name: string, options: { readonly team?: boolean } = {}) 
     const durable = { register: vi.fn(), invoke: vi.fn(), cancel: vi.fn() };
     const titles = new TitlesModule(config, new HistoryModule(), workspaces);
     const naming = vi.spyOn(titles, "suggestNames");
+    const collaboration = new CollaborationModule(config, abort, new HistoryModule(), compute);
+    collaboration.beforeStart(database.context, agents.asRef());
     const tasks = new TasksModule(
         config,
         abort,
@@ -1052,6 +1354,7 @@ async function started(name: string, options: { readonly team?: boolean } = {}) 
         runners,
         compute,
         durable as unknown as DurableFunctionsModule,
+        collaboration,
     );
     const taskHooks = tasks.beforeStart(database.context, agents.asRef());
     const bots = new BotsModule(config, abort, titles, projects, workspaces, runners, tasks);
@@ -1064,7 +1367,10 @@ async function started(name: string, options: { readonly team?: boolean } = {}) 
     const scopeFor = (agentId: string): AgentModuleScope => {
         const kv = kvs.get(agentId) ?? sharedKV();
         kvs.set(agentId, kv);
-        return { agent: { id: agentId, provider: "scripted" }, kv } as AgentModuleScope;
+        return {
+            agent: { id: agentId, provider: "scripted", model: "scripted/default" },
+            kv,
+        } as AgentModuleScope;
     };
     const taskToolsFor = async (agentId: string): Promise<readonly AnyAgentTool[]> =>
         (await taskHooks.tools?.(database.context, scopeFor(agentId))) ?? [];
@@ -1133,14 +1439,22 @@ async function started(name: string, options: { readonly team?: boolean } = {}) 
         },
         executeCreate: async (
             agentId: string,
-            input: { readonly name: string; readonly text?: string },
+            input: {
+                readonly name?: string;
+                readonly text?: string;
+                readonly model?: string;
+                readonly effort?: string;
+                readonly harness?: string;
+                readonly provider?: string;
+                readonly serviceTier?: string;
+            },
             remembered = new Map<string, unknown>(),
             ctx: Context = database.context,
         ): Promise<TaskRecord> =>
             (await (
                 await tool(agentId, "create_task")
             ).execute(ctx, input, {
-                id: `create-${input.name}`,
+                id: `create-${input.name ?? "unnamed"}`,
                 kv: {
                     getOrCreate: async (
                         _ctx: Context,

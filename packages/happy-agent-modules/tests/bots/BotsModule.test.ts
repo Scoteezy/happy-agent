@@ -30,6 +30,7 @@ import {
     type BotRecord,
 } from "../../sources/bots/index.js";
 import { ComputeModule } from "../../sources/compute/index.js";
+import { CollaborationModule } from "../../sources/collaboration/index.js";
 import { DurableFunctionsModule } from "../../sources/durableFunctions/index.js";
 import { GitModule } from "../../sources/git/index.js";
 import { HistoryModule } from "../../sources/history/index.js";
@@ -955,6 +956,7 @@ async function started(name: string, workspacesEnabled: boolean, script: Scripte
     );
     const titles = new TitlesModule(config, new HistoryModule(), workspaces);
     const naming = vi.spyOn(titles, "suggestBotName");
+    const collaboration = new CollaborationModule(config, abort, new HistoryModule(), compute);
     const tasks = new TasksModule(
         config,
         abort,
@@ -964,6 +966,7 @@ async function started(name: string, workspacesEnabled: boolean, script: Scripte
         runners,
         compute,
         new DurableFunctionsModule(),
+        collaboration,
     );
     tasks.beforeStart(database.context, agents.asRef());
     const bots = new BotsModule(config, abort, titles, projects, workspaces, runners, tasks);
