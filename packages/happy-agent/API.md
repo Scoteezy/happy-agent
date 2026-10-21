@@ -6109,7 +6109,7 @@ expected arguments are present:
 | `search`       | `bedrock_web_search`, `claude_web_search`, `codex_web_search`, `gemini_web_search`, `grok_web_search`, `grok_x_search` |
 | `agent_spawn`  | `create_agent`                                                                                                         |
 | `media`        | `codex_imagegen`, `gemini_imagegen`, `present_files`                                                                   |
-| `artifact`     | `create_artifact`, `update_artifact`, `show_page`                                                                      |
+| `artifact`     | `create_artifact`, `update_artifact`                                                                                   |
 
 **`exploration`** — one normalized directory listing, file read, or code search. The daemon
 currently emits one operation per mapped tool call.
@@ -6291,8 +6291,8 @@ successfully.
 latest version when the call completed, and `title` is the artifact's title at that version.
 `shows` says which version the chat shows:
 
-- `"latest"` — the artifact as it is now, following every later version. `create_artifact` and the
-  deprecated `show_page` present this way. An agent can later write a file artifact with
+- `"latest"` — the artifact as it is now, following every later version. `create_artifact`
+  presents this way. An agent can later write a file artifact with
   `write_artifact_file` and `edit_artifact_file`, or change a live artifact's URL with
   `update_artifact`; this presentation follows those versions. This is where a client shows an
   HTML artifact inline, by its `display` preference.
@@ -6305,9 +6305,9 @@ version, and display preference through the artifact routes and keeps them curre
 `artifact.updated` events. A later deletion leaves the presentation unchanged; the artifact routes
 then answer `404`.
 
-**`page`** — a legacy web page presentation, retained for history and older daemons. New
-`show_page` calls create live-URL artifacts and return an `artifact` presentation with
-`shows: "latest"`; they no longer produce `page` presentations.
+**`page`** — a legacy web page presentation, retained for history and older daemons. The
+`show_page` tool was removed. New live pages use `create_artifact` with `type: "html"` and `url`,
+returning an `artifact` presentation with `shows: "latest"`. Old `page` presentations remain readable.
 
 ```json
 {
@@ -6323,9 +6323,7 @@ it: `localhost` names the agent's machine, not the client's. A client shows it t
 web page for that agent, through the agent's network, and never sends it the client's own cookies
 or credentials. `title` is 1–256 characters naming the page for the reader. `display` is a display
 preference exactly as for artifacts (see "Display" under "Artifacts"), or `null` for the client's
-choice. Older daemons' `show_page` takes `{ "url", "title", "display"? }` and only records the
-presentation: the daemon never fetches the page. In Auto, every `show_page` call is reviewed,
-and the reviewer is shown its URL and title. A page shown inline reaches
+choice. The legacy presentation records the URL without the daemon fetching the page. A page shown inline reaches
 the network like any other page the client shows. That is a potential vulnerability, so a client
 gives it the same sandbox it gives every web page.
 
@@ -9454,11 +9452,8 @@ live URL. Reading their fallback files remains available. Metadata-only REST upd
 `400 invalid_request`. REST creation and update request shapes are unchanged and do not accept
 live URL content. Only the agent tools create or change it.
 
-`show_page` remains registered for this release but is deprecated: use `create_artifact` with
-`type: "html"` and `url`. It accepts the existing `{ "url", "title", "display"? }` arguments and
-creates the same live-URL artifact, with its ID, version, recorded network, reference tag, and
-`artifact` presentation. Omitted `display` stays `null`. Its Auto review happens on every call,
-as for `create_artifact` with a URL. Existing `page` presentations remain readable as history.
+`show_page` was removed. Use `create_artifact` with `type: "html"` and `url` for live pages.
+Existing `page` presentations remain readable as history.
 
 **Types.** The type decides the entry and which files a version may hold:
 

@@ -52,8 +52,7 @@ an inert, title-independent `index.html` notice for older clients, unchanged acr
 New clients use the URL through its
 recorded network in a browser profile scoped to the artifact ID; the daemon never fetches it.
 The network is captured at creation and cannot change. `url` on `update_artifact` makes a new
-version; metadata edits preserve it, and file edits are refused. `show_page` is a deprecated
-creation alias owned by this module. Every live create or update is reviewed in Auto.
+version; metadata edits preserve it, and file edits are refused. Every live create or update is reviewed in Auto.
 
 Live pages use the artifact proxy, not the unrestricted network proxy. `proxy` owns the connection
 policy: public destinations, or the exact recorded loopback host and port, evaluated against the
@@ -112,7 +111,7 @@ access.
 
 ## Tools
 
-Every agent gets eight artifact tools plus the deprecated `show_page` alias. The author and source of a change are always the calling agent and
+Every agent gets eight artifact tools. The author and source of a change are always the calling agent and
 the place it works in, found by `actorFor`.
 
 | Tool                  | Behavior                                                                                                                                                             | Auto review                                                                                       | Durability                                          |

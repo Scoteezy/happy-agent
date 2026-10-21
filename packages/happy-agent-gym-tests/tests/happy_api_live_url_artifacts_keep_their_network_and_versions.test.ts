@@ -155,9 +155,10 @@ describe("live URL artifacts", () => {
         expect(gym.inference.unscripted).toEqual([]);
     });
 
-    it("keeps the deprecated show_page tool, rejects edits, and honors denied updates", async () => {
+    it("rejects live artifact file edits and honors denied updates", async () => {
         const { gym, call, reviews, deny } = await harness();
-        const result = await call("show_page", {
+        const result = await call("create_artifact", {
+            type: "html",
             title: "Dev server",
             url: "http://localhost:5173/",
         });
@@ -174,7 +175,7 @@ describe("live URL artifacts", () => {
         ).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    name: "show_page",
+                    name: "create_artifact",
                     presentation: expect.objectContaining({
                         type: "artifact",
                         artifactId: artifact.id,

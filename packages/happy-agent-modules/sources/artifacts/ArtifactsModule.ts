@@ -106,7 +106,6 @@ import {
     normalizeArtifactUrl,
     requireFileArtifact,
 } from "./impl/liveArtifact.js";
-import { showPageTool } from "./tools/show_page.js";
 import { createArtifactTool } from "./tools/create_artifact.js";
 import { deleteArtifactTool } from "./tools/delete_artifact.js";
 import { editArtifactFileTool } from "./tools/edit_artifact_file.js";
@@ -217,7 +216,6 @@ export class ArtifactsModule implements AgentModule {
             readArtifactTool(this),
             readArtifactFileTool(this),
             deleteArtifactTool(this, scope.agent.id),
-            showPageTool(this, this.#compute, scope.agent.id),
         ],
     };
 

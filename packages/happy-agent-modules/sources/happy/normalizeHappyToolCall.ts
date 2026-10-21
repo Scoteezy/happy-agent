@@ -534,11 +534,6 @@ const createArtifactArgumentsSchema = Type.Object(
     { additionalProperties: true },
 );
 
-const showPageArgumentsSchema = Type.Object(
-    { title: Type.String(), url: Type.String() },
-    { additionalProperties: true },
-);
-
 const presentFilesArgumentsSchema = Type.Object(
     { filepaths: Type.Array(Type.String(), { minItems: 1 }) },
     { additionalProperties: true },
@@ -556,9 +551,6 @@ function shownDescription(name: string, args: Record<string, unknown>): string |
             const noun = ARTIFACT_KIND_NOUNS[args.type] ?? "artifact";
             return namedDescription(`Creating ${noun}`, args.title);
         }
-        case "show_page":
-            if (!Value.Check(showPageArgumentsSchema, args)) return undefined;
-            return namedDescription("Showing page", args.title);
         case "present_files": {
             if (!Value.Check(presentFilesArgumentsSchema, args)) return undefined;
             const first = posix.basename(args.filepaths[0]!.replaceAll("\\", "/"));

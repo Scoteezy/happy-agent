@@ -50,8 +50,7 @@ empty file, an image over 32 MiB, a video over 256 MiB, another file over 64 MiB
 Full access only when allowed, through compute's shared path-boundary helpers. The tool is
 durable: a repeated call reads the same files and records the same items.
 
-Live pages belong to the Artifacts module. Use `create_artifact` with `type: "html"` and `url`;
-that module also keeps the deprecated `show_page` alias registered for older prompts.
+Live pages belong to the Artifacts module. Use `create_artifact` with `type: "html"` and `url`.
 
 Every agent is told, through this module's instructions, that generated images, artifact cards,
 and presented files appear inline in its own chat only, not in parent or child chats.

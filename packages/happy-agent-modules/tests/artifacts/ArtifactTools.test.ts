@@ -107,7 +107,7 @@ async function textAt(w: ArtifactsWorld, artifactId: string, path: string): Prom
 }
 
 describe("the artifact tools", () => {
-    it("offers every agent the artifact tools and deprecated page alias", async () => {
+    it("offers every agent the artifact tools", async () => {
         const w = await world("artifact-tools-offer");
         expect((await w.tools(AGENT)).map((tool) => tool.name)).toEqual([
             "create_artifact",
@@ -118,7 +118,6 @@ describe("the artifact tools", () => {
             "read_artifact",
             "read_artifact_file",
             "delete_artifact",
-            "show_page",
         ]);
     });
 
@@ -286,17 +285,21 @@ describe("the artifact tools", () => {
         expect((await w.artifacts.getVersion(w.ctx, artifact.id, 1)).live).toEqual(artifact.live);
     });
 
-    it("keeps show_page as a reviewed live artifact alias and rejects unsafe URLs", async () => {
-        const w = await world("live-page-alias");
-        const tool = await w.tool(AGENT, "show_page");
-        expect(tool.description).toContain("Deprecated: use create_artifact with url");
+    it("reviews live artifact creation and rejects unsafe URLs", async () => {
+        const w = await world("live-page-create");
+        const tool = await w.tool(AGENT, "create_artifact");
         const ctx = withAgentPermissionMode(w.ctx, "auto");
-        const args = { title: "Checkout\u202e", url: "http://localhost:5173/", display: "side" };
+        const args = {
+            type: "html",
+            title: "Checkout\u202e",
+            url: "http://localhost:5173/",
+            display: "side",
+        };
         expect(await tool.shouldReviewInAutoMode(args, ctx)).toBe(true);
         expect(tool.describeAutoPermissionAction?.(args, ctx)).toContain(
             'titled "Checkout\\u{202e}"',
         );
-        expect(tool.shouldRunInFullAccessInAutoMode).toBeUndefined();
+        expect(await tool.shouldRunInFullAccessInAutoMode?.(args, ctx)).toBe(false);
         const result = (await call(ctx, tool, args)) as ArtifactRecord;
         expect(result).toMatchObject({
             type: "html",
@@ -310,7 +313,9 @@ describe("the artifact tools", () => {
             "not a url",
             "https://me:pw@example.com/",
         ]) {
-            await expect(call(w.ctx, tool, { title: "Invalid", url })).rejects.toThrow();
+            await expect(
+                call(w.ctx, tool, { type: "html", title: "Invalid", url }),
+            ).rejects.toThrow();
         }
         const createTool = await w.tool(AGENT, "create_artifact");
         for (const invalid of [

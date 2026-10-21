@@ -25,8 +25,7 @@ it. `present_files` has no such cost, so its snapshot failures fail the call.
 
 ## Live pages belong to artifacts
 
-Kirill replaced standalone page presentations with live-URL artifacts. The deprecated
-`show_page` is now registered by Artifacts, where it creates the same versioned artifact as
+Kirill replaced standalone page presentations with live-URL artifacts created through
 `create_artifact` with a URL. Chat Media owns only media snapshots and `present_files`, and its
 instructions direct new live pages to artifact creation. The client loads live pages through
 their recorded network, so every live create or update remains reviewed in Auto.

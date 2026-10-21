@@ -426,8 +426,8 @@ artifact's versions and views but never by other artifacts or the workspace brow
 daemon credentials to the live page, expose the artifact data bridge, or forward its `/api/*`
 requests to the daemon. Only agent tools create or change live URLs; the REST request shapes are
 unchanged. Metadata-only updates preserve `live`, while file mutations on live artifacts fail.
-`show_page` is deprecated in favor of `create_artifact` with `type: "html"` and `url`; its new
-calls return ordinary artifact presentations. Keep reading legacy `page` presentations in history.
+Use `create_artifact` with `type: "html"` and `url` for live pages. Keep reading legacy `page`
+presentations in history.
 
 `MessageMode.account` is optional server-resolved provenance only in configuration/error execution
 snapshots, not an account selector. It is absent from user-message/composer modes and drafts.

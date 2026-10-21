@@ -219,11 +219,6 @@ describe("Happy mobile tool-call normalization", () => {
             "Creating page: Q3 at a glance",
         ],
         ["create_artifact", { type: "markdown", title: "Notes" }, "Creating document: Notes"],
-        [
-            "show_page",
-            { url: "http://localhost:5173/", title: "Shop preview" },
-            "Showing page: Shop preview",
-        ],
         ["present_files", { filepaths: ["/tmp/out/report.pdf"] }, "Showing: report.pdf"],
         [
             "present_files",
@@ -257,7 +252,6 @@ describe("Happy mobile tool-call normalization", () => {
         ],
         ["delete_artifact", { artifactId: "not a valid id!" }, "Deleting an artifact"],
         ["edit_artifact_file", {}, "Editing an artifact"],
-        ["show_page", { url: "http://localhost:5173/" }, "Running Show Page"],
     ])("says what %s shows, since the phone shows none of it", (name, args, description) => {
         const normalized = normalizeHappyToolCall(name, args);
         expect(normalized).toEqual({ name, args });
