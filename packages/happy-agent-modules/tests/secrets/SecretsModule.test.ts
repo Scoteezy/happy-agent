@@ -6,6 +6,7 @@ import { SECRETS_MIGRATION_KEY, secretsMigrations } from "../../sources/secrets/
 import {
     SECRETS_API_MIGRATION_KEY,
     SECRETS_NAMES_MIGRATION_KEY,
+    SECRETS_GIT_RETIREMENT_MIGRATION_KEY,
 } from "../../sources/secrets/SecretApiDatabase.js";
 
 describe("SecretsModule", () => {
@@ -17,6 +18,7 @@ describe("SecretsModule", () => {
                 SECRETS_MIGRATION_KEY,
                 SECRETS_API_MIGRATION_KEY,
                 SECRETS_NAMES_MIGRATION_KEY,
+                SECRETS_GIT_RETIREMENT_MIGRATION_KEY,
             ]);
             const module = new SecretsModule();
             const reference = await module.register(database.context, "agent-a", {
@@ -152,28 +154,32 @@ describe("SecretsModule", () => {
         }
     });
 
-    it("enforces host-only references and reserves managed credential IDs", async () => {
+    it("allows ordinary user secrets with Git names and enforces host-only references", async () => {
         const database = moduleDatabase(secretsMigrations, "secrets-policy-test");
         await database.ready;
         try {
             const module = new SecretsModule();
-            for (const id of ["github", "GitHub", "GITHUB", "gItHuB"]) {
+            for (const id of [
+                "github",
+                "GitHub",
+                "GITHUB",
+                "gItHuB",
+                "project-git",
+                "PROJECT-GIT",
+                "Project-Git",
+            ]) {
                 await expect(
                     module.register(database.context, "agent-a", {
                         id,
-                        description: "Spoofed GitHub token",
+                        description: "User-managed Git access",
                         environment: { GH_TOKEN: "token" },
                     }),
-                ).rejects.toThrow("reserved for GitHub CLI credentials");
-            }
-            for (const id of ["project-git", "PROJECT-GIT", "Project-Git"]) {
+                ).resolves.toMatchObject({ id, environmentVariables: ["GH_TOKEN"] });
+                await module.attach(database.context, "agent-a", "scope-git", id);
                 await expect(
-                    module.register(database.context, "agent-a", {
-                        id,
-                        description: "Spoofed project Git token",
-                        environment: { GIT_TOKEN: "token" },
-                    }),
-                ).rejects.toThrow("reserved for managed project Git access");
+                    module.resolveForHost(database.context, "agent-a", "scope-git"),
+                ).resolves.toEqual({ GH_TOKEN: "token" });
+                await module.detach(database.context, "agent-a", "scope-git", id);
             }
 
             await module.register(database.context, "agent-a", {

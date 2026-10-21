@@ -13,15 +13,6 @@ export const secretIdSchema = Type.String({
     pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
 });
 
-/** IDs owned by host-managed credentials rather than user registrations. */
-export const GITHUB_SECRET_ID = "github" as const;
-export const PROJECT_GIT_SECRET_ID = "project-git" as const;
-
-export const secretReservedIdSchema = Type.Union([
-    Type.Literal(GITHUB_SECRET_ID),
-    Type.Literal(PROJECT_GIT_SECRET_ID),
-]);
-
 export const secretScopeRefSchema = Type.String({
     minLength: 1,
     /**
@@ -250,7 +241,6 @@ export const secretMutationOperationSchema = Type.Union([
 
 export type SecretAgentId = Static<typeof secretAgentIdSchema>;
 export type SecretId = Static<typeof secretIdSchema>;
-export type SecretReservedId = Static<typeof secretReservedIdSchema>;
 export type SecretScopeRef = Static<typeof secretScopeRefSchema>;
 export type SecretCursor = Static<typeof secretCursorSchema>;
 export type SecretEnvironmentVariableName = Static<typeof secretEnvironmentVariableNameSchema>;

@@ -34,6 +34,7 @@ import { createSecretVersion } from "./createSecretVersion.js";
 
 export const SECRETS_API_MIGRATION_KEY = "002-secrets-api";
 export const SECRETS_NAMES_MIGRATION_KEY = "003-secret-names";
+export const SECRETS_GIT_RETIREMENT_MIGRATION_KEY = "004-retire-managed-git-secrets";
 const SECRETS_TABLE = "happy_agent_secrets";
 const LEGACY_ATTACHMENTS_TABLE = "happy_agent_secret_attachments";
 const ATTACHMENTS_TABLE = "happy_agent_secret_api_attachments";
@@ -139,6 +140,30 @@ export const secretsApiMigrations: readonly AgentModuleMigration[] = [
             ctx.log.info(
                 { migratedSecrets: publicRows.length },
                 "Expanded secret names are available to the public catalog.",
+            );
+        },
+    ],
+    [
+        SECRETS_GIT_RETIREMENT_MIGRATION_KEY,
+        async (_ctx, database) => {
+            // User-created secrets with these names have no managed kind and keep their grants.
+            for (const table of [LEGACY_ATTACHMENTS_TABLE, ATTACHMENTS_TABLE]) {
+                await agentDatabaseRun(
+                    database,
+                    sql`DELETE FROM ${sql.identifier(table)}
+                    WHERE EXISTS (
+                        SELECT 1 FROM happy_agent_secrets AS retired
+                        WHERE retired.owner_agent_id = ${sql.identifier(table)}.owner_agent_id
+                          AND retired.id = ${sql.identifier(table)}.secret_id
+                          AND retired.id IN ('github', 'project-git')
+                          AND retired.kind IS NOT NULL
+                    )`,
+                );
+            }
+            await agentDatabaseRun(
+                database,
+                sql`DELETE FROM happy_agent_secrets
+                WHERE id IN ('github', 'project-git') AND kind IS NOT NULL`,
             );
         },
     ],

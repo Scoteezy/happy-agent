@@ -203,13 +203,9 @@ tool call's retry history: the module does not need `AgentKV` and does not read 
 
 Every value that crosses into an event or model-facing string is validated against its TypeBox
 schema and deep-frozen before an event is handed to a subscriber, so nothing malformed or mutable
-escapes the module's boundary. Registrations under `github` and `project-git` are rejected because
-those IDs belong to managed host credentials.
+escapes the module's boundary. Secret names are user-managed; `github` and `project-git` have no
+special ownership or command behavior.
 
 The legacy `request_secret` interaction is intentionally not a secrets-catalog operation. Asking a
 person to enter or update a value belongs in the User Input module/client broker. The reviewed
 model-facing creation and update tools accept either inline raw values or a host dotenv path.
-
-Specialized host integration debt remains for GitHub CLI token synchronization and the managed `project-git`
-credential-proxy lease (`trustedLoopbackPorts`); those are not flat environment bundles and must be
-owned by host infrastructure.

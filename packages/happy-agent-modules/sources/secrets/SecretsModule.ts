@@ -12,8 +12,6 @@ import { afterCommit, type Context } from "@steve.kite/stdlib";
 import type { BotSettingsModule } from "../botSettings/index.js";
 
 import {
-    GITHUB_SECRET_ID,
-    PROJECT_GIT_SECRET_ID,
     secretAgentIdSchema,
     secretAttachReferenceResultSchema,
     secretAttachInputSchema,
@@ -24,7 +22,6 @@ import {
     secretListQuerySchema,
     secretRegistrationInputSchema,
     secretRegistrationSchema,
-    secretReservedIdSchema,
     secretScopeRefSchema,
     secretUpdateInputSchema,
     type SecretAgentId,
@@ -1533,7 +1530,6 @@ export class SecretsModule implements AgentModule {
     #normalizeRegistration(
         input: SecretRegistrationInput & { readonly id: SecretId },
     ): SecretRegistration {
-        assertUserSecretId(input.id);
         const registration = {
             id: input.id,
             description: normalizeText(input.description),
@@ -1745,17 +1741,6 @@ export class SecretsModule implements AgentModule {
             throw new Error("The clock returned a time secrets cannot represent.");
         }
         return at;
-    }
-}
-
-function assertUserSecretId(value: SecretId): void {
-    const normalized = value.toLowerCase();
-    if (!Value.Check(secretReservedIdSchema, normalized)) return;
-    if (normalized === GITHUB_SECRET_ID) {
-        throw new Error("Secret ID 'github' is reserved for GitHub CLI credentials.");
-    }
-    if (normalized === PROJECT_GIT_SECRET_ID) {
-        throw new Error("Secret ID 'project-git' is reserved for managed project Git access.");
     }
 }
 

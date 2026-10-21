@@ -2,7 +2,7 @@ import { basename, dirname } from "node:path";
 
 import { computePermissions, type Compute } from "@slopus/happy-agent-compute";
 
-import type { GitCredentialRef, GitModule } from "../../git/index.js";
+import type { GitModule } from "../../git/index.js";
 import type { Project } from "../../projects/index.js";
 import type { Workspace } from "../Workspace.js";
 
@@ -20,7 +20,6 @@ const PRODUCT = computePermissions("full_access");
  * the shared Git directory is gone too — otherwise something else still owns this checkout.
  */
 export async function removeWorkspaceDirectory(options: {
-    credential?: GitCredentialRef;
     git: GitModule;
     /** The machine the workspace's folder is on. */
     machine: Compute;
@@ -80,7 +79,6 @@ export async function removeWorkspaceDirectory(options: {
 
     if (await machine.fs.exists(PRODUCT, project.repositoryRef)) {
         await options.git.removeWorktree({
-            ...(options.credential === undefined ? {} : { credential: options.credential }),
             ...(workspace.runnerId === undefined ? {} : { runnerId: workspace.runnerId }),
             expectedCommonDir: commonDir,
             projectPath: project.repositoryRef,

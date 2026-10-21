@@ -47,7 +47,7 @@ something before the agent has started throws rather than quietly archiving over
 | Module                                                    | What it answers                                                                                                                                                                    |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`ConfigModule`](../config/README.md)                     | Where managed workspace folders live, whether managed workspaces are on at all, and what a workspace folder does by default — setup commands, sync paths, what is kept on archive. |
-| [`ProjectsModule`](../projects/README.md)                 | The project's folder, its credential, its repository lock, and the vocabulary a workspace names things with.                                                                       |
+| [`ProjectsModule`](../projects/README.md)                 | The project's folder, its repository lock, and the vocabulary a workspace names things with.                                                                                       |
 | [`GitModule`](../git/README.md)                           | Worktrees, branches, clones, and every path Git is handed.                                                                                                                         |
 | [`AbortModule`](../abort/README.md)                       | How the agents working in a folder are stopped, so archiving a workspace ends the work standing in it.                                                                             |
 | [`DurableFunctionsModule`](../durableFunctions/README.md) | Provisioning, archival, restart recovery, checkpoints, and per-workspace operation locks.                                                                                          |
@@ -55,7 +55,7 @@ something before the agent has started throws rather than quietly archiving over
 
 The dependency on projects is one-way. A workspace is a branch of a project's repository, in a
 folder under that project's key, cut from the trunk that project decided on, and every worktree of
-a project shares one set of refs — so the projects catalog owns the folder, the credential and the
+a project shares one set of refs — so the projects catalog owns the folder and the
 repository lock, and this catalog takes all three through it. Archiving a project archives
 everything cut from it, which this module arranges by subscribing to the projects catalog's own
 events inside that transaction rather than by being called back.

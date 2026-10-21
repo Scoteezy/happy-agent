@@ -18,7 +18,7 @@ import { AbortModule } from "../abort/index.js";
 import type { BotSettingsModule } from "../botSettings/index.js";
 import { ConfigModule } from "../config/index.js";
 import { durableCheckpoint, DurableFunctionsModule } from "../durableFunctions/index.js";
-import { GitModule, type GitCredentialRef, type GitRepositoryFacts } from "../git/index.js";
+import { GitModule, type GitRepositoryFacts } from "../git/index.js";
 import { ProjectRegistrationError, ProjectsModule, type Project } from "../projects/index.js";
 import type { RunnerRunOptions, RunnerRunResult, RunnersModule } from "../runners/index.js";
 
@@ -236,7 +236,7 @@ export class WorkspacesModule implements AgentModule {
      * @param config Where workspace folders live and what a folder does when it says nothing itself.
      * @param projects The catalog these workspaces are cut from: a workspace is a branch of a
      * project's repository, in a folder named after it, so the projects catalog owns the folder,
-     * the credential, and the repository lock every Git call here goes through.
+     * and the repository lock every Git call here goes through.
      * @param git Git itself.
      * @param durableFunctions The durable owner of checkout and archive work.
      * @param abort How work standing in a workspace is stopped. Archiving is the moment a folder
@@ -976,9 +976,6 @@ export class WorkspacesModule implements AgentModule {
                 "The project root must be active and ready before creating a workspace.",
             );
         }
-        if (normalized.secret !== undefined && project.remoteSource?.kind !== "github") {
-            throw new Error("GitHub credentials can only be used with a GitHub project.");
-        }
         const name = projects.validateName(normalized.name);
         const requestedId =
             normalized.id === undefined
@@ -998,20 +995,6 @@ export class WorkspacesModule implements AgentModule {
         // A nested workspace forks the parent branch by default. The durable baseRef makes a
         // delayed or restarted initialization resolve the same checkout relationship.
         const baseRef = requestedBaseRef ?? parent?.branch;
-        // API and agent callers normally omit a creator. Use the same project-owned credential
-        // identity that provisioning passes to Git, while preserving any explicit caller.
-        const creator = options.createdBy ?? projects.gitCredential(projectId)?.creator;
-        if (options.githubToken !== undefined && creator !== undefined) {
-            await projects.registerGitCredential(ctx, projectId, creator, options.githubToken);
-        }
-        if (
-            project.requiredSecretKind === "github" &&
-            (creator === undefined ||
-                (await projects.ensureGitAuthentication(ctx, projectId, creator)) === undefined)
-        ) {
-            throw new Error("GitHub credentials are unavailable for this workspace.");
-        }
-
         const kind = await this.#workspaceKindFor(ctx, project);
         const workspaceRoot = await this.#workspaceRootFor(project);
         const gitRefs = await workspaceGitRefSnapshot({
@@ -1402,7 +1385,7 @@ export class WorkspacesModule implements AgentModule {
                 (await this.#git.isWorktreeAt({
                     commonDir: locked.gitCommonDir,
                     path: locked.path,
-                    ...this.#gitOptions(project.id, locked.runnerId),
+                    ...this.#gitOptions(locked.runnerId),
                 }));
             if (adoptable) return locked;
             // A half-made worktree is cleaned up before creation is tried again. The keep-on-
@@ -1410,7 +1393,6 @@ export class WorkspacesModule implements AgentModule {
             await removeWorkspaceDirectory({
                 git: this.#git,
                 machine,
-                ...this.#gitOptions(project.id),
                 keepCopiesOnArchive: false,
                 keepWorktreesOnArchive: false,
                 project,
@@ -1455,7 +1437,7 @@ export class WorkspacesModule implements AgentModule {
             return workspace;
         }
         const projects = this.#projects;
-        const gitOptions = this.#gitOptions(project.id, workspace.runnerId);
+        const gitOptions = this.#gitOptions(workspace.runnerId);
         const topLevel = await this.#git.topLevel(project.repositoryRef, gitOptions);
         if (topLevel !== project.repositoryRef) {
             throw new Error("A workspace worktree needs a Git repository project.");
@@ -1495,7 +1477,7 @@ export class WorkspacesModule implements AgentModule {
             expectedCommonDir: workspace.gitCommonDir ?? "",
             projectPath,
             workspacePath: workspace.path,
-            ...this.#gitOptions(workspace.projectRef, workspace.runnerId),
+            ...this.#gitOptions(workspace.runnerId),
         });
         // A rename landing during the checkout is not moved by the branch mover, which leaves
         // workspaces that are not ready alone. The branch Git just created is the real one.
@@ -1557,7 +1539,6 @@ export class WorkspacesModule implements AgentModule {
                     await removeWorkspaceDirectory({
                         git: this.#git,
                         machine,
-                        ...this.#gitOptions(project.id),
                         keepCopiesOnArchive: settings.keepCopiesOnArchive,
                         keepWorktreesOnArchive: settings.keepWorktreesOnArchive,
                         project,
@@ -1885,19 +1866,9 @@ export class WorkspacesModule implements AgentModule {
         return project;
     }
 
-    /**
-     * The credential a Git command against one project must carry. The projects catalog owns who
-     * created a project, so it is what names the credential a workspace cut from it inherits.
-     */
-    #gitOptions(
-        projectId: string,
-        runnerId?: string,
-    ): { readonly credential?: GitCredentialRef; readonly runnerId?: string } {
-        const credential = this.#projects.gitCredential(projectId);
-        return {
-            ...(credential === undefined ? {} : { credential }),
-            ...(runnerId === undefined ? {} : { runnerId }),
-        };
+    /** Workspace Git operations run on the same machine as their project. */
+    #gitOptions(runnerId?: string): { readonly runnerId?: string } {
+        return runnerId === undefined ? {} : { runnerId };
     }
 
     #runSyncInBackground(work: (workerCtx: Context) => Promise<void>): void {
@@ -2657,7 +2628,7 @@ export class WorkspacesModule implements AgentModule {
                     from: previousBranch,
                     to: workspace.branch,
                     workspacePath: workspace.path,
-                    ...this.#gitOptions(workspace.projectRef, workspace.runnerId),
+                    ...this.#gitOptions(workspace.runnerId),
                 });
             });
             return workspace;

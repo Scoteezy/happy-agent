@@ -5,6 +5,7 @@ import { SECRETS_MIGRATION_KEY, secretsMigrations } from "../../sources/secrets/
 import {
     SECRETS_API_MIGRATION_KEY,
     SECRETS_NAMES_MIGRATION_KEY,
+    SECRETS_GIT_RETIREMENT_MIGRATION_KEY,
 } from "../../sources/secrets/SecretApiDatabase.js";
 import { moduleDatabase, type ModuleDatabase } from "../support/moduleDatabase.js";
 
@@ -69,6 +70,7 @@ describe("SecretsModule boundary contracts", () => {
                 SECRETS_MIGRATION_KEY,
                 SECRETS_API_MIGRATION_KEY,
                 SECRETS_NAMES_MIGRATION_KEY,
+                SECRETS_GIT_RETIREMENT_MIGRATION_KEY,
             ]);
         });
     });
@@ -226,18 +228,9 @@ describe("SecretsModule boundary contracts", () => {
         });
     });
 
-    it("denies reserved managed IDs case-insensitively and rejects invalid public inputs", async () => {
+    it("rejects invalid public inputs", async () => {
         await withDatabase("secrets-boundary-validation", async (database) => {
             const module = new SecretsModule();
-            for (const id of ["github", "GitHub", "GITHUB", "project-git", "Project-Git"]) {
-                await expect(
-                    module.register(database.context, AGENT, {
-                        id,
-                        description: "Credential",
-                        environment: { TOKEN: "value" },
-                    }),
-                ).rejects.toThrow("reserved");
-            }
             await expect(
                 module.register(database.context, AGENT, {
                     id: "bad id",

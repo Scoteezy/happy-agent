@@ -24,14 +24,12 @@ background processes before removing files, but has no service admission hook or
 barrier. The optional stored cleanup field remains readable for API compatibility and clears when
 archival completes.
 
-## Child workspaces reuse the project's credential owner
+## Child workspaces use the existing checkout
 
-GitHub project cloning resolves a default creator, but child creation used to require every caller
-to pass one explicitly. The API and agent callers omit that internal option, so a ready GitHub
-project could reject every child before Git ran. Creation now defaults to the project's credential
-owner, using the same identity as background provisioning. An explicitly supplied creator still
-takes precedence and must have its own registered credential; missing credentials still fail before
-reservation. Clients do not send tokens or creator identity again to create a child.
+Creating a child of a GitHub project used to require a project-owned token, even though making
+a local worktree needs no GitHub authentication. Workspace creation no longer accepts credential
+selectors, tokens, or credential owners and never gates reservation on a stored credential.
+Workspace Git operations use the Git authentication configured on the machine where they run.
 
 ## Archiving stops the work, not just the record
 

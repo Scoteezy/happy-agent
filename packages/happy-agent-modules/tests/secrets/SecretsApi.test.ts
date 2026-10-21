@@ -10,6 +10,63 @@ import { SecretsModule } from "../../sources/secrets/SecretsModule.js";
 import { moduleDatabase } from "../support/moduleDatabase.js";
 
 describe("SecretsModule public catalog", () => {
+    it("retires only managed Git credentials and their grants", async () => {
+        const migration = secretsApiMigrations.at(-1)!;
+        const database = moduleDatabase(secretsMigrations.slice(0, -1), "retire-git-secrets");
+        await database.ready;
+        try {
+            const module = new SecretsModule();
+            for (const id of ["github", "project-git", "ordinary"]) {
+                await module.createCatalogSecret(database.context, {
+                    id,
+                    description: "Stored credential",
+                    environment: { TOKEN: "private-value" },
+                });
+                await module.attachCatalogSecret(database.context, id, {
+                    type: "agent",
+                    id: "agentone",
+                });
+                await module.attach(database.context, "global", "legacy-scope", id);
+            }
+            await module.register(database.context, "other-owner", {
+                id: "github",
+                description: "User secret",
+                environment: { TOKEN: "user-value" },
+            });
+            await agentDatabaseRun(
+                database.database,
+                sql`UPDATE happy_agent_secrets
+                SET kind = 'retired-host-feature' WHERE owner_agent_id = 'global'
+                AND id IN ('github', 'project-git')`,
+            );
+
+            await migration[1](database.context, database.database);
+            await migration[1](database.context, database.database);
+
+            const rows = await agentDatabaseRows<{ owner_agent_id: string; id: string }>(
+                database.database,
+                sql`SELECT owner_agent_id, id FROM happy_agent_secrets
+                    ORDER BY owner_agent_id, id`,
+            );
+            expect(rows).toEqual([
+                { owner_agent_id: "global", id: "ordinary" },
+                { owner_agent_id: "other-owner", id: "github" },
+            ]);
+            for (const table of [
+                "happy_agent_secret_attachments",
+                "happy_agent_secret_api_attachments",
+            ]) {
+                const grants = await agentDatabaseRows<{ secret_id: string }>(
+                    database.database,
+                    sql`SELECT secret_id FROM ${sql.identifier(table)}`,
+                );
+                expect(grants).toEqual([{ secret_id: "ordinary" }]);
+            }
+        } finally {
+            database.close();
+        }
+    });
+
     it("accepts lowercase secret names with underscores and dashes", () => {
         expect(Value.Check(secretApiIdSchema, "openai_prod-key")).toBe(true);
         expect(Value.Check(secretApiIdSchema, "ab")).toBe(true);

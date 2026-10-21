@@ -8,10 +8,8 @@ import { expect, it, vi } from "vitest";
 
 const exec = promisify(execFile);
 
-it("creates GitHub child workspaces using the clone's credential owner, including after restart", async () => {
-    const gym = await createAgentGym({
-        environment: { GITHUB_TOKEN: "github-child-workspace-fixture-token" },
-    });
+it("creates GitHub child workspaces without product credentials, including after restart", async () => {
+    const gym = await createAgentGym();
     try {
         const source = join(gym.workspacePath, "source");
         await mkdir(source);
@@ -22,7 +20,7 @@ it("creates GitHub child workspaces using the clone's credential owner, includin
         await exec("git", ["-C", source, "add", "fixture.txt"]);
         await exec("git", ["-C", source, "commit", "-m", "fixture"]);
 
-        // Register the GitHub project and its real credential, but prohibit network Git.
+        // Register the GitHub project without a product credential and prohibit network Git.
         // Recover its checkout from a local fixture through the ordinary refresh API.
         // No GitHub request or real credential is needed to exercise child creation.
         vi.stubEnv("GIT_ALLOW_PROTOCOL", "file");
@@ -30,7 +28,6 @@ it("creates GitHub child workspaces using the clone's credential owner, includin
         const { project } = await gym.client.cloneProject({
             name: "github-fixture",
             source: { kind: "github", repository: "workspace-gym/fixture" },
-            secret: { kind: "github" },
         });
         await gym.waitUntil(async () => {
             const current = (await gym.client.getProject(project.id)).project;
@@ -67,9 +64,6 @@ it("creates GitHub child workspaces using the clone's credential owner, includin
         expect(
             (await gym.client.listWorkspaces({ projectId: project.id })).workspaces,
         ).toHaveLength(4);
-        expect(JSON.stringify(await gym.events())).not.toContain(
-            "github-child-workspace-fixture-token",
-        );
         expect(gym.errors).toEqual([]);
     } finally {
         try {

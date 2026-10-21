@@ -1,5 +1,17 @@
 # Secrets module learnings
 
+## Git names are ordinary user secrets
+
+The catalog used to reserve `github` and `project-git` even though it no longer creates either
+managed credential. Both names now follow the same registration, attachment, and command
+selection rules as every other user secret. Nothing imports the host's GitHub login into the
+secret catalog.
+
+A new migration retires historical managed rows under those two names together with their typed
+and legacy grants. It selects by name and a non-null managed kind, so ordinary user-created
+secrets keep their values and grants. The storage migration is atomic and never reads a host
+credential store or deserializes secret values.
+
 ## The catalog is global; direct grants are typed
 
 Secrets registered for Happy Agent belong to one installation-wide catalog. Agent identities do
