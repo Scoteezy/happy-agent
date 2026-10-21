@@ -75,4 +75,37 @@ describe("ensureAgentDaemon working directory", () => {
             windowsHide: true,
         });
     });
+
+    // The spawned `run` becomes a crash supervisor on macOS and Linux; Windows stays unsupervised.
+    it("asks the spawned process to supervise the daemon outside Windows", async () => {
+        const happyHome = await mkdtemp(join(tmpdir(), "happy-agent-supervise-ensure-"));
+        temporaryDirectories.push(happyHome);
+        const directory = join(happyHome, "agent");
+        mocks.getHappyDaemonPaths.mockReturnValue({
+            directory,
+            happyHome,
+            logPath: join(directory, "daemon.log"),
+            observationLogPath: join(directory, "observation", "agent.log"),
+            pidPath: join(directory, "daemon.pid"),
+            socketPath: join(directory, "server.sock"),
+            tokenPath: join(directory, "token"),
+        });
+        mocks.readDaemonTokenIfPresent.mockResolvedValue(undefined);
+        mocks.readOrCreateDaemonToken.mockResolvedValue("token");
+        mocks.loadHappyAgentConfiguration.mockResolvedValue({
+            values: { feature: { team: { enabled: false } } },
+        });
+        mocks.spawn.mockImplementation(() => {
+            throw new Error("Spawn recorded.");
+        });
+
+        await expect(ensureAgentDaemon({ entrypoint: "daemon.js" })).rejects.toThrow(
+            "Spawn recorded.",
+        );
+        const options = mocks.spawn.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv } | undefined;
+        expect(options?.env.HAPPY_AGENT_SUPERVISE).toBe(
+            process.platform === "win32" ? undefined : "1",
+        );
+        expect(process.env.HAPPY_AGENT_SUPERVISE).toBeUndefined();
+    });
 });

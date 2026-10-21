@@ -46,7 +46,17 @@ check and runs the same graceful reload, logging to `agent/reload.log`. It is un
 Windows, which does not reparent orphans.
 
 `start` spawns a detached runtime process, redirects its output to the rotated daemon log, and
-waits until health reports ready. The Node-compatible package runs `node <cli> run`; a standalone
+waits until health reports ready. On macOS and Linux that process is a small crash supervisor that
+runs the daemon as its child and starts a replacement when the daemon exits unexpectedly: with a
+signal such as a native crash, or with a failure status. A clean exit never restarts it, and every
+intentional stop records the daemon's PID in `agent/stop-intent` first, so `stop`, `kill`,
+`reload`, the shutdown API, and a caller that kills the daemon after asking it to shut down never
+fight a respawn. `kill` and `stop` also stand down a supervisor that is waiting to restart a crashed
+daemon. Restarts back off from one second to thirty; after five consecutive exits that each came
+within a minute of starting, the supervisor stops and leaves the daemon down. It publishes what it
+is doing in the owner-only `agent/supervisor.json` (`running`, `restarting` with `nextRestartAt`,
+or `gave-up`, with the last exit's status, signal, and uptime), and `status` reports it. The next
+`start` begins a fresh supervisor. Windows runs the daemon unsupervised. The Node-compatible package runs `node <cli> run`; a standalone
 binary relaunches itself. A running daemon whose reported version does not match the CLI is
 replaced. `stop` waits for both the socket and the exact daemon PID to disappear. All state lives
 under the Happy home (`~/.happy` or `HAPPY_HOME_DIR`), in its `agent/` directory: `server.sock`,

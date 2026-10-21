@@ -76,3 +76,27 @@ while running, so a reader treats a running phase as abandoned once `pid` has ex
 daemon, writes nothing. Writing the file is optional reporting that never fails a reload. The
 detached worker's `reload.log` gets timed `reload:phase` lines, and a terminal reload leaves
 them out. The daemon also logs `daemon:ready` with its startup time.
+
+## A crashed daemon restarts itself; an intentional stop never does
+
+A native Bun trap killed the detached daemon. Nothing watched it, so Desktop returned 502 until
+someone ran `happy-agent start` by hand. On macOS and Linux, `start` now spawns its `run` process
+with `HAPPY_AGENT_SUPERVISE=1`, which makes it a crash supervisor: it loads none of the agent
+runtime, runs the daemon as its child with that variable removed, and restarts it only after an
+abnormal exit, with exponential backoff and a give-up after repeated quick failures that it
+publishes in `agent/supervisor.json`.
+
+A supervisor in the same binary was chosen over a LaunchAgent or a systemd user unit. The daemon
+depends on the environment its launcher computes, which a unit would freeze to disk; registering a
+background item changes login behavior, raises macOS background-item notices, and would happen
+again for every versioned binary and every temporary Happy home in tests. The supervisor's own
+crash risk is small because the crashes come from the runtime it never loads, but nothing
+restarts the supervisor itself.
+
+Exit status alone cannot tell a crash from an intentional forced kill: Desktop and `kill` may
+SIGKILL a daemon that is already stopping. The daemon therefore writes its PID to
+`agent/stop-intent` synchronously as soon as any shutdown begins, and `kill` writes it too after
+standing the supervisor down; the supervisor consumes the record and lets that exit stand. A start
+that times out signals the detached process group, so a stalled daemon never outlives the
+supervisor that was told to stop. Windows has no process group to do that with and stays
+unsupervised until it gets its own mechanism.

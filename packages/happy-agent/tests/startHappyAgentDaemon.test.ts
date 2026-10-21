@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
     bindAgentHttpServer: vi.fn(),
     bindAgentSocket: vi.fn(),
+    recordDaemonStopIntent: vi.fn(),
     removeInactiveAgentSocket: vi.fn(),
     removeDaemonPid: vi.fn(),
     startHappyAgentRuntime: vi.fn(),
@@ -16,6 +17,9 @@ vi.mock("@slopus/happy-agent-modules", () => ({
 vi.mock("../sources/lifecycle/daemonPid.js", () => ({
     removeDaemonPid: mocks.removeDaemonPid,
     writeDaemonPid: mocks.writeDaemonPid,
+}));
+vi.mock("../sources/lifecycle/daemonStopIntent.js", () => ({
+    recordDaemonStopIntent: mocks.recordDaemonStopIntent,
 }));
 vi.mock("../sources/socket/AgentSocket.js", () => ({
     bindAgentHttpServer: mocks.bindAgentHttpServer,
@@ -53,6 +57,39 @@ describe("startHappyAgentDaemon", () => {
         expect(closeHttp).not.toHaveBeenCalled();
         await daemon.close();
     });
+    it("records an intentional stop before a dedicated daemon begins shutting down", async () => {
+        const runtime = arrangeRuntime(false);
+        mocks.bindAgentSocket.mockResolvedValue({
+            close: vi.fn(),
+            socketPath: "/tmp/happy-team/server.sock",
+        });
+        arrangeHttp(vi.fn());
+
+        const daemon = await startHappyAgentDaemon({ persistPid: true });
+        expect(mocks.recordDaemonStopIntent).not.toHaveBeenCalled();
+        await daemon.close("api");
+
+        // A caller may kill the daemon mid-shutdown; the crash supervisor must still let it go.
+        expect(mocks.recordDaemonStopIntent).toHaveBeenCalledWith("/tmp/happy-team", process.pid);
+        expect(mocks.recordDaemonStopIntent.mock.invocationCallOrder[0]).toBeLessThan(
+            runtime.shutdown.mock.invocationCallOrder[0]!,
+        );
+    });
+
+    it("records no stop intent for a daemon embedded without a PID file", async () => {
+        arrangeRuntime(false);
+        mocks.bindAgentSocket.mockResolvedValue({
+            close: vi.fn(),
+            socketPath: "/tmp/happy-team/server.sock",
+        });
+        arrangeHttp(vi.fn());
+
+        const daemon = await startHappyAgentDaemon();
+        await daemon.close();
+
+        expect(mocks.recordDaemonStopIntent).not.toHaveBeenCalled();
+    });
+
     it("binds TCP HTTP instead of the local socket in team mode", async () => {
         const runtime = arrangeRuntime(true);
         const closeHttp = vi.fn();

@@ -2,7 +2,6 @@
 
 import { AgentDaemonError } from "./lifecycle/AgentDaemonError.js";
 import { getDaemonIdentity } from "./lifecycle/getDaemonIdentity.js";
-import { isAgentDaemonCommand, runAgentDaemonCommand } from "./lifecycle/runAgentDaemonCommand.js";
 
 /**
  * The `happy-agent` command line: the Happy agent is its own daemon and owns its whole boot
@@ -95,14 +94,23 @@ async function main(): Promise<void> {
         });
     }
     if (command === "run") {
+        if (process.env.HAPPY_AGENT_SUPERVISE === "1") {
+            // `start` asked this process to supervise the daemon instead of being it. Only the
+            // supervisor loads, never the agent runtime it restarts after a crash.
+            const { runAgentDaemonSupervisor } =
+                await import("./lifecycle/runAgentDaemonSupervisor.js");
+            process.exit(await runAgentDaemonSupervisor());
+        }
         // The runtime import is deferred so lifecycle commands never load the whole agent.
         const { runAgentDaemon } = await import("./lifecycle/runAgentDaemon.js");
         // The daemon keeps this process alive through its socket server until it closes.
         await runAgentDaemon();
         return;
     }
-    if (isAgentDaemonCommand(command)) {
-        await runAgentDaemonCommand(command);
+    // Deferred like the runtime, so a crash supervisor never loads daemon lifecycle management.
+    const lifecycle = await import("./lifecycle/runAgentDaemonCommand.js");
+    if (lifecycle.isAgentDaemonCommand(command)) {
+        await lifecycle.runAgentDaemonCommand(command);
         return;
     }
     throw new AgentDaemonError(`The Happy agent does not have a command called '${command}'.`, {

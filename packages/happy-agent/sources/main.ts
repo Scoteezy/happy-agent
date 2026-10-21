@@ -7,8 +7,10 @@ import {
 } from "@slopus/happy-agent-modules";
 import { withLogContext, type Context } from "@steve.kite/stdlib";
 import type { DrainWaitingFor } from "@slopus/happy-agent-client";
+import { dirname } from "node:path";
 
 import { removeDaemonPid, writeDaemonPid } from "./lifecycle/daemonPid.js";
+import { recordDaemonStopIntent } from "./lifecycle/daemonStopIntent.js";
 import {
     bindAgentHttpServer,
     bindAgentSocket,
@@ -138,6 +140,17 @@ export async function startHappyAgentDaemon(
     let closing: Promise<void> | undefined;
     closeDaemon = (reason = "requested") => {
         if (closing === undefined) {
+            const stopIntentDirectory =
+                pidWritten && pidPath !== undefined ? dirname(pidPath) : undefined;
+            // Every shutdown is intentional. Recording it first means a crash supervisor never
+            // restarts this daemon, even when a caller kills it mid-shutdown.
+            if (stopIntentDirectory !== undefined) {
+                try {
+                    recordDaemonStopIntent(stopIntentDirectory, process.pid);
+                } catch {
+                    // Without the record a forced kill reads as a crash; a clean exit still does not.
+                }
+            }
             closing = closeHappyAgentDaemon(
                 runtime,
                 bound,

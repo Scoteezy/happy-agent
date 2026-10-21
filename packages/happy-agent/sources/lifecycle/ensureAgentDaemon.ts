@@ -20,6 +20,7 @@ import {
 import { getDaemonIdentity, type AgentDaemonIdentity } from "./getDaemonIdentity.js";
 import { getHappyDaemonPaths, type HappyDaemonPaths } from "./getHappyDaemonPaths.js";
 import { resolveAgentDaemonProcessCommand } from "./resolveAgentDaemonProcessCommand.js";
+import { AGENT_DAEMON_SUPERVISE_ENVIRONMENT } from "./superviseAgentDaemon.js";
 import { rotateDaemonLog } from "./rotateDaemonLog.js";
 import { stopLocalProtocolServer } from "./stopLocalProtocolServer.js";
 
@@ -209,7 +210,7 @@ async function spawnAgentDaemon(
             cwd: homedir(),
             detached: true,
             windowsHide: true,
-            env: process.env,
+            env: daemonLaunchEnvironment(),
             stdio: ["ignore", log.fd, log.fd],
         });
         return child;
@@ -218,7 +219,19 @@ async function spawnAgentDaemon(
     }
 }
 
+/**
+ * On macOS and Linux the spawned `run` process becomes a crash supervisor that runs the daemon
+ * as its child and restarts it after an unexpected exit. Windows keeps an unsupervised daemon:
+ * it has no process groups to stop a supervisor and its stalled child together.
+ */
+function daemonLaunchEnvironment(): NodeJS.ProcessEnv {
+    if (process.platform === "win32") return process.env;
+    return { ...process.env, [AGENT_DAEMON_SUPERVISE_ENVIRONMENT]: "1" };
+}
+
 export interface SpawnedAgentDaemonProcess {
+    /** Present for a real process; a detached one also leads its own process group. */
+    readonly pid?: number | undefined;
     readonly exitCode: number | null;
     readonly signalCode: NodeJS.Signals | null;
     kill(signal: NodeJS.Signals): boolean;
@@ -277,13 +290,31 @@ async function terminateSpawnedDaemon(child: SpawnedAgentDaemonProcess): Promise
         const onExit = () => finish();
         child.once("exit", onExit);
         forceTimer = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+            if (child.exitCode === null && child.signalCode === null) {
+                signalSpawnedDaemon(child, "SIGKILL");
+            }
         }, DAEMON_CHILD_TERMINATION_TIMEOUT_MS / 2);
         reapTimer = setTimeout(finish, DAEMON_CHILD_TERMINATION_TIMEOUT_MS);
         forceTimer.unref();
         reapTimer.unref();
-        child.kill("SIGTERM");
+        signalSpawnedDaemon(child, "SIGTERM");
     });
+}
+
+/**
+ * The spawned process may be a crash supervisor whose stalled daemon is its child. Both share
+ * the detached process group, so a failed start signals the group and leaves neither behind.
+ */
+function signalSpawnedDaemon(child: SpawnedAgentDaemonProcess, signal: NodeJS.Signals): void {
+    if (process.platform !== "win32" && child.pid !== undefined) {
+        try {
+            process.kill(-child.pid, signal);
+            return;
+        } catch {
+            // Not a group leader, or already gone; signal the process itself.
+        }
+    }
+    child.kill(signal);
 }
 
 export async function waitForReady(

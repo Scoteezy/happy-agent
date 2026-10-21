@@ -4,6 +4,8 @@ import { AgentDaemonError } from "./AgentDaemonError.js";
 import { assertReloadCallerOutsideDaemon } from "./assertReloadCallerOutsideDaemon.js";
 import { createUnixSocketFetch } from "./createUnixSocketFetch.js";
 import { isDaemonProcessRunning, killDaemonFromPidFile, readDaemonPid } from "./daemonPid.js";
+import { consumeDaemonStopIntent, recordDaemonStopIntent } from "./daemonStopIntent.js";
+import { describeDaemonSupervisor, standDownDaemonSupervisor } from "./daemonSupervisorControl.js";
 import { readDaemonTokenIfPresent } from "./daemonToken.js";
 import { drainDaemonFromSignal } from "./drainDaemonFromSignal.js";
 import { ensureAgentDaemon } from "./ensureAgentDaemon.js";
@@ -79,7 +81,21 @@ export async function runAgentDaemonCommand(
     }
 
     if (command === "kill") {
+        // The crash supervisor goes first, so it cannot restart the daemon being killed.
+        await standDownDaemonSupervisor(paths.directory);
+        const recordedPid = await readDaemonPid(paths.pidPath).catch(() => undefined);
+        if (recordedPid !== undefined && (await isDaemonProcessRunning(recordedPid))) {
+            try {
+                recordDaemonStopIntent(paths.directory, recordedPid);
+            } catch {
+                // The supervisor was already stood down above; the record is a second guard.
+            }
+        }
         const result = await killDaemonFromPidFile(paths.pidPath);
+        if (recordedPid !== undefined) {
+            // The supervisor was already stood down; the record has nothing left to explain.
+            await consumeDaemonStopIntent(paths.directory, recordedPid);
+        }
         if (!result.killed) {
             log("Daemon is not running.");
             return;
@@ -94,6 +110,8 @@ export async function runAgentDaemonCommand(
             await assertReloadCallerOutsideDaemon(await readDaemonPid(paths.pidPath));
         } else {
             await assertNoUnresponsiveDaemon(paths.pidPath);
+            // A supervisor waiting to restart a crashed daemon would compete with the reload.
+            await standDownDaemonSupervisor(paths.directory);
         }
         // Clients that did not start this reload read its phases from reload.json.
         const status = startReloadStatus(paths, {
@@ -137,6 +155,7 @@ export async function runAgentDaemonCommand(
             } else {
                 log("Daemon is not running.");
             }
+            for (const line of await describeDaemonSupervisor(paths.directory, false)) log(line);
             log(`Daemon log: ${paths.logPath}`);
             log(`Shutdown log: ${paths.observationLogPath}`);
             return;
@@ -155,6 +174,7 @@ export async function runAgentDaemonCommand(
         if (connection.health.draining === true) {
             log(formatDrainProgress(connection.health.drainWaitingFor ?? []));
         }
+        for (const line of await describeDaemonSupervisor(paths.directory, true)) log(line);
         log(`Daemon log: ${paths.logPath}`);
         log(`Shutdown log: ${paths.observationLogPath}`);
         return;
@@ -162,6 +182,8 @@ export async function runAgentDaemonCommand(
 
     if (connection === undefined) {
         await assertNoUnresponsiveDaemon(paths.pidPath);
+        // A daemon down between crash restarts stays down once stopped.
+        await standDownDaemonSupervisor(paths.directory);
         log("Daemon is not running.");
         return;
     }
