@@ -1,5 +1,13 @@
 # Artifacts — learnings
 
+## Sidebar lifecycle bytes belong to the caller's transaction
+
+Creating or archiving a space also edits its sidebar artifact. Ordinary upload staging writes
+files outside a transaction and cannot safely serve that path: a caller rollback would leave
+unowned bytes. Bounded sidebar text is stored by digest in the artifact database with its upload
+intent, and rolls back with the space. File serving materializes an immutable cache through the
+ordinary atomic content-file path. Other artifact uploads keep their existing staging behavior.
+
 ## An artifact is a bundle of files, not one file
 
 The first design held one file per Markdown or HTML artifact and told HTML to inline everything.

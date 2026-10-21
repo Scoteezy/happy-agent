@@ -3,6 +3,7 @@ import { lookup } from "node:dns/promises";
 import type { Duplex } from "node:stream";
 
 import { createId } from "@paralleldrive/cuid2";
+import { createHash } from "node:crypto";
 import { ensurePrivateDirectory } from "@slopus/happy-agent-compute";
 import {
     type AgentModule,
@@ -25,6 +26,11 @@ import { WorkspacesModule } from "../workspaces/index.js";
 import type { SpacesModule } from "../spaces/index.js";
 import { parseSidebar } from "./SidebarDocument.js";
 import { readFile } from "node:fs/promises";
+import {
+    insertArtifactInline,
+    queryArtifactInline,
+    deleteArtifactInline,
+} from "./ArtifactStore.js";
 
 import {
     ARTIFACT_UPLOAD_EXPIRY_FUNCTION,
@@ -198,7 +204,7 @@ export class ArtifactsModule implements AgentModule {
             readArtifactTool(this),
             readArtifactFileTool(this),
             updateArtifactTool(this, this.#compute, agentId),
-        ];
+        ].map((tool) => ({ ...tool, defer: false }));
     }
 
     constructor(
@@ -364,6 +370,24 @@ export class ArtifactsModule implements AgentModule {
         selector: ArtifactVersionSelector,
         path: string,
     ): Promise<ArtifactStoredFile> {
+        const stored = await this.#storedFile(ctx, artifactId, selector, path);
+        const inline = await queryArtifactInline(ctx, stored.file.sha256);
+        if (inline !== undefined && !(await artifactFileExists(stored.contentPath))) {
+            // The database is authoritative. This immutable file is only a serving cache.
+            await this.#ensureHome();
+            const temporary = this.#config.artifactUploadPath(createId());
+            await receiveArtifactContent(temporary, new TextEncoder().encode(inline), 128 * 1024);
+            await storeArtifactContent(temporary, stored.contentPath);
+        }
+        return stored;
+    }
+
+    async #storedFile(
+        ctx: Context,
+        artifactId: string,
+        selector: ArtifactVersionSelector,
+        path: string,
+    ): Promise<ArtifactStoredFile> {
         return await ctx.inTx(async (txCtx) => {
             const artifact = await this.#requiredActive(txCtx, artifactId);
             const number = selector === "latest" ? artifact.latestVersion : selector;
@@ -399,13 +423,17 @@ export class ArtifactsModule implements AgentModule {
         readonly bytes: Uint8Array;
         readonly more: boolean;
     }> {
-        const stored = await this.storedFile(ctx, artifactId, selector, path);
+        const stored = await this.#storedFile(ctx, artifactId, selector, path);
         const offset = Math.min(Math.max(0, window.offset ?? 0), stored.file.size);
-        const bytes = await readArtifactContent(
-            stored.contentPath,
-            offset,
-            Math.max(0, Math.min(window.maxBytes, stored.file.size - offset)),
-        );
+        const inline = await queryArtifactInline(ctx, stored.file.sha256);
+        const bytes =
+            inline === undefined
+                ? await readArtifactContent(
+                      stored.contentPath,
+                      offset,
+                      Math.max(0, Math.min(window.maxBytes, stored.file.size - offset)),
+                  )
+                : new TextEncoder().encode(inline).slice(offset, offset + window.maxBytes);
         return {
             file: stored.file,
             version: stored.version,
@@ -468,6 +496,39 @@ export class ArtifactsModule implements AgentModule {
     /** Receive one text file's whole text, stored as UTF-8. */
     async stageText(ctx: Context, text: string): Promise<ArtifactUpload> {
         return await this.stageUpload(ctx, new TextEncoder().encode(text));
+    }
+
+    /** No filesystem writes: safe inside a lifecycle/owner transaction, including rollback. */
+    async stageSidebarText(ctx: Context, text: string): Promise<ArtifactUpload> {
+        parseSidebar(text);
+        const now = Date.now();
+        const bytes = new TextEncoder().encode(text);
+        const upload = {
+            id: createId(),
+            size: bytes.byteLength,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            utf8: true,
+            createdAt: now,
+            expiresAt: now + ARTIFACT_UPLOAD_LIFETIME_MS,
+        };
+        await ctx.inTx(async (txCtx) => {
+            await insertArtifactUpload(txCtx, upload);
+            await updateArtifactUploadReceived(txCtx, upload);
+            await insertArtifactInline(txCtx, upload.sha256, text);
+            await this.#durableFunctions.invoke(txCtx, {
+                function: ARTIFACT_UPLOAD_EXPIRY_FUNCTION,
+                arguments: { uploadId: upload.id, expiresAt: upload.expiresAt },
+                operationId: uploadOperationId(upload.id),
+            });
+        });
+        return upload;
+    }
+
+    async #sidebarText(ctx: Context, digest: string): Promise<string> {
+        return (
+            (await queryArtifactInline(ctx, digest)) ??
+            (await readFile(this.#config.artifactContentPath(digest), "utf8"))
+        );
     }
 
     /**
@@ -539,7 +600,7 @@ export class ArtifactsModule implements AgentModule {
                 }
             }
             if (input.type === "sidebar") {
-                const html = await readFile(this.#config.artifactContentPath(entry.sha256), "utf8");
+                const html = await this.#sidebarText(txCtx, entry.sha256);
                 parseSidebar(html);
                 if (this.#spaces === undefined || input.id === undefined)
                     throw new ArtifactInputError("Sidebar artifacts are created by Spaces.");
@@ -693,7 +754,10 @@ export class ArtifactsModule implements AgentModule {
             if (current.type === "sidebar") {
                 if (input.baseVersion === undefined)
                     throw new ArtifactInputError("Sidebar writes require baseVersion.");
-                if (input.baseVersion !== current.latestVersion)
+                if (
+                    (sidebarBatch || input.author.kind !== "agent") &&
+                    input.baseVersion !== current.latestVersion
+                )
                     throw new ArtifactConflictError(
                         "The sidebar changed. Read its current version before editing.",
                         current,
@@ -722,7 +786,7 @@ export class ArtifactsModule implements AgentModule {
             );
             const now = Math.max(Date.now(), current.updatedAt + 1);
             if (current.type === "sidebar") {
-                const html = await readFile(this.#config.artifactContentPath(entry.sha256), "utf8");
+                const html = await this.#sidebarText(txCtx, entry.sha256);
                 parseSidebar(html);
                 if (this.#spaces === undefined)
                     throw new ArtifactInputError("Spaces is unavailable.");
@@ -737,6 +801,8 @@ export class ArtifactsModule implements AgentModule {
                     );
                     return current;
                 }
+                if (!sidebarBatch && input.author.kind === "user")
+                    await this.#spaces.markSidebarManualEdit(txCtx, current.id, html);
             }
             const title = input.title ?? current.title;
             const background =
@@ -1117,7 +1183,10 @@ export class ArtifactsModule implements AgentModule {
                     `The upload for "${placement.path}" was not found. It may have expired or been used already; upload the file again.`,
                 );
             }
-            if (!(await artifactFileExists(this.#config.artifactContentPath(upload.sha256)))) {
+            if (
+                !(await artifactFileExists(this.#config.artifactContentPath(upload.sha256))) &&
+                (await queryArtifactInline(ctx, upload.sha256)) === undefined
+            ) {
                 throw new ArtifactNotFoundError(
                     `The content uploaded for "${placement.path}" is missing; upload the file again.`,
                 );
@@ -1158,6 +1227,7 @@ export class ArtifactsModule implements AgentModule {
                 !(await queryArtifactContentInUse(txCtx, received.sha256, uploadId))
             ) {
                 await removeArtifactFile(this.#config.artifactContentPath(received.sha256));
+                await deleteArtifactInline(txCtx, received.sha256);
             }
         });
     }

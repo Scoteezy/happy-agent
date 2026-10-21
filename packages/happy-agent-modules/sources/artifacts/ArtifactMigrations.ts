@@ -203,4 +203,16 @@ export const artifactMigrations = [
             );
         },
     ],
+    [
+        "006-sidebar-inline-content",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            await agentDatabaseRun(
+                database,
+                sql`CREATE TABLE happy_agent_module_artifact_inline (
+                sha256 TEXT PRIMARY KEY,
+                content TEXT NOT NULL
+            )`,
+            );
+        },
+    ],
 ] as const;

@@ -180,6 +180,12 @@ Sidebar writes require the immutable `baseVersion`, run the strict HTML validato
 and reject malformed content with source diagnostics. Manager writes enter Spaces' durable calm
 queue; `commitSidebar` is the apply path after its guards are checked again.
 
+`stageSidebarText` keeps the bounded daemon-authored HTML in an artifact-owned content table,
+with its upload and expiry intent in the caller's transaction. Lifecycle rollback therefore
+leaves neither uploads nor filesystem bytes. Reads use that authoritative text directly; file
+serving materializes an immutable content-addressed file through the ordinary atomic file path.
+Ordinary file uploads keep their existing staging path.
+
 ## Storage
 
 Content lives under the daemon's private `artifacts/` folder, which Config owns:

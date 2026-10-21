@@ -57,6 +57,10 @@ export interface SidebarNode {
 
 /** Strict HTML subset: no recovery, executable content, URLs, or resource loads. */
 export function parseSidebar(html: string, knownRefs?: ReadonlySet<string>): SidebarNode {
+    if (Buffer.from(html, "utf8").toString("utf8") !== html || html.includes("\0"))
+        throw new SidebarValidationError(
+            "The sidebar must contain valid Unicode text without null characters.",
+        );
     if (Buffer.byteLength(html, "utf8") > 128 * 1024)
         throw new SidebarValidationError("The sidebar exceeds 128 KiB.");
     const stack: SidebarNode[] = [];

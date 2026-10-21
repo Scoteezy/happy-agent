@@ -7361,7 +7361,15 @@ export class ApiModule implements AgentModule {
                     409,
                     "conflict",
                     error.message,
-                    artifact === undefined ? {} : { currentVersion: artifact["version"], artifact },
+                    artifact === undefined
+                        ? {}
+                        : {
+                              currentVersion:
+                                  error.artifact?.type === "sidebar"
+                                      ? error.artifact.latestVersion
+                                      : artifact["version"],
+                              artifact,
+                          },
                 );
             }
             throw error;

@@ -79,7 +79,23 @@ export function sidebarPosition(node: SidebarNode, peerIds: ReadonlySet<string>)
     let current = node.parent;
     while (current !== undefined) {
         ancestors.unshift(
-            `${current.tag}:${current.attrs["id"] ?? ""}:${Object.hasOwn(current.attrs, "collapsed")}`,
+            JSON.stringify([
+                current.tag,
+                current.attrs["id"] ??
+                    current.parent?.children
+                        .filter((sibling) => sibling.tag === current!.tag)
+                        .indexOf(current) ??
+                    0,
+                Object.hasOwn(current.attrs, "collapsed"),
+                current.parent?.children
+                    .filter(
+                        (sibling) =>
+                            sibling.start < current!.start &&
+                            sibling.tag === "happy-section" &&
+                            peerIds.has(`section:${sibling.attrs["id"]}`),
+                    )
+                    .map((sibling) => sibling.attrs["id"]),
+            ]),
         );
         current = current.parent;
     }
@@ -110,6 +126,16 @@ export function changedSidebarRefs(before: string, after: string): string[] {
             })
             .map((node) => node.attrs["ref"]!),
     );
+    const nextSections = new Set(
+        sidebarNodes(parseSidebar(after))
+            .filter((node) => node.tag === "happy-section")
+            .map((node) => node.attrs["id"]!),
+    );
+    for (const section of sidebarNodes(parseSidebar(before)).filter(
+        (node) => node.tag === "happy-section",
+    )) {
+        if (nextSections.has(section.attrs["id"]!)) peers.add(`section:${section.attrs["id"]}`);
+    }
     return left
         .filter((node) => {
             const other = next.get(node.attrs["ref"]!);

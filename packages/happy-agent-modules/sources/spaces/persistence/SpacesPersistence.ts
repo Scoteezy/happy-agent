@@ -394,6 +394,19 @@ export async function queryOwnerByPrioritizingAgent(
 }
 
 /** Every person who has a sidebar. */
+export async function queryOwnerBySidebarArtifact(
+    ctx: Context,
+    artifactId: string,
+): Promise<SpaceOwnerState | undefined> {
+    const rows = await agentDatabaseRows<{ readonly state_json: string }>(
+        ctx.db,
+        sql`SELECT state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)} WHERE json_extract(state_json, '$.sidebarArtifactId') = ${artifactId} LIMIT 1`,
+    );
+    return rows[0] === undefined
+        ? undefined
+        : parseValue(spaceOwnerStateSchema, rows[0].state_json, "owner state");
+}
+
 export async function queryOwnerStates(ctx: Context): Promise<SpaceOwnerState[]> {
     const rows = await agentDatabaseRows<{ readonly state_json: string }>(
         ctx.db,

@@ -150,4 +150,13 @@ export const spaceMigrations = [
             );
         },
     ],
+    [
+        "005-sidebar-artifact-owner",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            await agentDatabaseRun(
+                database,
+                sql`CREATE UNIQUE INDEX happy_agent_module_space_owners_sidebar ON ${sql.raw(SPACE_OWNERS_TABLE)} (json_extract(state_json, '$.sidebarArtifactId')) WHERE json_extract(state_json, '$.sidebarArtifactId') IS NOT NULL`,
+            );
+        },
+    ],
 ] as const;

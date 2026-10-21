@@ -1,4 +1,5 @@
 import { createId } from "@paralleldrive/cuid2";
+import { createHash } from "node:crypto";
 import {
     cuid2Schema,
     DEFAULT_AGENT_PERMISSION_MODE,
@@ -78,6 +79,7 @@ import {
     insertSpaceIfAbsent,
     queryBatches,
     queryOwnerByPrioritizingAgent,
+    queryOwnerBySidebarArtifact,
     queryOwnerState,
     queryOwnerStates,
     queryOwnersWithPendingChanges,
@@ -164,6 +166,10 @@ export class SpacesModule implements AgentModule {
     readonly #interactingSince = new Map<SpaceOwnerId, number>();
     /** People whose client signalled calm while Prioritizing was still deciding. */
     readonly #calmSignalled = new Set<SpaceOwnerId>();
+    readonly #sidebarObservations = new Map<
+        SpaceOwnerId,
+        NonNullable<SpaceOwnerState["sidebarObservations"]>
+    >();
     /** Prioritizing agents with a turn in progress; their batch waits until they finish. */
     readonly #busyPrioritizing = new Set<string>();
     readonly #unsubscribe: (() => void)[] = [];
@@ -258,7 +264,17 @@ export class SpacesModule implements AgentModule {
         },
         afterAgentSettled: async (ctx, scope) => {
             const owner = (await queryOwnerByPrioritizingAgent(ctx, scope.agent.id))?.ownerUserId;
-            if (owner === undefined) return;
+            if (owner === undefined) {
+                for (const row of await querySpacesByAgent(ctx, scope.agent.id)) {
+                    if (row.role === "item")
+                        await this.#queueSidebarBrief(
+                            ctx,
+                            row.ownerUserId,
+                            `Work finished or paused in space ${row.id}.`,
+                        );
+                }
+                return;
+            }
             this.#busyPrioritizing.delete(scope.agent.id);
             const lifetime = this.#lifetime;
             if (lifetime === undefined) return;
@@ -370,6 +386,10 @@ export class SpacesModule implements AgentModule {
     async #ensureSidebar(ctx: Context, ownerUserId: SpaceOwnerId): Promise<string> {
         const state = await this.#ownerState(ctx, ownerUserId);
         if (state.sidebarArtifactId !== undefined) return state.sidebarArtifactId;
+        if (state.prioritizingAgentId === undefined)
+            throw new SpaceInputError(
+                "Configure a model for Prioritizing before creating the sidebar.",
+            );
         const artifacts = this.#requireArtifacts();
         const artifactId = createId();
         const html = seedSidebar({
@@ -390,7 +410,9 @@ export class SpacesModule implements AgentModule {
             id: artifactId,
             type: "sidebar",
             title: "Sidebar",
-            files: [{ path: "index.html", uploadId: (await artifacts.stageText(ctx, html)).id }],
+            files: [
+                { path: "index.html", uploadId: (await artifacts.stageSidebarText(ctx, html)).id },
+            ],
             author: actor,
             ...(happy?.kind === "bot"
                 ? {
@@ -420,9 +442,7 @@ export class SpacesModule implements AgentModule {
         html: string,
         author: ArtifactAuthor,
     ): Promise<void> {
-        const owner = (await queryOwnerStates(ctx)).find(
-            (state) => state.sidebarArtifactId === artifactId,
-        );
+        const owner = await queryOwnerBySidebarArtifact(ctx, artifactId);
         if (owner === undefined)
             throw new SidebarValidationError("Sidebar artifacts are created by Spaces.");
         const rows = await querySpaces(ctx, owner.ownerUserId);
@@ -471,12 +491,13 @@ export class SpacesModule implements AgentModule {
         input: { html: string; baseVersion: number; mutationId: string },
     ) {
         const current = await this.sidebar(ctx, ownerUserId);
+        const operationId = `sidebar:${createHash("sha256").update(input.mutationId).digest("hex")}`;
         return await ctx.inTx(async (txCtx) => {
             const artifacts = this.#requireArtifacts();
             const replay = await artifacts.versionForOperation(
                 txCtx,
                 current.artifactId,
-                input.mutationId,
+                operationId,
             );
             if (replay !== undefined) {
                 const original = await this.#readSidebar(
@@ -505,7 +526,7 @@ export class SpacesModule implements AgentModule {
                 current.artifactId,
                 input.html,
                 input.baseVersion,
-                input.mutationId,
+                operationId,
                 author,
             );
             const state = await this.#ownerState(txCtx, ownerUserId);
@@ -525,6 +546,25 @@ export class SpacesModule implements AgentModule {
         });
     }
 
+    /** Ordinary person-authored artifact edits carry the same manual authority as the app route. */
+    async markSidebarManualEdit(ctx: Context, artifactId: string, html: string): Promise<void> {
+        const state = await queryOwnerBySidebarArtifact(ctx, artifactId);
+        if (state === undefined) throw new SpaceNotFoundError();
+        const current = await this.#readSidebar(ctx, state.ownerUserId, artifactId);
+        const changed = changedSidebarRefs(current.html, html);
+        await writeOwnerState(ctx, {
+            ...state,
+            sidebarManualIds: [...new Set([...(state.sidebarManualIds ?? []), ...changed])].slice(
+                -1000,
+            ),
+            sidebarPending: [],
+            sidebarBrief: [
+                ...(state.sidebarBrief ?? []),
+                `The person changed sidebar placement or disclosure for: ${changed.join(", ")}.`,
+            ].slice(-32),
+        });
+    }
+
     async #writeSidebar(
         ctx: Context,
         artifactId: string,
@@ -534,7 +574,7 @@ export class SpacesModule implements AgentModule {
         author: ArtifactAuthor,
     ) {
         const artifacts = this.#requireArtifacts();
-        const upload = await artifacts.stageText(ctx, html);
+        const upload = await artifacts.stageSidebarText(ctx, html);
         return await artifacts.commitSidebar(ctx, {
             artifactId,
             baseVersion,
@@ -559,7 +599,7 @@ export class SpacesModule implements AgentModule {
             ...(pending === undefined
                 ? {}
                 : { html: pending.html, version: pending.baseVersion + 1 }),
-            observations: state.sidebarObservations,
+            observations: this.#sidebarObservations.get(ownerUserId),
             manualSpaceIds: state.sidebarManualIds ?? [],
         };
     }
@@ -590,7 +630,7 @@ export class SpacesModule implements AgentModule {
                 if (
                     edit.oldText.length === 0 ||
                     at < 0 ||
-                    html.indexOf(edit.oldText, at + edit.oldText.length) !== -1
+                    html.indexOf(edit.oldText, at + 1) !== -1
                 )
                     throw new SidebarValidationError("Each oldText must occur exactly once.");
                 html = html.slice(0, at) + edit.newText + html.slice(at + edit.oldText.length);
@@ -614,9 +654,7 @@ export class SpacesModule implements AgentModule {
         baseVersion: number,
         operationId: string,
     ): Promise<void> {
-        const owner = (await queryOwnerStates(ctx)).find(
-            (state) => state.sidebarArtifactId === artifactId,
-        );
+        const owner = await queryOwnerBySidebarArtifact(ctx, artifactId);
         if (owner === undefined || owner.prioritizingAgentId === undefined)
             throw new SpaceNotFoundError();
         const pending = owner.sidebarPending ?? [];
@@ -647,8 +685,39 @@ export class SpacesModule implements AgentModule {
         await ctx.inTx(async (txCtx) => {
             const rows = new Set((await querySpaces(txCtx, ownerUserId)).map((space) => space.id));
             if (input.visibleSpaceIds.some((id) => !rows.has(id))) throw new SpaceNotFoundError();
+            if (
+                JSON.stringify(this.#sidebarObservations.get(ownerUserId)) === JSON.stringify(input)
+            )
+                return;
+            afterCommit(txCtx, () => {
+                this.#sidebarObservations.set(ownerUserId, structuredClone(input));
+            });
+            await this.#queueSidebarBrief(
+                txCtx,
+                ownerUserId,
+                "The visible spaces or folded nodes changed. Read the latest observations with list_sidebar.",
+            );
+        });
+    }
+
+    async #queueSidebarBrief(ctx: Context, ownerUserId: SpaceOwnerId, text: string): Promise<void> {
+        const state = await this.#ownerState(ctx, ownerUserId);
+        if (state.sidebarArtifactId === undefined) return;
+        await writeOwnerState(ctx, {
+            ...state,
+            sidebarBrief: [...new Set([...(state.sidebarBrief ?? []), text])].slice(-32),
+        });
+    }
+
+    async #briefSidebarAtCalm(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
+        await ctx.inTx(async (txCtx) => {
             const state = await this.#ownerState(txCtx, ownerUserId);
-            await writeOwnerState(txCtx, { ...state, sidebarObservations: input });
+            if ((state.sidebarBrief?.length ?? 0) === 0) return;
+            await this.#brief(
+                txCtx,
+                ownerUserId,
+                "The person is calm. Review these sidebar changes and the current artifact; edit only if needed.",
+            );
         });
     }
 
@@ -1001,7 +1070,9 @@ export class SpacesModule implements AgentModule {
             return undefined;
         }
         this.#interactingSince.delete(ownerUserId);
-        return await this.#applyIfDue(ctx, ownerUserId, "calm");
+        const batch = await this.#applyIfDue(ctx, ownerUserId, "calm");
+        await this.#briefSidebarAtCalm(ctx, ownerUserId);
+        return batch;
     }
 
     /**
@@ -1579,6 +1650,13 @@ export class SpacesModule implements AgentModule {
         for (const state of await queryOwnerStates(ctx)) {
             if (state.applyRequestedAt !== undefined || (state.sidebarPending?.length ?? 0) > 0)
                 owners.add(state.ownerUserId);
+            if (
+                (state.sidebarBrief?.length ?? 0) > 0 &&
+                !this.#interacting(state.ownerUserId, Date.now()) &&
+                this.#idle(state.ownerUserId, Date.now())
+            ) {
+                await this.#briefSidebarAtCalm(ctx, state.ownerUserId);
+            }
         }
         for (const owner of owners) {
             if (!Value.Check(spaceOwnerIdSchema, owner)) continue;
@@ -1597,11 +1675,23 @@ export class SpacesModule implements AgentModule {
         operationId?: string,
     ): Promise<void> {
         if ((await this.#livePrioritizing(ctx, ownerUserId)) === undefined) return;
+        const state = await this.#ownerState(ctx, ownerUserId);
+        const observations = JSON.stringify(
+            this.#sidebarObservations.get(ownerUserId) ?? { visibleSpaceIds: [] },
+        );
+        const brief = [
+            text,
+            ...(state.sidebarBrief ?? []),
+            `Current sidebar observations: ${observations}. Read the artifact and preserve manual moves and folds.`,
+        ]
+            .join("\n\n")
+            .slice(0, 20_000);
         await this.#durableFunctions.invoke(ctx, {
             function: BRIEF_FUNCTION,
-            arguments: { ownerUserId, messageId: createId(), text },
+            arguments: { ownerUserId, messageId: createId(), text: brief },
             ...(operationId === undefined ? {} : { operationId: `spaces:${operationId}` }),
         });
+        await writeOwnerState(ctx, { ...state, sidebarBrief: [] });
     }
 
     async #deliverBrief(
@@ -1614,18 +1704,10 @@ export class SpacesModule implements AgentModule {
         if (prioritizingAgentId === undefined) return;
         const route = await this.#prioritizingRoute(ctx, ownerUserId);
         if (route === undefined) throw new Error("No model is available for Prioritizing.");
-        const state = await this.#ownerState(ctx, ownerUserId);
-        const observations = JSON.stringify(state.sidebarObservations ?? { visibleSpaceIds: [] });
-        const sidebarBrief = [
-            text,
-            ...(state.sidebarBrief ?? []),
-            `Current sidebar observations: ${observations}. Read the artifact and preserve manual moves and folds.`,
-        ].join("\n\n");
-        await writeOwnerState(ctx, { ...state, sidebarBrief: [] });
         await this.#requireAgents().send(
             ctx,
             prioritizingAgentId,
-            { role: "user", content: [{ type: "text", text: sidebarBrief.slice(0, 20_000) }] },
+            { role: "user", content: [{ type: "text", text }] },
             {
                 id: messageId,
                 metadata: { ...AGENT_MESSAGE_ORIGIN_METADATA },
@@ -1981,6 +2063,11 @@ export class SpacesModule implements AgentModule {
                     updatedAt: Date.now(),
                 };
                 await updateSpace(txCtx, next, row.version);
+                await this.#queueSidebarBrief(
+                    txCtx,
+                    row.ownerUserId,
+                    `Space ${row.id} was renamed or its identity changed. Read its live title with list_sidebar.`,
+                );
                 await this.#commitEvents(txCtx, row.ownerUserId, undefined, [
                     { type: "space_updated", space: next },
                 ]);

@@ -28,6 +28,35 @@ import {
 import { compareArtifactPaths } from "./ArtifactTypes.js";
 import { artifactAuthorId, artifactSourceId } from "./impl/artifactIdentities.js";
 
+/** Small daemon-authored sidebar entries compose with their caller's transaction. */
+export async function insertArtifactInline(
+    ctx: Context,
+    sha256: string,
+    content: string,
+): Promise<void> {
+    await agentDatabaseRun(
+        ctx.db,
+        sql`INSERT INTO happy_agent_module_artifact_inline (sha256, content) VALUES (${sha256}, ${content}) ON CONFLICT (sha256) DO NOTHING`,
+    );
+}
+export async function queryArtifactInline(
+    ctx: Context,
+    sha256: string,
+): Promise<string | undefined> {
+    return (
+        await agentDatabaseRows<{ content: string }>(
+            ctx.db,
+            sql`SELECT content FROM happy_agent_module_artifact_inline WHERE sha256 = ${sha256}`,
+        )
+    )[0]?.content;
+}
+export async function deleteArtifactInline(ctx: Context, sha256: string): Promise<void> {
+    await agentDatabaseRun(
+        ctx.db,
+        sql`DELETE FROM happy_agent_module_artifact_inline WHERE sha256 = ${sha256}`,
+    );
+}
+
 interface ArtifactRow {
     readonly id: string;
     readonly type: string;
