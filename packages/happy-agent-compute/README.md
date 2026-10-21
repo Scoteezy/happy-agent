@@ -112,8 +112,8 @@ machine is a runner, it has to happen there too. Three optional capabilities car
   connection is half-open like TCP: ending the writable side sends a half-close while replies keep
   arriving, and the remote end's half-close ends the readable side while writes continue.
   `network.listen(ctx)` goes the other way: a loopback port on the compute's machine whose
-  connections arrive at the caller, which is how Git on a runner reaches a credential proxy that
-  never leaves the daemon.
+  connections arrive at the caller, allowing a program on a remote machine to reach a service
+  owned by that caller.
 
 These are the product's actions, not the agent's: they take no permissions, and the agent sandbox
 does not apply to them. Callers must not hand them commands an agent chose. The host backend and

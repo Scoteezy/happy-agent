@@ -36,13 +36,13 @@ const projects = new ProjectsModule(
 );
 ```
 
-| Module                                                    | What it answers                                                                                                                                                   |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`ConfigModule`](../config/README.md)                     | Where managed projects live, where the agent keeps its own state, whether cross-workspace work is on, and the GitHub token a clone of a private repository needs. |
-| [`GitModule`](../git/README.md)                           | Every Git command, probe, clone and worktree, the credentials they carry, and who this copy of Git commits as.                                                    |
-| [`AbortModule`](../abort/README.md)                       | How the agents standing in a project stop when it is archived, together with everything below them.                                                               |
-| [`DurableFunctionsModule`](../durableFunctions/README.md) | Provisioning, archival, cleanup, restart recovery, checkpoints, and per-project operation locks.                                                                  |
-| [`RunnersModule`](../runners/README.md)                   | Which machine a folder is on — this one or a runner — and that machine's compute, where every folder probe, creation, and cleanup runs.                           |
+| Module                                                    | What it answers                                                                                                                         |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| [`ConfigModule`](../config/README.md)                     | Where managed projects live, where the agent keeps its own state, and whether cross-workspace work is on.                               |
+| [`GitModule`](../git/README.md)                           | Every Git command, probe, clone and worktree, and who this copy of Git commits as.                                                      |
+| [`AbortModule`](../abort/README.md)                       | How the agents standing in a project stop when it is archived, together with everything below them.                                     |
+| [`DurableFunctionsModule`](../durableFunctions/README.md) | Provisioning, archival, cleanup, restart recovery, checkpoints, and per-project operation locks.                                        |
+| [`RunnersModule`](../runners/README.md)                   | Which machine a folder is on — this one or a runner — and that machine's compute, where every folder probe, creation, and cleanup runs. |
 
 Both `AbortModule` and the `ComputeModule` beneath it have to be installed on the
 agent and started with it: the abort module learns the agent collection from its
@@ -55,9 +55,8 @@ checkpoints, locks, detached lifetimes, and restart recovery belong to
 
 Two answers that used to be the composition root's are now owned deliberately:
 
-- **The GitHub token is configuration's.** `ConfigModule.githubToken` is where a
-  personal access token already lives, beside every other credential a person
-  configures, and it is read at the moment a clone needs one.
+- **Git authentication belongs to the machine.** Git uses its configured credential helpers;
+  the product does not discover, store, or proxy GitHub tokens.
 - **The local Git identity is Git's.** `GitModule.localIdentity()` asks Git what
   this machine commits as, because running Git is what that module is for. The
   one profile a single-machine installation can resolve is named `local` inside
@@ -89,8 +88,7 @@ can key on.
 - `worktreeSupport` is `"supported"`, `"unsupported"` or `"unknown"`, with
   `worktreeUnsupportedReason` set only when it is `unsupported`.
 - `remoteSource` is `{ kind: "github", repository }` or `{ kind: "git", url }`
-  for a project that still has to be cloned, and `requiredSecretKind` names
-  the credential kind a retry needs. No secret material is stored here — and
+  for a project that still has to be cloned. No secret material is stored here — and
   the `git` URL must be one a clone would actually run: HTTPS, with a host, and
   with no credentials embedded in it, so a URL that could only fail later is
   refused when it is recorded instead.
@@ -130,7 +128,7 @@ Four durable, provider-neutral tools are available:
 - `create_project` registers an existing local folder; a new folder is created with the ordinary
   permission-checked shell first.
 - `clone_project` imports a GitHub repository or another credential-free HTTPS Git remote into
-  managed storage, optionally selecting the configured GitHub credential for a GitHub source.
+  managed storage using ordinary machine Git authentication.
 
 Listing and avatar selection do not review in Auto. Registration and cloning require Auto or Full
 access and always review in Auto, with a temporary Full access scope for the host operation. Their
@@ -194,9 +192,6 @@ Folders, clones and Git — the module's own work:
   over its shared refs and reflogs — including the workspaces catalog, which
   takes it through here rather than keeping a second lock over the same
   repository.
-- `gitForProject` returns the Git surface for a project, carrying the credential
-  its clone needs. `registerGitCredential`, `refreshGitCredential` and
-  `gitAuthentication` manage those credentials, which are never stored in a row.
 - `reconcileGitFacts` and `recordGitFacts` refresh the Git cache from a scan.
 
 Registration and catalog edits:

@@ -9,8 +9,22 @@ import { expect, it, vi } from "vitest";
 const exec = promisify(execFile);
 
 it("creates GitHub child workspaces without product credentials, including after restart", async () => {
-    const gym = await createAgentGym();
+    const obsoleteToken = "obsolete-github-config-fixture-token";
+    const gym = await createAgentGym({ config: `[github]\ntoken = "${obsoleteToken}"\n` });
     try {
+        const config = await gym.client.getConfig();
+        expect(config.config).not.toHaveProperty("github");
+        expect(JSON.stringify(config)).not.toContain(obsoleteToken);
+        const bootstrap = await gym.http.ok("GET", "/v0/bootstrap/desktop");
+        expect(JSON.stringify(bootstrap)).not.toContain(obsoleteToken);
+        const rejected = await gym.http.post("/v0/projects/clone", {
+            name: "obsolete-selector",
+            source: { kind: "github", repository: "workspace-gym/fixture" },
+            secret: { kind: "github" },
+        });
+        expect(rejected.status).toBe(400);
+        expect(rejected.text).toContain("invalid_request");
+
         const source = join(gym.workspacePath, "source");
         await mkdir(source);
         await exec("git", ["init", "--initial-branch=main", source]);

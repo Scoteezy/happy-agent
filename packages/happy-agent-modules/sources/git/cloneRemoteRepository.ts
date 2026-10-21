@@ -3,8 +3,6 @@ import { lstat, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import type { GitAuthentication } from "./GitCredentialBroker.js";
-import { redactGitAuthenticationText } from "./GitCredentialBroker.js";
 import { directGitCommandRunner } from "./runGitCommand.js";
 import { readGitTopLevel } from "./readGitTopLevel.js";
 import { runGitCommandOrThrow } from "./GitCommandRunner.js";
@@ -23,8 +21,7 @@ export const STRIPPED_GIT_ENVIRONMENT = [
     "GIT_COMMITTER_EMAIL",
     "GIT_COMMITTER_NAME",
     "GIT_CONFIG",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_COUNT",
     "GIT_DIR",
     "GIT_EXEC_PATH",
     "GIT_OBJECT_DIRECTORY",
@@ -52,7 +49,6 @@ export type GitCloneExecFile = (
 export interface CloneRemoteRepositoryOptions {
     destination: string;
     execFile?: GitCloneExecFile;
-    gitAuthentication?: GitAuthentication;
     gitIdentity?: { email: string; name: string };
     source: GitRemoteSource;
 }
@@ -81,7 +77,7 @@ export async function cloneRemoteRepository(options: CloneRemoteRepositoryOption
     // `git clone` requires the destination itself not to exist.
     await rm(stagingPath, { recursive: true });
     const environment = {
-        ...cloneEnvironment(options.gitAuthentication),
+        ...cloneEnvironment(),
         ...(options.gitIdentity === undefined
             ? {}
             : {
@@ -122,8 +118,6 @@ export async function cloneRemoteRepository(options: CloneRemoteRepositoryOption
             assertSameDirectory(stagingRoot, stagingIdentity, "The managed clone staging root"),
         ]);
         await rename(stagingPath, destination);
-    } catch (error) {
-        throwRedactedGitError(error, options.gitAuthentication?.environment);
     } finally {
         await rm(stagingPath, { force: true, recursive: true }).catch(() => undefined);
     }
@@ -171,18 +165,12 @@ export function remoteUrlForSource(source: GitRemoteSource): string {
         : validateGitRemoteUrl(source.url);
 }
 
-function cloneEnvironment(authentication: GitAuthentication | undefined): NodeJS.ProcessEnv {
+function cloneEnvironment(): NodeJS.ProcessEnv {
     const environment: NodeJS.ProcessEnv = { ...process.env };
     for (const name of STRIPPED_GIT_ENVIRONMENT) delete environment[name];
     for (const name of Object.keys(environment)) {
         if (/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/u.test(name)) delete environment[name];
     }
-    environment.GIT_CONFIG_GLOBAL = "/dev/null";
-    environment.GIT_CONFIG_NOSYSTEM = "1";
-    environment.GIT_CONFIG_COUNT = "1";
-    environment.GIT_CONFIG_KEY_0 = "credential.helper";
-    environment.GIT_CONFIG_VALUE_0 = "";
-    if (authentication !== undefined) Object.assign(environment, authentication.environment);
     environment.GIT_TERMINAL_PROMPT = "0";
     return environment;
 }
@@ -254,16 +242,6 @@ async function exists(path: string): Promise<boolean> {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
             throw error;
         });
-}
-
-function throwRedactedGitError(
-    error: unknown,
-    environment: Readonly<Record<string, string>> | undefined,
-): never {
-    if (environment === undefined || !(error instanceof Error)) throw error;
-    const message = redactGitAuthenticationText(error.message, environment);
-    if (message === error.message) throw error;
-    throw new Error(message, { cause: error });
 }
 
 async function runExecFile(

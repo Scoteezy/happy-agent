@@ -612,7 +612,6 @@ describe("ProjectsModule", () => {
                 name: "Cloned",
                 remoteSource: { kind: "github", repository: "slopus/happy" },
                 repositoryRef: "/tmp/projects/cloned",
-                requiredSecretKind: "github",
             });
             expect(cloned).toMatchObject({
                 presence: "missing",

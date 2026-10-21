@@ -16,16 +16,14 @@ for GitHub or other HTTPS Git remotes. New empty projects use ordinary permissio
 creation followed by registration. Both tools reuse the catalog's public operations and durable
 setup, retaining a project ID in the tool call's KV so replay does not create another clone.
 These installation-wide operations require Auto review or Full access; review discloses the host
-filesystem, background setup, network, and configured-credential boundaries. Subagents and the
+filesystem, background setup, and network boundaries. Subagents and the
 cross-workspace opt-out retain no project tools.
 
-## Child creation can restore a local Git credential after restart
+## Projects do not own GitHub credentials
 
-Git credential registrations live in memory, so a restarted daemon used to reject child creation
-even with its GitHub token still configured. Projects now restores a missing registration on demand
-for the exact local creator from configuration. Existing registrations are reused; another profile
-or installation never receives the local token. Workspaces asks Projects for this authentication
-instead of reading tokens or deriving creator identities itself.
+Projects no longer select, register, persist requirements for, or proxy GitHub tokens. Clones
+and foreground Git use normal machine Git authentication. Historical credential requirements
+are ignored when reading project rows, so an existing project cannot remain credential-gated.
 
 ## The root catalog is available by default
 
@@ -144,7 +142,7 @@ may carry a port, and a port is digits.
 ## Cloning does not require a Git author
 
 A machine may have no global Git name or email, and cloning does not create a commit. Managed
-project creation therefore keeps creator and credential ownership checks but does not invent or
+project creation therefore keeps creator checks but does not invent or
 require an author identity. When Git already has a local identity the clone receives it explicitly;
 otherwise the clone environment contains no author or committer override.
 
@@ -169,7 +167,7 @@ provisioning instead of leaving an active missing folder.
 ## Construction names only module dependencies
 
 The catalog takes `ConfigModule`, `GitModule`, `AbortModule`, and `DurableFunctionsModule`, not an options object or loose
-collaborators. Configuration owns its durable paths and credentials; Git owns repository
+collaborators. Configuration owns its durable paths; Git owns repository
 operations; abort owns stopping an agent and everything below it. The catalog
 mints IDs and timestamps itself, keeps page bounds as constants, and accepts event subscribers
 after construction through `onEventTransactional` and `onEvent`.

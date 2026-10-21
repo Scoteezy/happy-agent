@@ -21,9 +21,6 @@ export function projectText(project: Project): string {
             : [`Default branch: ${project.defaultBranch}`]),
         `Git: ${gitText(project)}`,
         ...(project.remoteSource === undefined ? [] : [`Remote: ${remoteText(project)}`]),
-        ...(project.requiredSecretKind === undefined
-            ? []
-            : ["Needs a GitHub credential before it can be cloned again."]),
         ...(project.description === undefined ? [] : [`Description: ${project.description}`]),
         ...(project.avatar === undefined
             ? []

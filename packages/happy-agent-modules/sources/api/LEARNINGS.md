@@ -1,5 +1,12 @@
 # API module learnings
 
+## GitHub credential selection was explicitly retired
+
+The user approved removing `secret` from project clone requests as an exception to the additive
+protocol policy. HTTP rejects the old selector with `400 invalid_request`; current client and tool
+schemas omit it. GitHub repository sources remain supported and use the Git authentication on the
+machine running the clone. This decision does not authorize publishing or pushing local changes.
+
 ## Scheduled waits travel through the agent resource
 
 The desktop sidebar could not show waits because agent snapshots and updates omitted Scheduling's

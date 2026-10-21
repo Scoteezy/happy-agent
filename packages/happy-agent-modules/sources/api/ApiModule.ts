@@ -5616,7 +5616,6 @@ export class ApiModule implements AgentModule {
                     await this.#projects.createRemote(ctx, {
                         name: body.name,
                         source: body.source,
-                        ...(body.secret === undefined ? {} : { secret: body.secret }),
                         ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
                         ...(body.runnerId === undefined ? {} : { runnerId: body.runnerId }),
                     }),

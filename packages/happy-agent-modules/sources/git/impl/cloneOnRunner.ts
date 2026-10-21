@@ -14,8 +14,6 @@ import {
     STRIPPED_GIT_ENVIRONMENT,
     validateDestination,
 } from "../cloneRemoteRepository.js";
-import type { GitAuthentication } from "../GitCredentialBroker.js";
-import { redactGitAuthenticationText } from "../GitCredentialBroker.js";
 import type { GitRemoteSource } from "../types.js";
 import type { RunnerRunOptions, RunnerRunResult } from "../../runners/index.js";
 
@@ -33,7 +31,6 @@ export async function cloneOnRunner(
     options: {
         readonly destination: string;
         readonly source: GitRemoteSource;
-        readonly gitAuthentication?: GitAuthentication;
         readonly gitIdentity?: { readonly email: string; readonly name: string };
     },
 ): Promise<void> {
@@ -63,12 +60,6 @@ export async function cloneOnRunner(
     const environment: Record<string, string | null> = {};
     for (const name of STRIPPED_GIT_ENVIRONMENT) environment[name] = null;
     Object.assign(environment, {
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_CONFIG_COUNT: "1",
-        GIT_CONFIG_KEY_0: "credential.helper",
-        GIT_CONFIG_VALUE_0: "",
-        ...options.gitAuthentication?.environment,
         ...(options.gitIdentity === undefined
             ? {}
             : {
@@ -79,8 +70,6 @@ export async function cloneOnRunner(
               }),
         GIT_TERMINAL_PROMPT: "0",
     });
-    const redact = (text: string) =>
-        redactGitAuthenticationText(text, options.gitAuthentication?.environment ?? {});
     try {
         const cloned = await run({
             command: "git",
@@ -91,7 +80,7 @@ export async function cloneOnRunner(
         });
         if (cloned.code !== 0 || cloned.timedOut) {
             throw new Error(
-                redact(cloned.stderr.trim()) ||
+                cloned.stderr.trim() ||
                     (cloned.timedOut ? "The clone did not finish in time." : "The clone failed."),
             );
         }
@@ -103,7 +92,7 @@ export async function cloneOnRunner(
                 maximumBytes: 64 * 1024,
                 timeoutMs: 10_000,
             });
-            if (result.code !== 0) throw new Error(redact(result.stderr.trim()) || "Git failed.");
+            if (result.code !== 0) throw new Error(result.stderr.trim() || "Git failed.");
             return result.stdout.toString("utf8").trim();
         };
         const topLevel = await git(["rev-parse", "--show-toplevel"]);

@@ -43,7 +43,7 @@ export interface ComputeNetwork {
     connect(ctx: Context, options: ComputeConnectOptions): Promise<Duplex>;
     /**
      * Listen on the compute's loopback. This is how a program on a remote machine reaches back to
-     * something only the caller can do — Git reaching the credential proxy, for one.
+     * a service owned by the caller.
      */
     listen?(ctx: Context): Promise<ComputeListener>;
 }

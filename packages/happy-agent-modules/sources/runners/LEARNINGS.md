@@ -32,8 +32,9 @@ runners; Git commands that create worktrees and clones do run there.
 Git, workspace checkouts, terminals, file watching, and the workspace proxy were all asked for
 explicitly, not only agent commands. Once any runner is configured nothing runs on the daemon's
 machine and nothing falls back to it: a disconnected runner is an error that names it.
-Repository tokens still never leave the daemon — Git on a runner reaches back to the daemon's
-credential proxy through a loopback listener carried over the runner connection.
+Git on a runner uses the Git authentication configured on that runner. The daemon does not
+discover or proxy GitHub tokens, so remote repository access must be configured for the user
+running Git there.
 
 ## A runner that is away fails at once
 

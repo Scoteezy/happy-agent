@@ -81,8 +81,8 @@ sudo -u happy-work -H git config --global user.name "CONFIRMED_NAME"
 sudo -u happy-work -H git config --global user.email "CONFIRMED_EMAIL"
 ```
 
-Repository tokens stay with the daemon: Git in the workload user's runner reaches remotes through
-the daemon's credential proxy, exactly as on a dedicated runner. Install `gh` or other command-line
+Git in the workload user's runner uses that user's configured Git authentication, exactly as on
+a dedicated runner. Install `gh` or other command-line
 logins for `happy-work` only if the user wants agents to use them, and only with an account whose
 reach they accept for every agent on the node.
 

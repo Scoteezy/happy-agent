@@ -26,8 +26,6 @@ import { durableCheckpoint, DurableFunctionsModule } from "../durableFunctions/i
 import { LocalExecutionDisabledError, type RunnersModule } from "../runners/index.js";
 import {
     GitModule,
-    type GitAuthentication,
-    type GitCredentialRef,
     type GitRepositoryFacts,
     type GitRepositoryProbe,
     type ProjectCreator,
@@ -172,9 +170,7 @@ export const MAX_PROJECT_OUTPUT_CHARACTERS = 12_000;
 /**
  * The only profile a single-machine installation can resolve.
  *
- * Profiles are a multi-instance idea: a project created on one machine records who created it so
- * another machine can refuse to clone it with the wrong person's credentials. One local
- * installation has exactly one person behind it, and this is what that person is called here.
+ * One local installation has one person behind it. Git supplies that person's commit identity.
  */
 const LOCAL_PROFILE_ID = "local";
 
@@ -200,11 +196,11 @@ const PROJECT_STATE_FIELDS = [
 
 /**
  * The catalog of the folders an agent works in, and the Git and filesystem work those records
- * describe: canonical paths, managed folders, clones, repository credentials, probes, avatar bytes,
+ * describe: canonical paths, managed folders, clones, probes, avatar bytes,
  * and the background setup that carries a new project through to a usable one.
  *
- * It takes configuration, because configuration owns the paths and the credentials this
- * installation runs against; it takes Git, because Git is what clones a repository and reads a
+ * It takes configuration, because configuration owns the paths this installation runs against;
+ * it takes Git, because Git is what clones a repository and reads a
  * folder; and it takes abort, because stopping an agent and everything below it is that module's.
  * Everything else it does itself.
  */
@@ -292,7 +288,6 @@ export class ProjectsModule implements AgentModule {
             resultSchema: projectArchiveResultSchema,
             executor: async (ctx, call) => {
                 await this.#stopProjectAgents(ctx, call.arguments.id, call.kv);
-                this.#git.revokeCredentials(call.arguments.id);
                 return null;
             },
         });
@@ -681,9 +676,6 @@ export class ProjectsModule implements AgentModule {
                         ...(normalized.remoteSource === undefined
                             ? {}
                             : { remoteSource: normalized.remoteSource }),
-                        ...(normalized.requiredSecretKind === undefined
-                            ? {}
-                            : { requiredSecretKind: normalized.requiredSecretKind }),
                     }),
                     "Project store create",
                 );
@@ -732,9 +724,6 @@ export class ProjectsModule implements AgentModule {
                         ...(normalized.remoteSource === undefined
                             ? {}
                             : { remoteSource: normalized.remoteSource }),
-                        ...(normalized.requiredSecretKind === undefined
-                            ? {}
-                            : { requiredSecretKind: normalized.requiredSecretKind }),
                     }),
                     "Project store ensure",
                 ),
@@ -867,7 +856,6 @@ export class ProjectsModule implements AgentModule {
                     ),
             },
         );
-        this.#git.revokeCredentials(projectId);
     }
 
     /** Brings an archived project back. Restoring an active project changes nothing. */
@@ -1258,7 +1246,7 @@ export class ProjectsModule implements AgentModule {
     // --- Folders, Git, and setup -------------------------------------------------------------
     //
     // Everything below is the work the records describe: canonical paths, managed folders, clones,
-    // credentials, probes, avatar bytes, and the background setup that carries a new project
+    // probes, avatar bytes, and the background setup that carries a new project
     // through to a usable one. The catalog does it itself; nothing is handed to a host.
 
     /** Where projects Happy Agent cloned for someone live. */
@@ -1305,32 +1293,10 @@ export class ProjectsModule implements AgentModule {
         return projectGitFactsFrom(facts);
     }
 
-    /**
-     * The credential a Git command against one project must carry, when that project has one.
-     *
-     * A workspace cut from a private repository needs the same credential the clone used, so the
-     * catalog that knows who created a project is what names it. Git holds the token itself.
-     */
-    gitCredential(projectId: string): GitCredentialRef | undefined {
-        const creator = this.#creators.get(projectId) ?? this.#localCreator;
-        if (creator === undefined) return undefined;
-        return { creator, projectId };
-    }
-
-    /**
-     * The options every Git method takes for one project: the machine its folder is on and the
-     * credential it carries. A folder on this machine is refused once runners are configured.
-     */
-    #gitOptions(project: Project): {
-        readonly credential?: GitCredentialRef;
-        readonly runnerId?: string;
-    } {
-        const credential = this.gitCredential(project.id);
+    /** The machine every Git method uses for one project. */
+    #gitOptions(project: Project): { readonly runnerId?: string } {
         const { runnerId } = this.location(project);
-        return {
-            ...(credential === undefined ? {} : { credential }),
-            ...(runnerId === undefined ? {} : { runnerId }),
-        };
+        return runnerId === undefined ? {} : { runnerId };
     }
 
     /**
@@ -1426,7 +1392,7 @@ export class ProjectsModule implements AgentModule {
     }
 
     /**
-     * Records this installation identity before recovered remote clones need its credentials.
+     * Records this installation identity before recovered remote clones resolve their Git identity.
      * Durable Functions owns restart recovery.
      */
     open(localInstanceId: string): void {
@@ -1709,7 +1675,7 @@ export class ProjectsModule implements AgentModule {
         }
     }
 
-    // --- Remote projects and credentials -----------------------------------------------------
+    // --- Remote projects ---------------------------------------------------------------------
 
     /** Adds a project whose folder Happy Agent has still to clone from a remote repository. */
     async createRemote(
@@ -1725,12 +1691,6 @@ export class ProjectsModule implements AgentModule {
                 "A person's profile is required to create a managed project.",
             );
         }
-        if (request.secret !== undefined && request.source.kind !== "github") {
-            throw new ProjectRegistrationError(
-                "unsupported_git_source",
-                "GitHub credentials can only be used with a GitHub repository.",
-            );
-        }
         const id =
             request.projectId === undefined ? createId() : clientChosenProjectId(request.projectId);
         const runnerId = this.#place(request.runnerId);
@@ -1739,41 +1699,13 @@ export class ProjectsModule implements AgentModule {
             runnerId,
             join(await this.#runners.projectsHome(runnerId), name),
         );
-        const githubToken =
-            options.githubToken ??
-            (request.secret?.kind === "github" &&
-            creator.instanceId === this.#localInstanceId &&
-            creator.profileId === LOCAL_PROFILE_ID
-                ? await this.#config.resolveGithubTokenForImport()
-                : undefined);
-        if (githubToken !== undefined && request.source.kind !== "github") {
-            throw new ProjectRegistrationError(
-                "unsupported_git_source",
-                "GitHub credentials can only be used with a GitHub repository.",
-            );
-        }
-        const registerCredential = async (): Promise<void> => {
-            if (githubToken === undefined || request.source.kind !== "github") return;
-            await this.#git.registerCredential({
-                creator,
-                projectId: id,
-                repository: request.source.repository,
-                token: githubToken,
-            });
-        };
-
         const retried = await this.#retriedRemoteProject(ctx, id, path, request, creator, runnerId);
         if (retried !== undefined) {
             this.#creators.set(id, creator);
-            await registerCredential();
-            const canRetry =
-                retried.requiredSecretKind !== "github" ||
-                this.gitAuthentication(retried.id, creator) !== undefined;
-            if (retried.initializationStatus === "failed" && !canRetry) return retried;
             if (retried.initializationStatus === "failed") {
                 await this.retryInitialization(ctx, id);
             }
-            if (retried.initializationStatus !== "ready" && canRetry) {
+            if (retried.initializationStatus !== "ready") {
                 await this.scheduleInitialization(ctx, id);
             }
             return (await this.get(ctx, id)) ?? retried;
@@ -1792,7 +1724,6 @@ export class ProjectsModule implements AgentModule {
         }
         await machine.fs.mkdir(PRODUCT, dirname(path), { recursive: true });
         this.#creators.set(id, creator);
-        await registerCredential();
         try {
             const project = await this.create(ctx, {
                 id,
@@ -1801,9 +1732,6 @@ export class ProjectsModule implements AgentModule {
                 kind: "regular",
                 name,
                 remoteSource: request.source,
-                ...(request.secret === undefined
-                    ? {}
-                    : { requiredSecretKind: request.secret.kind }),
             });
             await this.scheduleInitialization(ctx, id);
             return project;
@@ -1822,7 +1750,6 @@ export class ProjectsModule implements AgentModule {
                 }
                 return raced;
             }
-            this.#git.revokeCredentials(id);
             this.#creators.delete(id);
             if ((await this.getByPath(ctx, path, runnerId)) !== undefined) {
                 throw new ProjectRegistrationError(
@@ -1849,7 +1776,6 @@ export class ProjectsModule implements AgentModule {
             project.repositoryRef !== path ||
             project.runnerId !== runnerId ||
             !remoteProjectSourcesEqual(project.remoteSource, request.source) ||
-            project.requiredSecretKind !== request.secret?.kind ||
             (recordedCreator !== undefined &&
                 (recordedCreator.instanceId !== creator.instanceId ||
                     recordedCreator.profileId !== creator.profileId))
@@ -1895,19 +1821,9 @@ export class ProjectsModule implements AgentModule {
         if (profile !== undefined && profile.parentInstanceId !== creator.instanceId) {
             throw new Error("The project creator's profile is unavailable.");
         }
-        const credential: GitCredentialRef = { creator, projectId: project.id };
-        if (
-            project.requiredSecretKind === "github" &&
-            this.#git.daemonAuthentication(project.id, creator) === undefined
-        ) {
-            throw new Error(
-                "GitHub credentials are unavailable. Try this project again once GitHub is connected.",
-            );
-        }
         // Git clones through its own staging directory and renames the finished checkout into
         // place, so a failed or interrupted clone never leaves half a project behind.
         await this.#git.clone({
-            credential,
             ...(project.runnerId === undefined ? {} : { runnerId: project.runnerId }),
             destination: project.repositoryRef,
             source: project.remoteSource,
@@ -1934,117 +1850,6 @@ export class ProjectsModule implements AgentModule {
         const identity = await this.#git.localIdentity();
         if (identity === undefined) return undefined;
         return { email: identity.email, name: identity.name, parentInstanceId: instanceId };
-    }
-
-    async registerGitCredential(
-        ctx: Context,
-        projectId: string,
-        creator: ProjectCreator,
-        githubToken: string,
-    ): Promise<GitAuthentication> {
-        const project = await this.get(ctx, projectId);
-        if (project?.remoteSource?.kind !== "github") {
-            throw new Error("GitHub credentials can only be used with a GitHub project.");
-        }
-        this.#creators.set(projectId, creator);
-        return await this.#git.registerCredential({
-            creator,
-            projectId,
-            repository: project.remoteSource.repository,
-            token: githubToken,
-        });
-    }
-
-    async refreshGitCredential(
-        ctx: Context,
-        projectId: string,
-        creator: ProjectCreator,
-        githubToken: string,
-    ): Promise<GitAuthentication> {
-        const project = await this.get(ctx, projectId);
-        if (project?.remoteSource?.kind !== "github") {
-            throw new Error("That profile does not own a managed GitHub project.");
-        }
-        const recorded = this.#creators.get(projectId);
-        if (
-            recorded !== undefined &&
-            (recorded.instanceId !== creator.instanceId || recorded.profileId !== creator.profileId)
-        ) {
-            throw new Error("That profile does not own a managed GitHub project.");
-        }
-        const authentication = await this.registerGitCredential(
-            ctx,
-            projectId,
-            creator,
-            githubToken,
-        );
-        if (project.initializationStatus === "failed") {
-            await this.retryInitialization(ctx, projectId);
-            await this.scheduleInitialization(ctx, projectId);
-        }
-        return authentication;
-    }
-
-    /** The leaseable credential a command someone runs in this project may carry. */
-    gitAuthentication(
-        projectId: string,
-        creator: ProjectCreator,
-    ): ReturnType<GitModule["commandAuthentication"]> {
-        return this.#git.commandAuthentication(projectId, creator);
-    }
-
-    /** Restores a local project's in-memory credential after restart, without changing its owner. */
-    async ensureGitAuthentication(
-        ctx: Context,
-        projectId: string,
-        creator: ProjectCreator,
-    ): Promise<ReturnType<GitModule["commandAuthentication"]>> {
-        const existing = this.gitAuthentication(projectId, creator);
-        if (existing !== undefined) return existing;
-        const local = this.#localCreator;
-        const owner = this.gitCredential(projectId)?.creator;
-        if (
-            local === undefined ||
-            creator.instanceId !== local.instanceId ||
-            creator.profileId !== local.profileId ||
-            owner?.instanceId !== creator.instanceId ||
-            owner.profileId !== creator.profileId
-        ) {
-            return undefined;
-        }
-        const token = this.#config.githubToken;
-        if (token === undefined) return undefined;
-        const project = await this.get(ctx, projectId);
-        if (project?.remoteSource?.kind !== "github") return undefined;
-        await this.registerGitCredential(ctx, projectId, creator, token);
-        return this.gitAuthentication(projectId, creator);
-    }
-
-    /** Re-registers the local credential for every managed project and retries what failed. */
-    async retryRemoteProjects(ctx: Context, kind: "github"): Promise<void> {
-        if (kind !== "github") return;
-        const token = this.#config.githubToken;
-        if (token === undefined) return;
-        for (const project of await this.#allProjects(ctx)) {
-            if (project.requiredSecretKind !== kind) continue;
-            if (project.remoteSource?.kind !== "github") continue;
-            const creator = this.#creators.get(project.id) ?? this.#localCreator;
-            if (creator === undefined || creator.instanceId !== this.#localInstanceId) continue;
-            try {
-                await this.#git.registerCredential({
-                    creator,
-                    projectId: project.id,
-                    repository: project.remoteSource.repository,
-                    token,
-                });
-            } catch {
-                continue;
-            }
-            if (project.initializationStatus === "failed") {
-                await this.retryInitialization(ctx, project.id);
-            }
-            await this.scheduleInitialization(ctx, project.id);
-        }
     }
 
     // --- Git facts ---------------------------------------------------------------------------

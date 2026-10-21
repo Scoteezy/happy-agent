@@ -27,8 +27,8 @@ export interface RunnerMachineOptions {
  * An ordinary request is the host compute, behind the native supervisor. A request naming a Docker
  * image runs the agent's files and commands in a container of that image with the folder mounted
  * at the same path. Outbound connections are made from inside that container, so a preview reaches
- * what the agent started there. The product's own programs, watches, and loopback listeners — Git,
- * terminals, and the credential proxy Git reaches back through — stay on the runner, over the same
+ * what the agent started there. The product's own programs, watches, and loopback listeners — Git
+ * and terminals among them — stay on the runner, over the same
  * folder.
  */
 export function createRunnerMachine(

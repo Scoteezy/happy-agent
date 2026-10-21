@@ -1,8 +1,8 @@
 # Git
 
 Everything the product does with a repository. `GitModule` reads facts and change snapshots, probes
-a folder, clones a remote, cuts and retires worktrees, renames branches, brokers repository
-credentials, and watches repositories for change. It has no database, no migrations, no tools, and
+a folder, clones a remote, cuts and retires worktrees, renames branches, and watches repositories
+for change. It has no database, no migrations, no tools, and
 no protocol or HTTP coupling.
 
 ```ts
@@ -35,16 +35,12 @@ collection still works — it takes a lifetime of its own.
   `readFileAtRevision`, `listWorkingTreeFiles`, `countUntrackedFileLines`.
 - **Changing a repository.** `clone`, `resolveWorkspaceBase`, `createWorktree`, `removeWorktree`,
   `renameBranch`.
-- **Credentials.** `registerCredential`, `commandAuthentication`, `daemonAuthentication`,
-  `revokeCredentials`. A repository token never reaches Git: it stays in this process behind a
-  loopback proxy that serves only the repository it was registered for. Any method that touches a
-  private repository takes `{ credential: { projectId, creator } }` and resolves the environment
-  itself, so no caller ever holds a Git runner of its own.
+- **Authentication.** Foreground Git uses the authentication configured on the machine running it.
 - **Snapshots.** `generation`, `snapshot`, `watch`, `invalidate`.
 - **Live tracking.** `track`, `untrack`, `replaceTracked`, `markChanged`, `trackedSnapshot`,
   `trackedKeys`, `liveSnapshots`, `refresh`, and `onSnapshot(observer)` which returns its own
   unsubscribe. `watchWorkingTree(root, observer)` shares the live working-tree watch.
-- **Shutdown.** `dispose` stops every watcher, clears the cache and closes the credential broker.
+- **Shutdown.** `dispose` stops every watcher and clears the cache.
 
 ## Behavior worth knowing
 

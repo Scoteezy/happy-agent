@@ -30,12 +30,10 @@ export interface CreateRemoteProjectRequest {
     readonly projectId?: string;
     /** The runner to clone onto; the default runner while runners are configured. */
     readonly runnerId?: string;
-    readonly secret?: { readonly kind: "github" };
     readonly source: ProjectRemoteSource;
 }
 
-/** Who asked for a managed project or workspace, and with which credential. */
+/** Who asked for a managed project. */
 export interface ProjectCreatorOptions {
     readonly createdBy?: ProjectCreator;
-    readonly githubToken?: string;
 }

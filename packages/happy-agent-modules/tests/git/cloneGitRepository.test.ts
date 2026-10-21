@@ -1,9 +1,9 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { access, lstat, mkdir, readdir, symlink } from "node:fs/promises";
+import { access, lstat, mkdir, readdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
     cloneRemoteRepository,
@@ -15,6 +15,38 @@ const execFile = promisify(execFileCallback);
 afterEach(cleanupRoots);
 
 describe("cloneRemoteRepository", () => {
+    it("uses the machine's configured Git credential helper", async () => {
+        const parent = await createRoot();
+        const configPath = join(parent, "gitconfig");
+        await writeFile(configPath, "[credential]\n    helper = fixture-helper\n");
+        vi.stubEnv("GIT_CONFIG_GLOBAL", configPath);
+        vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+        let helper: string | undefined;
+        try {
+            await expect(
+                cloneRemoteRepository({
+                    destination: join(parent, "clone"),
+                    source: { kind: "github", repository: "example/private" },
+                    execFile: async (_file, _args, options) => {
+                        const result = await execFile(
+                            "git",
+                            ["config", "--get", "credential.helper"],
+                            {
+                                env: options.env,
+                                encoding: "utf8",
+                            },
+                        );
+                        helper = result.stdout.trim();
+                        throw new Error("fixture clone stopped");
+                    },
+                }),
+            ).rejects.toThrow("fixture clone stopped");
+            expect(helper).toBe("fixture-helper");
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
     it("clones into staging, proves origin, and atomically installs the destination", async () => {
         const source = await createRepository();
         await commitFile(source, "README.md", "fixture\n");

@@ -1,7 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 
-import { redactGitAuthenticationText } from "./GitCredentialBroker.js";
 import type { GitCommandOptions, GitCommandResult, GitCommandRunner } from "./GitCommandRunner.js";
 import { runScanGit } from "./runScanGit.js";
 
@@ -20,20 +19,11 @@ export async function runGitCommand(
     args: readonly string[],
     options: GitCommandOptions = {},
 ): Promise<GitCommandResult> {
-    return await runGitCommandWithEnvironment(cwd, args, {}, options);
-}
-
-export async function runGitCommandWithEnvironment(
-    cwd: string,
-    args: readonly string[],
-    environment: Readonly<Record<string, string>> = {},
-    options: GitCommandOptions = {},
-): Promise<GitCommandResult> {
     try {
         const result = await execFile("git", ["-C", cwd, ...args], {
             encoding: "utf8",
             windowsHide: true,
-            env: { ...process.env, ...environment, GIT_TERMINAL_PROMPT: "0" },
+            env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
             maxBuffer: options.maxOutputBytes ?? GIT_OUTPUT_LIMIT,
             signal: options.signal,
             // Fetch is allowed a deliberately generous foreground budget, but workspace creation
@@ -50,10 +40,7 @@ export async function runGitCommandWithEnvironment(
         };
         return {
             code: typeof candidate.code === "number" ? candidate.code : 1,
-            stderr: redactGitAuthenticationText(
-                candidate.stderr ?? (error instanceof Error ? error.message : String(error)),
-                environment,
-            ),
+            stderr: candidate.stderr ?? (error instanceof Error ? error.message : String(error)),
             stdout: candidate.stdout ?? "",
         };
     }

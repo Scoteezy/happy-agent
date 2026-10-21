@@ -98,9 +98,8 @@ A watch writes newline-delimited JSON batches `{paths, overflow}` on `out`. Whil
 behind, the runner merges pending batches rather than queueing them, and too many changed paths
 become one overflow batch telling the reader to rescan.
 
-A listener is how a program on the runner reaches back to something only the daemon can do. Git
-is the reason it exists: a repository token never leaves the daemon, so Git on the runner talks to
-a loopback port there, and each connection to it comes back to the daemon's own credential proxy.
+A listener lets a program on the runner reach a service owned by the daemon. A program connects
+to a loopback port on the runner, and each connection arrives back at the daemon.
 `net.listen` answers with the port. Every accepted connection is announced on the listener's `out`
 as a JSON line `{connection}` and waits, paused, until the daemon attaches it to a stream of its own
 with `net.accept`; at most 64 wait, each for at most 30 seconds.
@@ -128,8 +127,7 @@ previewing web apps it serves, and loopback listeners) over streams. A compute c
 `docker: { image }` runs the agent's files and commands in a container of that image on the
 runner, with the folder mounted at the same path. Its outbound connections are made from inside
 that container, so a preview reaches what the agent started there; its processes, watches, and
-loopback listeners still run on the runner itself, over the same folder, which is where Git and its
-credential proxy need them.
+loopback listeners still run on the runner itself, over the same folder.
 
 Protocol version 2 changes no message: it is the promise that `net.connect` on a Docker compute
 connects inside the container. A version 1 runner connects from its own network instead, so the

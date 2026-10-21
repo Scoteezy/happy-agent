@@ -1,19 +1,17 @@
 /**
  * The Git module's public surface.
  *
- * `GitModule` is the whole feature: every repository read, mutation, credential, and live watch
+ * `GitModule` is the whole feature: every repository read, mutation, and live watch
  * goes through an instance of it. The names below are only the module class and the types callers
  * need to speak about what its methods take and return. The commands themselves stay private —
  * ask the module instead of importing a file out of this folder.
  */
 export { GitModule } from "./GitModule.js";
 export {
-    gitCredentialRefSchema,
     gitEntitySchema,
     gitTrackedEntitiesSchema,
     gitWatchSchema,
     type GitChangedFile,
-    type GitCredentialRef,
     type GitEntity,
     type GitOperationOptions,
     type GitResource,
@@ -55,13 +53,6 @@ export {
     type WorkingTreeObserver,
 } from "./impl/WorkingTreeWatcher.js";
 export { type HostingRepository } from "./parseHostingRepository.js";
-export {
-    type GitAuthentication,
-    type GitCommandAuthentication,
-    type GitCommandAuthenticationLease,
-    type RegisterGitCredential,
-} from "./GitCredentialBroker.js";
-
 /**
  * Still published only because callers outside this package have not moved to `GitModule` yet.
  *

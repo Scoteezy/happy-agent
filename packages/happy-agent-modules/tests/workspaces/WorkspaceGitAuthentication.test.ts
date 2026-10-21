@@ -31,7 +31,6 @@ it("creates a workspace from an existing GitHub checkout without a stored creden
             name: "GitHub project",
             repositoryRef: repository,
             remoteSource: { kind: "github", repository: "workspace-gym/fixture" },
-            requiredSecretKind: "github",
         });
         await catalog.projects.markCloneReady(ctx, project.id);
         await catalog.projects.probe(ctx, project.id);

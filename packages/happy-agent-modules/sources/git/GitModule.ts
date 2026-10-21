@@ -11,19 +11,12 @@ import { createRootContext, detach, type Context, type RootContext } from "@stev
 import type { ConfigModule } from "../config/index.js";
 import type { RunnerRunOptions, RunnersModule } from "../runners/index.js";
 import type { GitCommandOptions, GitCommandResult, GitCommandRunner } from "./GitCommandRunner.js";
-import {
-    GitCredentialBroker,
-    type GitAuthentication,
-    type GitCommandAuthentication,
-    type RegisterGitCredential,
-} from "./GitCredentialBroker.js";
 import { cloneRemoteRepository, remoteUrlForSource } from "./cloneRemoteRepository.js";
 import { countUntrackedFileLines, type UntrackedFileCount } from "./countUntrackedFileLines.js";
 import { createGitWorktree } from "./createGitWorktree.js";
 import { detectGitDefaultBranch } from "./detectGitDefaultBranch.js";
 import { cloneOnRunner } from "./impl/cloneOnRunner.js";
 import { GitStateTracker } from "./impl/GitStateTracker.js";
-import { RunnerGitCredentialTunnel } from "./impl/RunnerGitCredentialTunnel.js";
 import { runnerGitCommandRunner, runnerScanGit } from "./impl/runnerGitRunners.js";
 import { WorkingTreeWatcher, type WorkingTreeObserver } from "./impl/WorkingTreeWatcher.js";
 import { isGitWorktreeAt } from "./isGitWorktreeAt.js";
@@ -42,7 +35,7 @@ import { renameGitBranch } from "./renameGitBranch.js";
 import { resolveGitCommit } from "./resolveGitCommit.js";
 import { resolveGitComparisonBase, type GitComparisonBase } from "./resolveGitComparisonBase.js";
 import { resolveWorkspaceBase, type WorkspaceBase } from "./resolveWorkspaceBase.js";
-import { directGitCommandRunner, runGitCommandWithEnvironment } from "./runGitCommand.js";
+import { directGitCommandRunner } from "./runGitCommand.js";
 import {
     gitCommandRunnerFromScanGitRunner,
     runScanGit,
@@ -54,7 +47,6 @@ import { selectGitRemoteUrl } from "./selectGitRemoteUrl.js";
 import { supportsRecursiveWorktreeWatch } from "./watchGitRepositoryChanges.js";
 import {
     gitTrackedEntitySchema,
-    projectCreatorSchema,
     type GitChangeSnapshot,
     type GitChangeState,
     type GitFileChange,
@@ -62,7 +54,6 @@ import {
     type GitRemoteSource,
     type GitRepositoryFacts,
     type GitTrackedEntity,
-    type ProjectCreator,
 } from "./types.js";
 
 const SNAPSHOT_CACHE_MS = 2_000;
@@ -91,23 +82,8 @@ export const gitTrackedEntitiesSchema = Type.Array(gitTrackedEntitySchema, {
     maxItems: MAX_WATCH_ENTITIES,
 });
 
-/**
- * Names the project credential a Git command should carry.
- *
- * A repository cloned with a token needs the same token for every later fetch, so callers name the
- * project and the person it was registered for rather than carrying an environment of their own.
- */
-export const gitCredentialRefSchema = Type.Object(
-    {
-        creator: projectCreatorSchema,
-        projectId: Type.String({ minLength: 1, maxLength: 128 }),
-    },
-    { additionalProperties: false },
-);
-
 export type GitEntity = Static<typeof gitEntitySchema>;
 export type GitWatchInput = Static<typeof gitWatchSchema>;
-export type GitCredentialRef = Static<typeof gitCredentialRefSchema>;
 export type GitChangedFile = GitFileChange;
 export type { GitChangeSnapshot, GitLiveSnapshot, GitRepositoryFacts };
 
@@ -116,9 +92,8 @@ export interface GitPlacement {
     readonly runnerId?: string;
 }
 
-/** How one Git operation runs: where, whose credential it carries, and when it must give up. */
+/** Where one Git operation runs and when it must give up. */
 export interface GitOperationOptions extends GitPlacement {
-    readonly credential?: GitCredentialRef;
     readonly signal?: AbortSignal;
 }
 
@@ -127,7 +102,7 @@ const PRODUCT = computePermissions("full_access");
 
 /** Everything Git work needs on one machine. */
 interface GitMachine {
-    foreground(credential: GitCredentialRef | undefined): GitCommandRunner;
+    readonly foreground: GitCommandRunner;
     readonly read: GitCommandRunner;
     readonly scan: ScanGitRunner;
     isDirectory(path: string): Promise<boolean>;
@@ -153,7 +128,7 @@ interface CachedSnapshot {
  *
  * Everything the product does with a repository runs through here: reading facts and change
  * snapshots, probing a folder, cloning a remote, cutting and retiring worktrees, renaming
- * branches, brokering repository credentials, and watching repositories for change. It reaches
+ * branches and watching repositories for change. It reaches
  * Git itself rather than being handed a runner, and unattended reads go
  * through the hardened read-only scanner while mutations and network work use the foreground one.
  *
@@ -166,15 +141,11 @@ export class GitModule implements AgentModule {
     readonly name = "git";
 
     readonly #cache = new Map<string, CachedSnapshot>();
-    readonly #credentials = new GitCredentialBroker();
     readonly #generation = randomUUID();
     readonly #observers = new Set<GitSnapshotObserver>();
     readonly #runners: RunnersModule | undefined;
     readonly #runnerMachines = new Map<string, GitMachine>();
-    readonly #tunnel = new RunnerGitCredentialTunnel();
     #config: ConfigModule | undefined;
-    /** Whether Git is reached directly, which is what makes a credential-carrying runner possible. */
-    #direct = true;
     #disposed = false;
     #foreground: GitCommandRunner;
     #lifetime: RootContext | undefined;
@@ -209,7 +180,6 @@ export class GitModule implements AgentModule {
      */
     static withRunner(runner: GitCommandRunner): GitModule {
         const module = new GitModule();
-        module.#direct = false;
         module.#foreground = runner;
         module.#scan = scanGitRunnerFromCommandRunner(runner);
         module.#read = gitCommandRunnerFromScanGitRunner(module.#scan);
@@ -259,7 +229,7 @@ export class GitModule implements AgentModule {
     // --- Running Git -----------------------------------------------------------------------
 
     /**
-     * Runs one Git command in the foreground, carrying a project credential when one is named.
+     * Runs one Git command in the foreground using ordinary machine Git authentication.
      *
      * The escape hatch for work this module has no method for. It returns exit status and both
      * streams rather than throwing, so a caller can read a failure without losing Git's own text.
@@ -267,10 +237,10 @@ export class GitModule implements AgentModule {
     async run(
         cwd: string,
         args: readonly string[],
-        options: GitCommandOptions & GitPlacement & { readonly credential?: GitCredentialRef } = {},
+        options: GitCommandOptions & GitPlacement = {},
     ): Promise<GitCommandResult> {
-        const { credential, runnerId, ...command } = options;
-        return await this.#machine(runnerId).foreground(credential).run(cwd, args, command);
+        const { runnerId, ...command } = options;
+        return await this.#machine(runnerId).foreground.run(cwd, args, command);
     }
 
     /**
@@ -301,7 +271,7 @@ export class GitModule implements AgentModule {
     ): Promise<GitRepositoryProbe> {
         const machine = this.#machine(options.runnerId);
         return await probeGitRepository({
-            git: this.#readFor(options.credential, options.runnerId),
+            git: machine.read,
             ...(this.#native(options.runnerId)
                 ? {}
                 : {
@@ -326,12 +296,12 @@ export class GitModule implements AgentModule {
 
     /** The canonical top level of the repository containing a path. */
     async topLevel(path: string, options: GitOperationOptions = {}): Promise<string> {
-        return await readGitTopLevel(this.#readFor(options.credential, options.runnerId), path);
+        return await readGitTopLevel(this.#machine(options.runnerId).read, path);
     }
 
     /** The shared Git directory every worktree of a repository has in common. */
     async commonDir(path: string, options: GitOperationOptions = {}): Promise<string> {
-        return await readGitCommonDir(this.#readFor(options.credential, options.runnerId), path);
+        return await readGitCommonDir(this.#machine(options.runnerId).read, path);
     }
 
     /** Both halves of a worktree's identity: its own top level and its shared common directory. */
@@ -339,10 +309,7 @@ export class GitModule implements AgentModule {
         path: string,
         options: GitOperationOptions = {},
     ): Promise<GitWorktreeIdentity> {
-        return await readGitWorktreeIdentity(
-            this.#readFor(options.credential, options.runnerId),
-            path,
-        );
+        return await readGitWorktreeIdentity(this.#machine(options.runnerId).read, path);
     }
 
     /** Whether a path is the top level of a worktree belonging to one specific repository. */
@@ -351,7 +318,7 @@ export class GitModule implements AgentModule {
     ): Promise<boolean> {
         return await isGitWorktreeAt({
             commonDir: options.commonDir,
-            git: this.#readFor(options.credential, options.runnerId),
+            git: this.#machine(options.runnerId).read,
             path: options.path,
         });
     }
@@ -361,10 +328,7 @@ export class GitModule implements AgentModule {
         path: string,
         options: GitOperationOptions = {},
     ): Promise<string | undefined> {
-        return await detectGitDefaultBranch(
-            this.#readFor(options.credential, options.runnerId),
-            path,
-        );
+        return await detectGitDefaultBranch(this.#machine(options.runnerId).read, path);
     }
 
     /** The remote URL a repository is really working against, tracked branch first. */
@@ -372,7 +336,7 @@ export class GitModule implements AgentModule {
         cwd: string,
         options: GitOperationOptions = {},
     ): Promise<string | undefined> {
-        return await selectGitRemoteUrl(this.#readFor(options.credential, options.runnerId), cwd);
+        return await selectGitRemoteUrl(this.#machine(options.runnerId).read, cwd);
     }
 
     /** The commit a reference resolves to, or nothing when Git answered with something else. */
@@ -382,7 +346,7 @@ export class GitModule implements AgentModule {
         options: GitOperationOptions = {},
     ): Promise<string | undefined> {
         return await resolveGitCommit(
-            this.#readFor(options.credential, options.runnerId),
+            this.#machine(options.runnerId).read,
             cwd,
             ref,
             options.signal === undefined ? undefined : { signal: options.signal },
@@ -458,19 +422,11 @@ export class GitModule implements AgentModule {
      */
     async clone(
         options: GitPlacement & {
-            readonly credential?: GitCredentialRef;
             readonly destination: string;
             readonly gitIdentity?: { readonly email: string; readonly name: string };
             readonly source: GitRemoteSource;
         },
     ): Promise<void> {
-        const authentication =
-            options.credential === undefined
-                ? undefined
-                : this.daemonAuthentication(
-                      options.credential.projectId,
-                      options.credential.creator,
-                  );
         if (!this.#native(options.runnerId)) {
             const runnerId = options.runnerId;
             const machine = await this.#runnerMachine(runnerId);
@@ -482,15 +438,6 @@ export class GitModule implements AgentModule {
                 {
                     destination: options.destination,
                     source: options.source,
-                    ...(authentication === undefined
-                        ? {}
-                        : {
-                              gitAuthentication: await this.#throughTunnel(
-                                  runnerId,
-                                  machine,
-                                  authentication,
-                              ),
-                          }),
                     ...(options.gitIdentity === undefined
                         ? {}
                         : { gitIdentity: options.gitIdentity }),
@@ -501,7 +448,6 @@ export class GitModule implements AgentModule {
         await cloneRemoteRepository({
             destination: options.destination,
             source: options.source,
-            ...(authentication === undefined ? {} : { gitAuthentication: authentication }),
             ...(options.gitIdentity === undefined ? {} : { gitIdentity: options.gitIdentity }),
         });
     }
@@ -509,7 +455,6 @@ export class GitModule implements AgentModule {
     /** The commit a new workspace should start from, fetching origin first when it can. */
     async resolveWorkspaceBase(
         options: GitPlacement & {
-            readonly credential?: GitCredentialRef;
             readonly defaultBranch?: string;
             readonly projectPath: string;
             readonly requestedRef?: string;
@@ -517,7 +462,7 @@ export class GitModule implements AgentModule {
         },
     ): Promise<WorkspaceBase> {
         return await resolveWorkspaceBase({
-            git: this.#machine(options.runnerId).foreground(options.credential),
+            git: this.#machine(options.runnerId).foreground,
             projectPath: options.projectPath,
             ...(options.defaultBranch === undefined
                 ? {}
@@ -532,7 +477,6 @@ export class GitModule implements AgentModule {
         options: GitPlacement & {
             readonly branch: string;
             readonly commit: string;
-            readonly credential?: GitCredentialRef;
             readonly expectedCommonDir: string;
             readonly projectPath: string;
             readonly workspacePath: string;
@@ -543,7 +487,7 @@ export class GitModule implements AgentModule {
             branch: options.branch,
             commit: options.commit,
             expectedCommonDir: options.expectedCommonDir,
-            git: machine.foreground(options.credential),
+            git: machine.foreground,
             ...(this.#native(options.runnerId)
                 ? {}
                 : { makeParent: async (path: string) => await machine.makeDirectory(path) }),
@@ -561,7 +505,6 @@ export class GitModule implements AgentModule {
      */
     async removeWorktree(
         options: GitPlacement & {
-            readonly credential?: GitCredentialRef;
             readonly expectedCommonDir: string;
             readonly projectPath: string;
             readonly removeDirectory: boolean;
@@ -571,7 +514,7 @@ export class GitModule implements AgentModule {
         const machine = this.#machine(options.runnerId);
         await removeGitWorktree({
             expectedCommonDir: options.expectedCommonDir,
-            git: machine.foreground(options.credential),
+            git: machine.foreground,
             ...(this.#native(options.runnerId)
                 ? {}
                 : { inspect: async (path: string) => await machine.inspect(path) }),
@@ -586,7 +529,6 @@ export class GitModule implements AgentModule {
     /** Renames the branch a worktree is on, refusing when it is not the branch the caller named. */
     async renameBranch(
         options: GitPlacement & {
-            readonly credential?: GitCredentialRef;
             readonly expectedCommonDir: string;
             readonly from: string;
             readonly to: string;
@@ -596,14 +538,14 @@ export class GitModule implements AgentModule {
         await renameGitBranch({
             expectedCommonDir: options.expectedCommonDir,
             from: options.from,
-            git: this.#machine(options.runnerId).foreground(options.credential),
+            git: this.#machine(options.runnerId).foreground,
             to: options.to,
             workspacePath: options.workspacePath,
         });
         this.invalidate(options.workspacePath);
     }
 
-    // --- Repository credentials ------------------------------------------------------------
+    // --- Commit identity -------------------------------------------------------------------
 
     /**
      * Who this machine commits as, read from Git's own configuration.
@@ -625,37 +567,6 @@ export class GitModule implements AgentModule {
         const [email, name] = await Promise.all([read("user.email"), read("user.name")]);
         if (email === undefined || name === undefined) return undefined;
         return { email, name };
-    }
-
-    /**
-     * Records a repository token and returns the environment Git needs to use it.
-     *
-     * The token never reaches Git itself: it stays in this process behind a loopback proxy that
-     * only serves the one repository it was registered for.
-     */
-    async registerCredential(input: RegisterGitCredential): Promise<GitAuthentication> {
-        return await this.#credentials.register(input);
-    }
-
-    /** The leaseable credential for a command the model or a person is about to run. */
-    commandAuthentication(
-        projectId: string,
-        creator: ProjectCreator,
-    ): GitCommandAuthentication | undefined {
-        return this.#credentials.authentication(projectId, creator);
-    }
-
-    /** The credential Happy Agent's own background Git work carries for a project. */
-    daemonAuthentication(
-        projectId: string,
-        creator: ProjectCreator,
-    ): GitAuthentication | undefined {
-        return this.#credentials.daemonAuthentication(projectId, creator);
-    }
-
-    /** Forgets every credential registered for a project. */
-    revokeCredentials(projectId: string): void {
-        this.#credentials.revoke(projectId);
     }
 
     // --- Snapshots -------------------------------------------------------------------------
@@ -865,18 +776,16 @@ export class GitModule implements AgentModule {
         };
     }
 
-    /** Stops every watcher, clears the snapshot cache, and closes the credential broker. */
+    /** Stops every watcher and clears the snapshot cache. */
     dispose(): void {
         this.#disposed = true;
         this.#tracker?.dispose();
         this.#tracker = undefined;
         this.#tree?.dispose();
         this.#tree = undefined;
-        this.#tunnel.close();
         this.#runnerMachines.clear();
         this.#observers.clear();
         this.#cache.clear();
-        this.#credentials.close();
     }
 
     // --- Internals -------------------------------------------------------------------------
@@ -943,7 +852,7 @@ export class GitModule implements AgentModule {
     #machine(runnerId: string | undefined): GitMachine {
         if (this.#native(runnerId)) {
             return {
-                foreground: (credential) => this.#foregroundFor(credential),
+                foreground: this.#foreground,
                 read: this.#read,
                 scan: this.#scan,
                 isDirectory: async (path) =>
@@ -972,22 +881,7 @@ export class GitModule implements AgentModule {
         const scan = runnerScanGit(target, () => this.#config?.gitCeilingDirectories);
         const plain = runnerGitCommandRunner(target);
         const created: GitMachine = {
-            foreground: (credential) => {
-                const authentication =
-                    credential === undefined
-                        ? undefined
-                        : this.daemonAuthentication(credential.projectId, credential.creator);
-                if (authentication === undefined) return plain;
-                return runnerGitCommandRunner(target, async () => {
-                    const machine = await this.#runnerMachine(runnerId);
-                    return {
-                        GIT_CONFIG_GLOBAL: "/dev/null",
-                        GIT_CONFIG_NOSYSTEM: "1",
-                        ...(await this.#throughTunnel(runnerId, machine, authentication))
-                            .environment,
-                    };
-                });
-            },
+            foreground: plain,
             read: gitCommandRunnerFromScanGitRunner(scan),
             scan,
             isDirectory: async (path) => {
@@ -1022,57 +916,6 @@ export class GitModule implements AgentModule {
             throw new Error("Git cannot reach runners without the runners module.");
         }
         return this.#runners;
-    }
-
-    /** The credential's environment, pointed at the runner's own way back to the proxy. */
-    async #throughTunnel(
-        runnerId: string | undefined,
-        machine: Compute,
-        authentication: GitAuthentication,
-    ): Promise<GitAuthentication> {
-        const port = await this.#tunnel.port(
-            this.#root().named(`runner-git-tunnel-${runnerId ?? "local"}`),
-            machine,
-            authentication.loopbackPort,
-        );
-        const here = `127.0.0.1:${String(authentication.loopbackPort)}`;
-        const there = `127.0.0.1:${String(port)}`;
-        return {
-            environment: Object.fromEntries(
-                Object.entries(authentication.environment).map(([name, value]) => [
-                    name,
-                    value.replaceAll(here, there),
-                ]),
-            ),
-            loopbackPort: port,
-        };
-    }
-
-    /** The foreground boundary: writes, fetches, and anything needing a repository credential. */
-    #foregroundFor(credential: GitCredentialRef | undefined): GitCommandRunner {
-        if (credential === undefined || !this.#direct) return this.#foreground;
-        const authentication = this.daemonAuthentication(credential.projectId, credential.creator);
-        if (authentication === undefined) return this.#foreground;
-        return {
-            run: async (cwd, args, options) =>
-                await runGitCommandWithEnvironment(
-                    cwd,
-                    args,
-                    {
-                        GIT_CONFIG_GLOBAL: "/dev/null",
-                        GIT_CONFIG_NOSYSTEM: "1",
-                        ...authentication.environment,
-                    },
-                    options,
-                ),
-        };
-    }
-
-    /** The unattended read boundary, which still carries a credential when the read needs one. */
-    #readFor(credential: GitCredentialRef | undefined, runnerId?: string): GitCommandRunner {
-        const machine = this.#machine(runnerId);
-        if (credential === undefined) return machine.read;
-        return machine.foreground(credential);
     }
 
     #evictExpired(now: number): void {

@@ -45,8 +45,8 @@ attach it to another.
 
 The lower-level storage methods retain an opaque owner-ID parameter so the module boundary remains
 explicit. Product integrations use `GLOBAL_SECRET_OWNER_ID` there. Beyond the reviewed attachment
-decision, the `availableToModel` flag that keeps host-only credentials out of agent commands, and
-the reserved `github` / `project-git` IDs, the only authorization policy is a bot's secret
+decision and the `availableToModel` flag that keeps host-only credentials out of agent commands,
+the only authorization policy is a bot's secret
 allowlist. When the bot settings module says an agent's bot allows only certain secrets, the
 agent's tools list, read, attach, detach, and update only those, `create_secret` is refused, and
 command resolution drops or refuses every other secret, including ones attached to the agent's

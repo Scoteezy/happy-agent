@@ -118,27 +118,17 @@ describe("project creation tools", () => {
         ]);
     });
 
-    it("selects stored GitHub credentials without accepting secret material", async () => {
+    it("clones without product credential selectors", async () => {
         const { ctx, projects } = await fixture();
         const tool = cloneProjectTool(projects);
         const input = {
             name: "private-project",
             source: { kind: "github" as const, repository: "example/private" },
-            secret: { kind: "github" as const },
         };
         expect(Value.Check(tool.parameters!, input)).toBe(true);
         const project = await tool.execute(ctx, input, invocation());
-        expect(project.requiredSecretKind).toBe("github");
-        expect(
-            Value.Check(tool.parameters!, { ...input, secret: { kind: "github", token: "no" } }),
-        ).toBe(false);
-        await expect(
-            tool.execute(
-                ctx,
-                { ...input, source: { kind: "git", url: "https://example.com/repo" } },
-                invocation(),
-            ),
-        ).rejects.toThrow("GitHub credentials can only be used with a GitHub repository");
+        expect(project.remoteSource).toEqual(input.source);
+        expect(Value.Check(tool.parameters!, { ...input, secret: { kind: "github" } })).toBe(false);
     });
 
     it("rejects unsupported remotes, embedded credentials, and caller-owned IDs", async () => {
@@ -183,12 +173,10 @@ describe("project creation tools", () => {
             {
                 name: "private-project",
                 source: { kind: "github", repository: "owner/private" },
-                secret: { kind: "github" },
             },
             {} as never,
         );
         expect(description).toContain("https://github.com/owner/private");
-        expect(description).toContain("configured GitHub credential");
         expect(description).toContain("outside the current workspace");
     });
 });

@@ -1,5 +1,4 @@
 import type { GitCommandRunner } from "../GitCommandRunner.js";
-import { redactGitAuthenticationText } from "../GitCredentialBroker.js";
 import { scanGitError, STRIPPED_ENVIRONMENT, type ScanGitRunner } from "../runScanGit.js";
 import type { RunnerRunOptions, RunnerRunResult } from "../../runners/index.js";
 
@@ -26,22 +25,17 @@ export interface RunnerGitTarget {
 }
 
 /**
- * Foreground Git on a runner: writes, fetches, and clones, carrying the environment a credential
- * needs. The same exit-status contract as Git on this machine, so every caller is unchanged.
+ * Foreground Git on a runner uses that machine's Git configuration and authentication, with
+ * the same exit-status contract as Git on this machine.
  */
-export function runnerGitCommandRunner(
-    target: RunnerGitTarget,
-    environment: () => Promise<Readonly<Record<string, string>>> = async () => ({}),
-): GitCommandRunner {
+export function runnerGitCommandRunner(target: RunnerGitTarget): GitCommandRunner {
     return {
         async run(cwd, args, options = {}) {
-            let extra: Readonly<Record<string, string>> = {};
             try {
-                extra = await environment();
                 const result = await target.run({
                     command: "git",
                     args: ["-C", cwd, ...args],
-                    environment: { ...extra, GIT_TERMINAL_PROMPT: "0" },
+                    environment: { GIT_TERMINAL_PROMPT: "0" },
                     maximumBytes: options.maxOutputBytes ?? GIT_OUTPUT_LIMIT,
                     timeoutMs:
                         options.timeoutMs ??
@@ -51,23 +45,17 @@ export function runnerGitCommandRunner(
                 const failed = result.timedOut || result.truncated;
                 return {
                     code: failed && result.code === 0 ? 1 : result.code,
-                    stderr: redactGitAuthenticationText(
-                        result.timedOut
-                            ? `${result.stderr}\nGit did not finish in time on the runner.`.trim()
-                            : result.truncated
-                              ? `${result.stderr}\nGit wrote more output than allowed.`.trim()
-                              : result.stderr,
-                        extra,
-                    ),
+                    stderr: result.timedOut
+                        ? `${result.stderr}\nGit did not finish in time on the runner.`.trim()
+                        : result.truncated
+                          ? `${result.stderr}\nGit wrote more output than allowed.`.trim()
+                          : result.stderr,
                     stdout: result.stdout.toString("utf8"),
                 };
             } catch (error) {
                 return {
                     code: 1,
-                    stderr: redactGitAuthenticationText(
-                        error instanceof Error ? error.message : String(error),
-                        extra,
-                    ),
+                    stderr: error instanceof Error ? error.message : String(error),
                     stdout: "",
                 };
             }

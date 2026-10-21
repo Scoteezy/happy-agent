@@ -108,9 +108,6 @@ async function newProjectRow(
         initializationAttempt: 0,
         worktreeSupport: "unknown",
         ...(input.remoteSource === undefined ? {} : { remoteSource: input.remoteSource }),
-        ...(input.requiredSecretKind === undefined
-            ? {}
-            : { requiredSecretKind: input.requiredSecretKind }),
         gitAhead: 0,
         gitBehind: 0,
         gitDetached: false,

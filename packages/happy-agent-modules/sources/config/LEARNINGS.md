@@ -160,13 +160,11 @@ Refresh failures are advisory and never change account enablement; the shared pr
 owns rotation coordination and network bounds so background work cannot spend the same refresh
 token concurrently with another session in this process.
 
-## GitHub CLI discovery is request-bound
+## Git authentication belongs to Git
 
-Imports previously saw only exported tokens. An explicit standalone-owner import can now read
-an existing `gh` login with bounded time/output and trusted installation paths. Present environment
-tokens win even when blank or invalid; discovery never switches accounts, logs diagnostics, or
-persists tokens. Tokens go only to the project-scoped in-memory broker. Team and foreign creators
-cannot discover the host login, and background recovery after restart never performs CLI lookup.
+Configuration no longer discovers GitHub CLI logins or interprets GitHub token environment
+variables. Clones and foreground Git use the authentication configured on the machine running
+Git. Generic user-managed secrets remain available through explicit command selection.
 
 ## Node display identity is not P2P identity
 

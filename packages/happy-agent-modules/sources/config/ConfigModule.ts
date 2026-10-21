@@ -77,7 +77,6 @@ import {
     loadConfiguredProviderUsage,
     type ProviderUsageReadMethod,
 } from "./impl/loadConfiguredProviderUsage.js";
-import { discoverGithubCliToken, githubTokenSchema } from "./impl/discoverGithubCliToken.js";
 import { ProviderEnablement, providerRegistryUntil } from "./impl/providerRegistryUntil.js";
 import { ProviderServiceTiers } from "./impl/ProviderServiceTiers.js";
 import { RoundRobinRouterProvider } from "./impl/RoundRobinRouterProvider.js";
@@ -3181,34 +3180,6 @@ export class ConfigModule implements AgentModule {
         if (key?.type !== "secret") return undefined;
         const value = this.#environmentValue(key.env);
         return value === undefined ? undefined : new TextEncoder().encode(value);
-    }
-
-    /**
-     * The GitHub token this installation acts with, when its environment carries one.
-     *
-     * Explicit environment credentials win in order, even when blank or invalid. Background
-     * recovery uses only this getter; it must never discover the host's GitHub CLI account.
-     */
-    get githubToken(): string | undefined {
-        for (const name of ["GITHUB_TOKEN", "GH_TOKEN"] as const) {
-            const value = this.#environmentValue(name)?.trim();
-            if (value === undefined) continue;
-            return Value.Check(githubTokenSchema, value) ? value : undefined;
-        }
-        return undefined;
-    }
-
-    /** Explicit standalone-owner imports may reuse an existing GitHub CLI login. */
-    async resolveGithubTokenForImport(): Promise<string | undefined> {
-        if (
-            ["GITHUB_TOKEN", "GH_TOKEN"].some(
-                (name) => this.#environmentValue(name) !== undefined,
-            ) ||
-            this.configuration.values.feature.team.enabled
-        )
-            return this.githubToken;
-        const environment = { ...process.env, ...this.#environment };
-        return await discoverGithubCliToken(environment, environment.HOME?.trim() || homedir());
     }
 
     /**

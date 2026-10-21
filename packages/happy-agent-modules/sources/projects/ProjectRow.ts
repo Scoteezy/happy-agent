@@ -31,7 +31,6 @@ export type ProjectRow = {
     readonly worktree_support: string;
     readonly worktree_unsupported_reason: string | null;
     readonly remote_source_json: string | null;
-    readonly required_secret_kind: string | null;
     readonly git_ahead: number | string;
     readonly git_behind: number | string;
     readonly git_detached: number | string;
@@ -77,9 +76,6 @@ export function projectFromRow(row: ProjectRow): Project {
         ...(row.remote_source_json === null
             ? {}
             : { remoteSource: parseProjectRemoteSource(row.remote_source_json) }),
-        ...(row.required_secret_kind === null
-            ? {}
-            : { requiredSecretKind: row.required_secret_kind as "github" }),
         gitAhead: Number(row.git_ahead),
         gitBehind: Number(row.git_behind),
         gitDetached: storedBoolean(row.git_detached, "gitDetached"),

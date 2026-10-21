@@ -158,7 +158,7 @@ export async function insertProjectRow(database: AgentDatabase, project: Project
             id, repository_ref, runner_id, kind, storage_key, name, name_source,
             status, presence, initialization_status, initialization_attempt,
             initialization_error, default_branch, worktree_support,
-            worktree_unsupported_reason, remote_source_json, required_secret_kind,
+            worktree_unsupported_reason, remote_source_json,
             git_ahead, git_behind, git_detached, git_branch, git_head, git_upstream,
             workspace_setup_commands_json,
             order_key, version, avatar_json, description, created_at, updated_at, archived_at
@@ -170,7 +170,6 @@ export async function insertProjectRow(database: AgentDatabase, project: Project
             ${project.defaultBranch ?? null}, ${project.worktreeSupport},
             ${project.worktreeUnsupportedReason ?? null},
             ${project.remoteSource === undefined ? null : JSON.stringify(project.remoteSource)},
-            ${project.requiredSecretKind ?? null},
             ${project.gitAhead}, ${project.gitBehind}, ${project.gitDetached ? 1 : 0},
             ${project.gitBranch ?? null}, ${project.gitHead ?? null},
             ${project.gitUpstream ?? null},

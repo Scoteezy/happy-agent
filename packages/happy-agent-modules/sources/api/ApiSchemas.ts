@@ -69,9 +69,6 @@ export const projectCloneBodySchema = Type.Object(
         name: Type.String({ minLength: 1, maxLength: 500 }),
         projectId: Type.Optional(apiIdSchema),
         runnerId: Type.Optional(runnerIdSchema),
-        secret: Type.Optional(
-            Type.Object({ kind: Type.Literal("github") }, { additionalProperties: false }),
-        ),
         source: remoteSourceSchema,
     },
     { additionalProperties: false },

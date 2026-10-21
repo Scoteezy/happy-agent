@@ -198,9 +198,6 @@ export const projectRemoteSourceSchema = Type.Union([
     ),
 ]);
 
-/** Credential kind a retry of the clone needs. Secret material is never persisted here. */
-export const projectRequiredSecretKindSchema = Type.Literal("github");
-
 export const projectGitDivergenceSchema = Type.Integer({
     minimum: 0,
     maximum: MAX_PROJECT_GIT_DIVERGENCE,
@@ -340,7 +337,6 @@ export const projectSchema = Type.Object(
         worktreeSupport: projectWorktreeSupportSchema,
         worktreeUnsupportedReason: Type.Optional(projectErrorSchema),
         remoteSource: Type.Optional(projectRemoteSourceSchema),
-        requiredSecretKind: Type.Optional(projectRequiredSecretKindSchema),
         gitAhead: projectGitDivergenceSchema,
         gitBehind: projectGitDivergenceSchema,
         gitDetached: Type.Boolean(),
@@ -371,7 +367,6 @@ export const projectCreateInputSchema = Type.Object(
         kind: Type.Optional(projectKindSchema),
         description: Type.Optional(projectDescriptionSchema),
         remoteSource: Type.Optional(projectRemoteSourceSchema),
-        requiredSecretKind: Type.Optional(projectRequiredSecretKindSchema),
     },
     { additionalProperties: false },
 );
@@ -398,7 +393,6 @@ export const projectEnsureInputSchema = Type.Object(
         kind: Type.Optional(projectKindSchema),
         description: Type.Optional(projectDescriptionSchema),
         remoteSource: Type.Optional(projectRemoteSourceSchema),
-        requiredSecretKind: Type.Optional(projectRequiredSecretKindSchema),
     },
     { additionalProperties: false },
 );
@@ -535,7 +529,6 @@ export type ProjectGitRef = Static<typeof projectGitRefSchema>;
 export type ProjectGitFacts = Static<typeof projectGitFactsSchema>;
 export type ProjectWorktreeSupport = Static<typeof projectWorktreeSupportSchema>;
 export type ProjectRemoteSource = Static<typeof projectRemoteSourceSchema>;
-export type ProjectRequiredSecretKind = Static<typeof projectRequiredSecretKindSchema>;
 export type ProjectTimestamp = Static<typeof projectTimestampSchema>;
 export type ProjectVersion = Static<typeof projectVersionSchema>;
 export type ProjectOrderKey = Static<typeof projectOrderKeySchema>;
