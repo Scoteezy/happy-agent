@@ -24,6 +24,13 @@ page adds only its containing directory to a bounded least-recently-used watch s
 and successful module writes, coalesce into `files_changed` events with exact relative paths when
 the operating system provides them.
 
+A file read on this machine is also watched by itself, in a separate bounded set. Its device,
+inode, size and change times are taken before its bytes are read and compared once the platform
+holds the watch, so a change in between is reported. A re-read that finds another file at the
+same path watches that one instead. A file the platform will not watch is reported once as a
+change of unknown paths, and not again until it can be watched; that memory holds the last 256
+such files, so a client rendering more than that at once may be asked to refetch them again.
+
 Smaller transports pass an optional byte limit to `read` or `readRevision`; the default remains
 44 MiB. Current reads verify a contained regular file and stream at most the limit plus one byte.
 Revision callers may request strict errors; the HTTP preview retains its nullable default.

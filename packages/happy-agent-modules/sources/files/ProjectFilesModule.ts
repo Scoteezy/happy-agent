@@ -18,7 +18,7 @@ import type { SurfacesModule } from "../surfaces/index.js";
 import type { TasksModule } from "../tasks/index.js";
 import type { WorkspacesModule } from "../workspaces/index.js";
 import { MachineFileIndex } from "./impl/MachineFileIndex.js";
-import { ProjectFileWatcher } from "./ProjectFileWatcher.js";
+import { fileFingerprint, ProjectFileWatcher } from "./ProjectFileWatcher.js";
 import { WorkspaceFileIndex } from "./WorkspaceFileIndex.js";
 
 /** Folder files are the product's own work, so the agent sandbox does not apply to them. */
@@ -432,6 +432,8 @@ export class ProjectFilesModule implements AgentModule {
         if (!information.isFile)
             throw new ProjectFileError(400, "invalid", "The requested path is not a regular file.");
         this.#assertSize(information.size, maximumBytes);
+        // Taken before the bytes, so a change after them is caught once the file is watched.
+        const seen = this.#runners.native(root.runnerId) ? fileFingerprint(path) : undefined;
         let bytes: Buffer;
         try {
             // The final component must not have become a link since it was resolved.
@@ -460,7 +462,10 @@ export class ProjectFilesModule implements AgentModule {
             relativeDirectory === "." ? "" : relativeDirectory,
             dirname(path),
         );
-        if (this.#runners.native(root.runnerId)) this.#index.ensure(root.root, relativePath);
+        if (this.#runners.native(root.runnerId)) {
+            this.#watcherInstance().watchFile(root, relativePath, path, seen);
+            this.#index.ensure(root.root, relativePath);
+        }
         return { content: bytes.toString("base64"), hash: sha256(bytes) };
     }
 

@@ -35,6 +35,29 @@ excludes ignored directories, and is marked stale only when a path is created or
 workspace is never rescanned. The two-second age rule survives only for a tree that cannot be
 watched.
 
+## A rendered file is watched by itself
+
+On macOS, libuv serves every directory `fs.watch` in a process from one FSEvents stream, and
+stops and recreates it from "now" whenever any directory watch is added or closed anywhere in the
+daemon. A change landing during that gap is never reported: with other directory watches opening
+and closing, a write right after arming was missed about three times in four. A rendered file
+was watched only through its directory, so it could stay stale until its next change. A file
+watch is a kqueue vnode watch there and is not affected, so each rendered file now has its own,
+with a fingerprint taken before its bytes to cover the gap before it arms. Modification time and
+size alone miss a same-size write that restores the time, so the fingerprint includes the inode
+and change time. An atomic replace leaves the watch on the old inode after one rename event; the
+new file is watched afresh. Directory watches still carry tree-page structure, and creates or
+deletes there remain best-effort while other watches churn.
+
+Review found three gaps in that first version. On macOS `fs.watch` returns before the kernel
+holds the kqueue watch, which happens at the loop's next poll; a write right after the comparison
+was missed every time, so the comparison now waits two loop turns, which from an I/O callback is
+the first check after that poll. A re-read of the same path kept a live watch even when the path
+now named another file, as after its folder was moved and made again, so a watch is kept only for
+the same device and inode. And macOS reports a write in place as a rename, which closed and
+re-armed the watch and forced a full rescan of the index; a rename that leaves the same file at
+the path is now an ordinary change.
+
 ## A direct read during a scan still asks for one
 
 A read that proves a file exists asks the index to rescan when the file is missing from it. The

@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from "node:fs";
+import { lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
 
 import type { Compute, ComputeWatch } from "@slopus/happy-agent-compute";
 import type { Context } from "@steve.kite/stdlib";
@@ -6,6 +6,7 @@ import type { Context } from "@steve.kite/stdlib";
 const MAX_CHANGED_PATHS = 256;
 const MAX_PATH_LENGTH = 16_384;
 const MAX_WATCHED_DIRECTORIES = 256;
+const MAX_WATCHED_FILES = 256;
 const MAX_WATCHED_TREES = 8;
 /** Directory names a runner folder's watch never descends into. */
 const UNWATCHED_DIRECTORIES = [
@@ -42,6 +43,13 @@ interface DirectoryWatch {
     readonly watcher: FSWatcher;
 }
 
+interface FileWatch {
+    /** Device and inode of the file the watch is on, from the fingerprint it armed with. */
+    identity: string | undefined;
+    readonly path: string;
+    watcher: FSWatcher | undefined;
+}
+
 interface TreeWatch {
     ended: boolean;
     readonly root: string;
@@ -73,6 +81,9 @@ interface PendingChange {
  */
 export class ProjectFileWatcher {
     readonly #changes = new Map<string, PendingChange>();
+    readonly #files = new Map<string, FileWatch>();
+    /** Rendered files whose watch failed and were reported broadly, until one arms again. */
+    readonly #unwatchable = new Set<string>();
     readonly #ctx: Context;
     readonly #inFlight = new Set<Promise<void>>();
     readonly #onChange: ProjectFileChangeObserver;
@@ -112,6 +123,45 @@ export class ProjectFileWatcher {
             const oldestKey = this.#watches.keys().next().value as string | undefined;
             if (oldestKey === undefined) break;
             this.#removeWatch(oldestKey);
+        }
+    }
+
+    /**
+     * Watches one file a client just read, by itself.
+     *
+     * On macOS every directory watch in the process shares one FSEvents stream, which libuv stops
+     * and recreates from "now" whenever any directory watch is added or closed; a change landing
+     * meanwhile is never reported. A file watch is a kqueue vnode watch there, untouched by that.
+     * `seen` is the file's fingerprint from before it was read: one that differs once the watch
+     * is armed changed in between, and is reported then.
+     */
+    watchFile(
+        root: ProjectFileWatchRoot,
+        relativePath: string,
+        path: string,
+        seen: string | undefined,
+    ): void {
+        if (this.#closed) return;
+        const key = `${root.workspaceId ?? root.projectId}\0${relativePath}`;
+        const existing = this.#files.get(key);
+        // The same path may name another file by now, as when its folder was moved and remade.
+        if (
+            existing?.path === path &&
+            existing.watcher !== undefined &&
+            (seen === undefined || fileIdentity(seen) === existing.identity)
+        ) {
+            this.#files.delete(key);
+            this.#files.set(key, existing);
+            return;
+        }
+        if (existing !== undefined) this.#removeFile(key);
+        const entry: FileWatch = { identity: undefined, path, watcher: undefined };
+        this.#files.set(key, entry);
+        this.#armFile(root, key, relativePath, entry, seen);
+        while (this.#files.size > MAX_WATCHED_FILES) {
+            const oldestKey = this.#files.keys().next().value as string | undefined;
+            if (oldestKey === undefined) break;
+            this.#removeFile(oldestKey);
         }
     }
 
@@ -186,6 +236,8 @@ export class ProjectFileWatcher {
         this.#closed = true;
         for (const { watcher } of this.#watches.values()) closeWatcher(watcher);
         this.#watches.clear();
+        for (const { watcher } of this.#files.values()) if (watcher) closeWatcher(watcher);
+        this.#files.clear();
         for (const key of [...this.#trees.keys()]) this.#removeTree(key);
         for (const change of this.#changes.values()) {
             if (change.timer !== undefined) clearTimeout(change.timer);
@@ -287,6 +339,99 @@ export class ProjectFileWatcher {
         entry.watch?.close();
     }
 
+    /**
+     * Arms a file's watch, then compares its fingerprint with `seen`, so a change between the two
+     * is reported rather than lost. A file replaced by a rename leaves the watch on its old inode;
+     * it is reported and the new one is watched the same way.
+     *
+     * On macOS the kernel holds the watch only once the loop next polls, which from an I/O
+     * callback is after the second check phase, so the comparison waits two turns: one any
+     * sooner can miss a change made in between.
+     */
+    #armFile(
+        root: ProjectFileWatchRoot,
+        key: string,
+        relativePath: string,
+        entry: FileWatch,
+        seen: string | undefined,
+    ): void {
+        let watcher: FSWatcher;
+        try {
+            watcher = watch(entry.path, { persistent: false }, (event) => {
+                if (this.#files.get(key) !== entry || entry.watcher !== watcher) return;
+                if (event !== "rename") {
+                    this.#observed(root, relativePath, false);
+                    return;
+                }
+                // Only a regular file at the same canonical path takes the old one's place: a link,
+                // a folder, or a parent swapped for a link is not followed out of the root. The
+                // path is checked before the watch is armed on it, so a swap in between can still
+                // make it follow a link; that yields change hints about an outside file, never
+                // its content.
+                const current = canonical(entry.path) ? fileFingerprint(entry.path) : undefined;
+                // macOS also reports a write in place as a rename; the same file keeps its watch.
+                if (current !== undefined && fileIdentity(current) === entry.identity) {
+                    this.#observed(root, relativePath, false);
+                    return;
+                }
+                this.#observed(root, relativePath, true);
+                closeWatcher(watcher);
+                entry.watcher = undefined;
+                if (current === undefined) this.#files.delete(key);
+                else this.#armFile(root, key, relativePath, entry, current);
+            });
+        } catch {
+            this.#files.delete(key);
+            this.#unwatched(root, key);
+            return;
+        }
+        watcher.on("error", () => {
+            if (entry.watcher !== watcher) return;
+            this.#removeFile(key);
+            this.#unwatched(root, key);
+        });
+        watcher.unref?.();
+        entry.watcher = watcher;
+        entry.identity = seen === undefined ? undefined : fileIdentity(seen);
+        this.#unwatchable.delete(key);
+        if (seen === undefined) return;
+        setImmediate(() =>
+            setImmediate(() => {
+                if (this.#closed || this.#files.get(key) !== entry || entry.watcher !== watcher) {
+                    return;
+                }
+                const current = fileFingerprint(entry.path);
+                if (current !== seen) this.#observed(root, relativePath, current === undefined);
+            }),
+        );
+    }
+
+    /**
+     * A rendered file that cannot be watched may change unseen, so its workspace is reported as
+     * changed without a path. Only once per file until it is watched again: the client's re-read
+     * that follows fails the same way and must not report again, or the two would loop. The set
+     * forgets the oldest of more than 256 such files, so a client rendering more than that many
+     * unwatchable files at once could still be asked to refetch them in a cycle.
+     */
+    #unwatched(root: ProjectFileWatchRoot, key: string): void {
+        if (this.#unwatchable.has(key)) return;
+        this.#unwatchable.add(key);
+        while (this.#unwatchable.size > MAX_WATCHED_FILES) {
+            const oldest = this.#unwatchable.values().next().value as string | undefined;
+            if (oldest === undefined) break;
+            this.#unwatchable.delete(oldest);
+        }
+        this.#observed(root, null, false);
+    }
+
+    #removeFile(key: string): void {
+        const entry = this.#files.get(key);
+        if (entry === undefined) return;
+        this.#files.delete(key);
+        if (entry.watcher !== undefined) closeWatcher(entry.watcher);
+        entry.watcher = undefined;
+    }
+
     #removeWatch(key: string): void {
         const entry = this.#watches.get(key);
         if (entry === undefined) return;
@@ -310,6 +455,38 @@ function changedPath(relativeDirectory: string, filename: string | Buffer | null
     }
     const path = relativeDirectory === "" ? name : `${relativeDirectory}/${name}`;
     return path.length <= MAX_PATH_LENGTH ? path : null;
+}
+
+/**
+ * Identity, size and change times of a local regular file, or undefined once it is gone or is
+ * no longer a regular file. The change time moves on every write, even one that restores the
+ * modification time, and a replacement has a new inode.
+ */
+export function fileFingerprint(path: string): string | undefined {
+    try {
+        const stat = lstatSync(path, { bigint: true });
+        if (!stat.isFile()) return undefined;
+        return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    } catch {
+        return undefined;
+    }
+}
+
+/** The device and inode of a fingerprint: which file it is, whatever its content. */
+function fileIdentity(fingerprint: string): string {
+    return fingerprint.split(":", 2).join(":");
+}
+
+/**
+ * Whether no link anywhere on `path` leads elsewhere. Read paths are already canonical, resolved
+ * natively as this is.
+ */
+function canonical(path: string): boolean {
+    try {
+        return realpathSync.native(path) === path;
+    } catch {
+        return false;
+    }
 }
 
 function closeWatcher(watcher: FSWatcher): void {

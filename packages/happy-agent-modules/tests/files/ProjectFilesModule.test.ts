@@ -3,11 +3,15 @@ import {
     mkdtemp,
     readFile,
     realpath,
+    rename,
     rm,
+    stat,
     symlink,
     unlink,
+    utimes,
     writeFile,
 } from "node:fs/promises";
+import { watch, type FSWatcher } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -93,6 +97,111 @@ describe("ProjectFilesModule writes", () => {
         expect(Object.isFrozen(events[0])).toBe(true);
         expect(Object.isFrozen(events[0]?.paths)).toBe(true);
         unsubscribe();
+    });
+
+    it("reports one outside change to each rendered file, new or long open, while other watches come and go", async () => {
+        const earlier = Array.from({ length: 10 }, (_, index) => `earlier-${String(index)}.txt`);
+        const later = Array.from({ length: 10 }, (_, index) => `later-${String(index)}.txt`);
+        for (const name of [...earlier, ...later]) {
+            await writeFile(join(directory, name), "before", "utf8");
+        }
+        const events: ProjectFilesEvent[] = [];
+        files.onEvent((_ctx, event) => {
+            events.push(event);
+        });
+        for (const name of earlier) await files.read(root, { path: name });
+
+        // Other directory watches in this process opening and closing, as a busy daemon's do.
+        // On macOS each one restarts the stream every directory watch in the process shares.
+        const churnRoot = await mkdtemp(join(tmpdir(), "happy-agent-files-churn-"));
+        let churning = true;
+        const churn = (async () => {
+            for (let index = 0; churning; index += 1) {
+                const other = join(churnRoot, String(index));
+                await mkdir(other);
+                let watcher: FSWatcher | undefined;
+                try {
+                    watcher = watch(other, { persistent: false }, () => undefined);
+                    await new Promise((resolve) => setTimeout(resolve, 1));
+                } finally {
+                    watcher?.close();
+                }
+            }
+        })();
+        try {
+            for (const name of later) await files.read(root, { path: name });
+            for (const name of earlier) await writeFile(join(directory, name), "after", "utf8");
+            // Same size, with the modification time put back, as cp -p or rsync -t leave a file.
+            for (const name of later) {
+                const path = join(directory, name);
+                const { atime, mtime } = await stat(path);
+                await writeFile(path, "BEFORE", "utf8");
+                await utimes(path, atime, mtime);
+            }
+            await vi.waitFor(() => {
+                const reported = new Set(events.flatMap((event) => event.paths ?? []));
+                expect([...earlier, ...later].filter((name) => !reported.has(name))).toEqual([]);
+            });
+        } finally {
+            churning = false;
+            await churn;
+            await rm(churnRoot, { force: true, recursive: true });
+        }
+    });
+
+    it("reports a rendered file replaced by a rename, and its next change", async () => {
+        await writeFile(join(directory, "note.txt"), "before", "utf8");
+        const events: ProjectFilesEvent[] = [];
+        files.onEvent((_ctx, event) => {
+            events.push(event);
+        });
+        await files.read(root, { path: "note.txt" });
+
+        // An editor saving atomically: the name now belongs to a new file.
+        await writeFile(join(directory, "note.txt.tmp"), "replaced", "utf8");
+        await rename(join(directory, "note.txt.tmp"), join(directory, "note.txt"));
+        await vi.waitFor(() =>
+            expect(events.some((event) => event.paths?.includes("note.txt"))).toBe(true),
+        );
+        events.length = 0;
+        await writeFile(join(directory, "note.txt"), "edited", "utf8");
+        await vi.waitFor(() =>
+            expect(events.some((event) => event.paths?.includes("note.txt"))).toBe(true),
+        );
+    });
+
+    it("stops watching a rendered file whose folder is swapped for a link out of the root", async () => {
+        const outside = await mkdtemp(join(tmpdir(), "happy-agent-files-outside-"));
+        try {
+            await mkdir(join(directory, "docs"));
+            await writeFile(join(directory, "docs", "note.txt"), "before", "utf8");
+            await writeFile(join(outside, "note.txt"), "outside", "utf8");
+            const events: ProjectFilesEvent[] = [];
+            files.onEvent((_ctx, event) => {
+                events.push(event);
+            });
+            await files.read(root, { path: "docs/note.txt" });
+
+            // The folder moves and a link elsewhere takes its name. The watch went with the
+            // file, so replacing it reports its old name, which must not be watched through the link.
+            await rename(join(directory, "docs"), join(directory, "docs-moved"));
+            await symlink(outside, join(directory, "docs"));
+            await writeFile(join(directory, "docs-moved", "note.tmp"), "replaced", "utf8");
+            await rename(
+                join(directory, "docs-moved", "note.tmp"),
+                join(directory, "docs-moved", "note.txt"),
+            );
+            await vi.waitFor(() =>
+                expect(events.some((event) => event.paths?.includes("docs/note.txt"))).toBe(true),
+            );
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            events.length = 0;
+            await writeFile(join(outside, "note.txt"), "changed outside", "utf8");
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            expect(events.some((event) => event.paths?.includes("docs/note.txt"))).toBe(false);
+        } finally {
+            await rm(outside, { force: true, recursive: true });
+        }
     });
 
     it("emits an exact path when a rendered file changes outside the module", async () => {
