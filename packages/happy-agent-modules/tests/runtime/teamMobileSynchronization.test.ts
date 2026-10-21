@@ -132,6 +132,10 @@ describe("parallel personal mobile synchronization", () => {
                 expect((await client.getHappyIntegration()).integration.configured).toBe(false);
             }
             expect(relay.machines.size).toBe(0);
+            // This history covers explicit joins and leaves, so neither person joins the other's
+            // task automatically.
+            await alice.saveUserSetting("tasks.autoJoin", { value: false });
+            await bob.saveUserSetting("tasks.autoJoin", { value: false });
             const bot = (await alice.createBot({ name: "Shared mobile bot" })).bot;
             const task = (await alice.createTask({ name: "Alice's task" })).task;
             const bobTask = (await bob.createTask({ name: "Bob's task" })).task;
