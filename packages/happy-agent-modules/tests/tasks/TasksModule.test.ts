@@ -1563,6 +1563,7 @@ describe("TasksModule", () => {
                 "002-task-list-removed",
                 "003-task-catalog",
                 "004-task-naming",
+                "005-task-explicit-leaves",
             ]);
         } finally {
             database.close();

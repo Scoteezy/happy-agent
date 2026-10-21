@@ -25,6 +25,9 @@ Team user IDs are cuid2 values, so standalone settings are never assigned to a m
   the authoritative entry.
 - `onEvent(listener)` delivers each applied write as `{ owner, setting }` after its transaction
   commits. A failing listener is logged and cannot undo the write.
+- `onEventTransactional(listener)` lets another module compose behavior with an applied write;
+  failure rolls back both the setting and the listener's changes. Stale writes call neither kind
+  of listener. The originating settings event precedes events derived by transactional listeners.
 
 A refused operation throws `UserSettingsError` with `invalid_request` for a malformed key, value,
 or time, `too_large` for a value over 64 KiB as compact JSON, and `settings_full` when an applied

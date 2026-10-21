@@ -58,6 +58,14 @@ archive a task through the API when they own it or own the team, and the standal
 archive every task; everyone else gets a refusal. The API tells each caller whether they may with
 `canArchive`, which is computed per request and never sent in events that reach every member.
 
+## Automatic participation respects explicit leaves
+
+Default task participation must not undo a leave. Tasks now retains a per-person exclusion even
+when the person leaves before joining, and an explicit join clears it. Automatic joins skip those
+exclusions and existing memberships, preserving list order across restarts and preference changes.
+Catalog events reserve their post-commit notification before transactional membership listeners
+run, so clients receive task creation or restoration before the resulting automatic joins.
+
 ## Ownership follows the human the agent is working for
 
 A bot creates tasks on someone's behalf, and in a team chat that someone changes from message to

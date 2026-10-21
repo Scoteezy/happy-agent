@@ -3,9 +3,10 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { AgentProviders, withAgentDatabase } from "@slopus/happy-agent-base";
+import { AgentProviders, agentDatabaseRun, withAgentDatabase } from "@slopus/happy-agent-base";
 import { HappyAgentClient, type HappyAgentEvent } from "@slopus/happy-agent-client";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { sql } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -29,6 +30,147 @@ afterEach(async () => {
 });
 
 describe("the task API", () => {
+    it("rolls task participation back with settings, tasks, and member enrollment, and excludes guests", async () => {
+        const { runtime } = await start(true);
+        const ctx = withAgentDatabase(
+            runtime.ctx.named("test.autojoin-atomicity"),
+            runtime.database,
+        );
+        const { team, tasks, userSettings } = runtime.modules;
+        const alice = await team.createUser(ctx, {
+            authentication: "workos",
+            subject: "user_alice",
+            firstName: "Alice",
+        });
+        const guest = await team.createGuest(ctx, { name: "Exported bot guest" });
+        const aliceCtx = team.connectionContext(ctx, alice);
+        const first = await tasks.create(ctx, { name: "Shared task" });
+        expect(await tasks.membership(ctx, first.id, alice.id)).toBeDefined();
+        expect(await tasks.membership(ctx, first.id, guest.id)).toBeUndefined();
+        await userSettings.save(aliceCtx, "tasks.autoJoin", { value: false });
+        const second = await tasks.create(ctx, { name: "While opted out" });
+        const settingsEvents: unknown[] = [];
+        const taskEvents: unknown[] = [];
+        const stopSettings = userSettings.onEvent((_ctx, event) => {
+            settingsEvents.push(event);
+        });
+        const stopTasks = tasks.onEvent((_ctx, event) => {
+            taskEvents.push(event);
+        });
+        try {
+            await expect(
+                aliceCtx.inTx(async (txCtx) => {
+                    await userSettings.save(txCtx, "tasks.autoJoin", { value: true });
+                    expect(await tasks.membership(txCtx, second.id, alice.id)).toBeDefined();
+                    throw new Error("Rollback preference");
+                }),
+            ).rejects.toThrow("Rollback preference");
+            expect((await userSettings.get(aliceCtx, "tasks.autoJoin")).value).toBe(false);
+            expect(await tasks.membership(ctx, second.id, alice.id)).toBeUndefined();
+            expect(settingsEvents).toEqual([]);
+            expect(taskEvents).toEqual([]);
+
+            await userSettings.save(aliceCtx, "tasks.autoJoin", { value: true });
+            settingsEvents.length = 0;
+            taskEvents.length = 0;
+            const rejectCreation = tasks.onEventTransactional((_ctx, event) => {
+                if (event.type === "task_created") throw new Error("Rollback task");
+            });
+            try {
+                await expect(
+                    tasks.create(ctx, { id: "rolledbacktask", name: "Rolled back" }),
+                ).rejects.toThrow("Rollback task");
+            } finally {
+                rejectCreation();
+            }
+            expect((await tasks.list(ctx)).map((task) => task.id)).toEqual([first.id, second.id]);
+            expect(taskEvents).toEqual([]);
+
+            let rolledBackUserId = "";
+            await expect(
+                ctx.inTx(async (txCtx) => {
+                    const user = await team.createUser(txCtx, {
+                        authentication: "workos",
+                        subject: "user_rollback",
+                        firstName: "Rolled back",
+                    });
+                    rolledBackUserId = user.id;
+                    expect(await tasks.membership(txCtx, first.id, user.id)).toBeDefined();
+                    throw new Error("Rollback enrollment");
+                }),
+            ).rejects.toThrow("Rollback enrollment");
+            expect(await team.getUser(ctx, rolledBackUserId)).toBeUndefined();
+            expect(await tasks.membership(ctx, first.id, rolledBackUserId)).toBeUndefined();
+            expect(taskEvents).toEqual([]);
+        } finally {
+            stopSettings();
+            stopTasks();
+        }
+    }, 60_000);
+
+    it("catches up preexisting missing memberships on each startup while preserving explicit leaves", async () => {
+        const { runtime } = await start(true);
+        const ctx = withAgentDatabase(runtime.ctx.named("test.autojoin-upgrade"), runtime.database);
+        const alice = await runtime.modules.team.createUser(ctx, {
+            authentication: "workos",
+            subject: "user_alice",
+            firstName: "Alice",
+        });
+        const first = await runtime.modules.tasks.create(ctx, { name: "Preexisting task" });
+        const second = await runtime.modules.tasks.create(ctx, { name: "Explicitly left" });
+        await runtime.modules.tasks.leave(ctx, second.id, alice.id);
+        // Represent a membership missing on an installation created by the previous daemon.
+        await agentDatabaseRun(
+            ctx.db,
+            sql`DELETE FROM happy_agent_module_task_members
+            WHERE member_id = ${alice.id} AND task_id = ${first.id}`,
+        );
+        const happyHome = runtime.configuration.paths.happyHome;
+        await runtime.close();
+        for (let restart = 0; restart < 2; restart++) {
+            const providers = new AgentProviders();
+            providers.add("gym", new ScriptedProvider([]), "codex");
+            const recovered = await startHappyAgentRuntime({
+                happyHome,
+                inference: {
+                    providers,
+                    models: [
+                        {
+                            id: "gym/model",
+                            providerId: "gym",
+                            name: "Gym",
+                            defaultEffort: "medium",
+                            effortLevels: ["medium"],
+                        },
+                    ],
+                },
+            });
+            try {
+                const recoveredCtx = withAgentDatabase(
+                    recovered.ctx.named("test.recovered"),
+                    recovered.database,
+                );
+                await vi.waitFor(async () => {
+                    expect(
+                        await recovered.modules.tasks.membership(recoveredCtx, first.id, alice.id),
+                    ).toBeDefined();
+                });
+                expect(
+                    await recovered.modules.tasks.membership(recoveredCtx, second.id, alice.id),
+                ).toBeUndefined();
+                if (restart === 0) {
+                    await agentDatabaseRun(
+                        recoveredCtx.db,
+                        sql`DELETE FROM happy_agent_module_task_members
+                        WHERE member_id = ${alice.id} AND task_id = ${first.id}`,
+                    );
+                }
+            } finally {
+                await recovered.close();
+            }
+        }
+    }, 60_000);
+
     it("lists, orders, and archives a standalone person's tasks without a user ID", async () => {
         const { runtime, endpoint } = await start(false);
         const token = (await readFile(runtime.configuration.paths.tokenPath, "utf8")).trim();
@@ -240,6 +382,8 @@ describe("the task API", () => {
             const { profile } = await client!.getProfile();
             const saved = await client!.updateProfile({ name }, { ifMatch: profile.version });
             ids.push(saved.profile.userId!);
+            // This scenario exercises manual membership and per-person order.
+            await client!.saveUserSetting("tasks.autoJoin", { value: false });
         }
         const [, bobId, carolId] = ids as [string, string, string];
         const ctx = withAgentDatabase(runtime.ctx.named("test.tasks"), runtime.database);

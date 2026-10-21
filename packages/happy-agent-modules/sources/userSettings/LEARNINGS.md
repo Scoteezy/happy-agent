@@ -39,3 +39,7 @@ stale device is answered with the stored entry rather than an error.
 
 A write and its version are one transaction, and the only follow-up is the in-process event after
 commit. There is nothing to resume after a crash, so the module does not use Durable Functions.
+
+Other modules may subscribe transactionally to applied writes to interpret their own preferences.
+The store stays opaque; dependent changes roll back with the setting, stale writes trigger no
+subscriber, and notifications publish only after commit with the originating setting first.

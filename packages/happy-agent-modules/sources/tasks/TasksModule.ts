@@ -74,6 +74,12 @@ import {
     updateTask,
 } from "./TaskStore.js";
 import { deriveTaskFolderName } from "./impl/deriveTaskFolderName.js";
+import {
+    clearTaskLeave,
+    queryAutomaticTaskIds,
+    queryFirstTaskOrderKey,
+    saveTaskLeave,
+} from "./persistence/taskAutomaticMembership.js";
 import { formatTaskIdentityPrompt } from "./impl/formatTaskIdentityPrompt.js";
 import { taskOrderKeyBetween } from "./impl/taskOrderKeyBetween.js";
 import { archiveTaskTool } from "./tools/archive_task.js";
@@ -305,13 +311,28 @@ export class TasksModule implements AgentModule {
         this.#assertMember(memberId);
         return await ctx.inTx(async (txCtx) => {
             await this.#required(txCtx, taskId);
+            await clearTaskLeave(txCtx, memberId, taskId);
             const existing = await readMembership(txCtx, taskId, memberId);
             if (existing !== undefined) return { membership: existing, joined: false };
             return { membership: await this.#join(txCtx, taskId, memberId), joined: true };
         });
     }
 
-    /** Take the task out of the member's list. Leaving a task one never joined changes nothing. */
+    /** Join a bounded batch of eligible tasks without undoing explicit leaves or reordering. */
+    async joinAutomatically(
+        ctx: Context,
+        memberId: TaskMemberId,
+        taskId?: string,
+    ): Promise<number> {
+        this.#assertMember(memberId);
+        return await ctx.inTx(async (txCtx) => {
+            const ids = await queryAutomaticTaskIds(txCtx, memberId, taskId);
+            for (const id of ids) await this.#join(txCtx, id, memberId);
+            return ids.length;
+        });
+    }
+
+    /** Take the task out of the member's list and suppress future automatic joining. */
     async leave(
         ctx: Context,
         taskId: string,
@@ -320,6 +341,7 @@ export class TasksModule implements AgentModule {
         this.#assertMember(memberId);
         return await ctx.inTx(async (txCtx) => {
             await this.#required(txCtx, taskId);
+            await saveTaskLeave(txCtx, memberId, taskId);
             const existing = await readMembership(txCtx, taskId, memberId);
             if (existing === undefined) return undefined;
             await deleteMembership(txCtx, taskId, memberId);
@@ -769,11 +791,11 @@ export class TasksModule implements AgentModule {
     }
 
     async #join(ctx: Context, taskId: string, memberId: TaskMemberId): Promise<TaskMembership> {
-        const first = (await readMemberships(ctx, memberId))[0];
+        const firstOrderKey = await queryFirstTaskOrderKey(ctx, memberId);
         const membership: TaskMembership = {
             taskId,
             memberId,
-            orderKey: taskOrderKeyBetween(null, first?.orderKey ?? null),
+            orderKey: taskOrderKeyBetween(null, firstOrderKey ?? null),
             joinedAt: Date.now(),
         };
         await insertMembership(ctx, membership);
@@ -971,9 +993,8 @@ export class TasksModule implements AgentModule {
     async #publish(ctx: Context, event: TaskEvent): Promise<void> {
         if (!Value.Check(taskEventSchema, event)) throw new Error("The task event is invalid.");
         const frozen = deepFreeze(structuredClone(event)) as TaskEvent;
-        for (const listener of [...this.#transactionalListeners]) {
-            await listener(ctx, frozen);
-        }
+        // Reserve the catalog event's place before transactional listeners publish memberships.
+        // All callbacks are still discarded if any part of the transaction rolls back.
         afterCommit(ctx, async (eventCtx) => {
             for (const listener of [...this.#listeners]) {
                 try {
@@ -987,6 +1008,9 @@ export class TasksModule implements AgentModule {
                 }
             }
         });
+        for (const listener of [...this.#transactionalListeners]) {
+            await listener(ctx, frozen);
+        }
     }
 
     #requireAgents(): AgentSystemRef {

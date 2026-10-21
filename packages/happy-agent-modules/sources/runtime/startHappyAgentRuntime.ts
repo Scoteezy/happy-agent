@@ -88,6 +88,7 @@ import { ToolDiscoveryModule } from "../toolDiscovery/index.js";
 import { UsageModule } from "../usage/index.js";
 import { UserInputModule } from "../userInput/index.js";
 import { UserSettingsModule } from "../userSettings/index.js";
+import { TaskAutoJoinModule } from "../taskAutoJoin/index.js";
 import { SurfacesModule } from "../surfaces/index.js";
 import { WorkflowsModule } from "../workflows/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
@@ -532,6 +533,7 @@ export async function startHappyAgentRuntime(
         const team = new TeamModule<LibSQLDatabase>(config, profile, tasks);
         registerShutdown("team", async () => team.close());
         const userSettings = new UserSettingsModule(team);
+        const taskAutoJoin = new TaskAutoJoinModule(tasks, team, userSettings, durableFunctions);
         const surfaces = new SurfacesModule(
             durableFunctions,
             team,
@@ -804,6 +806,7 @@ export async function startHappyAgentRuntime(
             userSettings,
             git,
             durableFunctions,
+            taskAutoJoin,
             surfaces,
             botSettings,
             globalSkills,

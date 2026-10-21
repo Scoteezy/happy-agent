@@ -369,6 +369,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
     readonly #config: ConfigModule;
     readonly #draftListeners = new Set<TeamDraftUpdatedListener>();
     readonly #listeners = new Set<TeamUserProfileChangedListener>();
+    readonly #transactionalListeners = new Set<TeamUserProfileChangedListener>();
     readonly #authentication: TeamAuthentication;
     readonly #ownerSubject: string | undefined;
     readonly #profile: ProfileModule;
@@ -487,6 +488,14 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
         };
     }
 
+    /** Participate in profile enrollment and updates before their transaction commits. */
+    onProfileUpdatedTransactional(listener: TeamUserProfileChangedListener): () => void {
+        this.#transactionalListeners.add(listener);
+        return () => {
+            this.#transactionalListeners.delete(listener);
+        };
+    }
+
     /** The sign-in methods people can complete, in display order. Only JWT deployments offer one. */
     authenticationMethods(): readonly TeamOAuthAuthenticationMethod[] {
         const team = this.#config.configuration.values.feature.team;
@@ -582,7 +591,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
         };
         return await ctx.inTx(async (txCtx) => {
             await this.#insertUser(txCtx, user);
-            this.#publish(txCtx, { previousVersion: null, user });
+            await this.#publish(txCtx, { previousVersion: null, user });
             return user;
         });
     }
@@ -611,7 +620,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
         };
         return await ctx.inTx(async (txCtx) => {
             await this.#insertUser(txCtx, user);
-            if (this.enabled) this.#publish(txCtx, { previousVersion: null, user });
+            if (this.enabled) await this.#publish(txCtx, { previousVersion: null, user });
             return user;
         });
     }
@@ -640,7 +649,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
             };
             await this.#writeUser(txCtx, updated);
             if (this.enabled) {
-                this.#publish(txCtx, { previousVersion: current.version, user: updated });
+                await this.#publish(txCtx, { previousVersion: current.version, user: updated });
             }
             return updated;
         });
@@ -688,7 +697,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
                     subject: identity.subject,
                 };
                 await this.#insertUser(txCtx, created);
-                this.#publish(txCtx, { previousVersion: null, user: created });
+                await this.#publish(txCtx, { previousVersion: null, user: created });
                 return created;
             }
             this.#assertExpectedVersion(current, expectedVersion);
@@ -703,7 +712,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
                 version: createTeamUserVersion(current.version),
             };
             await this.#writeUser(txCtx, updated);
-            this.#publish(txCtx, { previousVersion: current.version, user: updated });
+            await this.#publish(txCtx, { previousVersion: current.version, user: updated });
             return updated;
         });
     }
@@ -827,7 +836,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
                 version: createTeamUserVersion(current.version),
             };
             await this.#writeUser(txCtx, updated);
-            this.#publish(txCtx, { previousVersion: current.version, user: updated });
+            await this.#publish(txCtx, { previousVersion: current.version, user: updated });
             return updated;
         });
     }
@@ -917,7 +926,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
                 version: createTeamUserVersion(current.version),
             };
             await this.#writeUser(txCtx, updated);
-            this.#publish(txCtx, { previousVersion: current.version, user: updated });
+            await this.#publish(txCtx, { previousVersion: current.version, user: updated });
             return updated;
         });
     }
@@ -996,7 +1005,7 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
         });
     }
 
-    #publish(ctx: Context, event: TeamUserProfileChangedEvent): void {
+    async #publish(ctx: Context, event: TeamUserProfileChangedEvent): Promise<void> {
         const frozen = deepFreeze(structuredClone(event)) as TeamUserProfileChangedEvent;
         afterCommit(ctx, async (eventCtx) => {
             const listeners = Array.from(this.#listeners);
@@ -1012,6 +1021,9 @@ export class TeamModule<Database extends AgentDatabase = AgentDatabase> implemen
                 }
             }
         });
+        for (const listener of Array.from(this.#transactionalListeners)) {
+            await listener(ctx, frozen);
+        }
     }
 }
 

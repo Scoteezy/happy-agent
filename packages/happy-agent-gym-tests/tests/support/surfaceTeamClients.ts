@@ -71,6 +71,8 @@ ${pem}"""
             bob,
             aliceId: (await alice.getProfile()).profile.userId!,
             bobId: await onboard(bob, "Bob"),
+            clientFor,
+            onboard,
         };
     } catch (error) {
         await gym.dispose();

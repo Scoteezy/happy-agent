@@ -35,6 +35,12 @@ identity. The combined wire `name` is split into first name and optional last na
 storage boundary. Startup never manufactures a user; the first non-null profile name creates it,
 and only the configured WorkOS owner identity receives the owner flag.
 
+## Enrollment composes task participation transactionally
+
+Profile enrollment now offers transactional listeners so default task participation commits with
+the enrolled member. Failure rolls back both the profile and its memberships; guests are excluded
+by the participation policy. The profile notification reserves its place before derived events.
+
 ## Enterprise JWT authentication is a second team method, not a separate mode
 
 Enterprises need to sign members in through their own identity provider. Team mode now selects

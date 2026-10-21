@@ -2038,8 +2038,9 @@ Removes the photo. Response — `200`: `{ "profile": { ... } }`.
 
 User settings are a small key-value store of opaque preferences that belongs to one person, so an
 application can keep a person's choices on the daemon and have them follow that person from device
-to device. The daemon checks only the shape and size of keys and values. It never interprets them,
-and they never reach agents, tools, or model context.
+to device. The settings store checks only the shape and size of keys and values. Preferences never
+reach agents, tools, or model context. The daemon interprets the reserved `tasks.autoJoin` key as
+described under Tasks; other keys remain opaque.
 
 **Owner.** In team mode, settings belong to the authenticated member, keyed by their
 installation-local Happy user ID. A member reads, writes, and receives events for only their own
@@ -9077,6 +9078,28 @@ person is the only member; in team mode a membership belongs to the authenticate
 Leaving and archiving are separate: leaving never archives a task, even when its owner or its last
 member leaves, and archiving never removes a membership, so an archived task stays in every list
 that holds it.
+
+**Automatic membership.** Every team member automatically joins all active tasks by default,
+including tasks created by other people or agents and tasks that already exist when the member
+finishes their profile. Guests of exported bots are excluded. Existing members acquire missing
+active-task memberships after daemon startup. Automatic joins use ordinary memberships and their
+private `task.joined` events, place newly joined tasks at the top, and preserve the order of tasks
+already joined. They do not change ownership, archival permission, or subtask visibility.
+
+The per-person user setting `tasks.autoJoin` controls this behavior through the existing user-settings
+routes. Only the JSON boolean `false` disables automatic joining; a missing or cleared value, `true`,
+or any other JSON value enables it. Disabling preserves existing memberships and manual joining.
+Enabling again joins missing active tasks. The owner still joins a newly created task even when
+their automatic joining is disabled. Setting changes use the same last-write-wins rules and
+owner-only `user_settings.updated` events as other settings; a stale write cannot change participation.
+Standalone installations retain their existing behavior: their one person joins each new task.
+
+Explicitly leaving a task suppresses automatic joining of that task for that person, including
+across daemon restarts and disabling and re-enabling automatic joining. An explicit join clears
+that suppression. Archived tasks are not automatically joined, but restoring a task makes it
+eligible again for members who have not explicitly left it. Leaving a task before joining it also
+records the suppression without emitting a membership event. Absences before this behavior was
+introduced are not recorded leaves and are eligible for automatic joining.
 
 **Archival permission.** In standalone mode the installation's one person may archive and
 unarchive every task. In team mode the task's owner and the team owner may; any other member

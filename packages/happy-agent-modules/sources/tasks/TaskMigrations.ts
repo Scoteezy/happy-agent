@@ -8,6 +8,7 @@ import type { Context } from "@steve.kite/stdlib";
 
 export const TASKS_TABLE = "happy_agent_module_tasks";
 export const TASK_MEMBERS_TABLE = "happy_agent_module_task_members";
+export const TASK_LEAVES_TABLE = "happy_agent_module_task_leaves";
 
 /**
  * The `tasks` module's migrations.
@@ -96,6 +97,19 @@ export const taskMigrations = [
                 database,
                 sql`ALTER TABLE ${sql.raw(TASKS_TABLE)}
                     ADD COLUMN name_configured INTEGER NOT NULL DEFAULT 1`,
+            );
+        },
+    ],
+    [
+        "005-task-explicit-leaves",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            await agentDatabaseRun(
+                database,
+                sql`CREATE TABLE ${sql.raw(TASK_LEAVES_TABLE)} (
+                    member_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    PRIMARY KEY (member_id, task_id)
+                )`,
             );
         },
     ],

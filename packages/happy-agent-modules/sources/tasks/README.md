@@ -52,12 +52,20 @@ Any person may join any task, archived ones included, and leave it again. A memb
 task in that person's own list and holds its place there with an order key that belongs to that
 person alone, so `reorder` moves a task only in the caller's list. A new membership goes to the
 top. The owner joins when the task is created; on a standalone installation the one person,
-`STANDALONE_TASK_MEMBER`, joins every task created there. In team mode a task created without an
-identified person joins nobody. `memberFor(userId)` maps a person to their member key: the user ID
+`STANDALONE_TASK_MEMBER`, joins every task created there. `TaskAutoJoinModule` additionally joins
+every enrolled team member to active tasks by default unless their `tasks.autoJoin` preference is
+boolean `false`; guests are excluded. This includes tasks created without an identified owner.
+`memberFor(userId)` maps a person to their member key: the user ID
 in team mode, the standalone member otherwise. `join` and `leave` are idempotent; moving a task to
 the place it already holds changes nothing. The global list is every task, oldest first. Leaving
 never archives a task, not even when its owner or its last member leaves, and archiving never
 removes a membership.
+
+Explicit leaves are retained separately, including leaving before joining. Automatic membership
+never reverses one, across restarts or preference changes; an explicit join clears the exclusion.
+`joinAutomatically` joins at most 100 missing active tasks per call, or one specified task, leaving
+existing order untouched. Startup catch-up invokes it in bounded transactions, while live task,
+profile, and preference mutations compose participation inside their originating transaction.
 
 ## Tools
 
@@ -90,7 +98,7 @@ so the task reports back to it. `SubtasksModule` gives it the same coordinator g
 ## Public operations
 
 `list`, `listForMember`, `get`, `membership`, `memberFor`, `forAgent`, `forWorkspace`,
-`hasIdentity`, `create`, `createWithResult`, `sendMessage`, `rename`, `join`, `leave`, `reorder`,
+`hasIdentity`, `create`, `createWithResult`, `sendMessage`, `rename`, `join`, `joinAutomatically`, `leave`, `reorder`,
 `archive`, `archiveForAgent`, `unarchive`, and `onEvent`. Task mutations take an expected version
 and raise `TaskConflictError` when the row moved; memberships are unversioned because each list
 has one writer. `task_created`, `task_updated`, `task_joined`, `task_reordered`, and `task_left`
@@ -108,6 +116,7 @@ cleanup and clears the agent's archival. The folder is never deleted.
 member with that member's order key. The module name once belonged to a per-agent checklist; its
 released `001-task-state` migration stays first, `002-task-list-removed` drops that table, and
 `003-task-catalog` creates the catalog and memberships.
+Migration `005-task-explicit-leaves` adds a per-member/task exclusion table for automatic joining.
 
 The HTTP contract for tasks is specified in the Tasks chapter of `packages/happy-agent/API.md`
 and typed in `@slopus/happy-agent-client`. `ApiModule` serves it from this module's public

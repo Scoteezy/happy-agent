@@ -39,6 +39,7 @@ export class UserSettingsModule implements AgentModule {
 
     readonly #team: TeamModule;
     readonly #listeners = new Set<UserSettingsListener>();
+    readonly #transactionalListeners = new Set<UserSettingsListener>();
 
     constructor(team: TeamModule) {
         this.#team = team;
@@ -88,7 +89,7 @@ export class UserSettingsModule implements AgentModule {
         return await ctx.inTx(async (txCtx) => {
             const result = await saveUserSetting(txCtx, owner, key, write, Date.now());
             if (result.applied) {
-                this.#publish(txCtx, { owner, setting: result.setting });
+                await this.#publish(txCtx, { owner, setting: result.setting });
             }
             return result.setting;
         });
@@ -102,6 +103,14 @@ export class UserSettingsModule implements AgentModule {
         };
     }
 
+    /** Participate in an applied write's transaction; a failure rolls the write back. */
+    onEventTransactional(listener: UserSettingsListener): () => void {
+        this.#transactionalListeners.add(listener);
+        return () => {
+            this.#transactionalListeners.delete(listener);
+        };
+    }
+
     #owner(ctx: Context): UserSettingsOwner {
         if (!this.#team.enabled) return STANDALONE_USER_SETTINGS_OWNER;
         const user = teamUser(ctx);
@@ -109,7 +118,7 @@ export class UserSettingsModule implements AgentModule {
         return user.id;
     }
 
-    #publish(ctx: Context, event: UserSettingChangedEvent): void {
+    async #publish(ctx: Context, event: UserSettingChangedEvent): Promise<void> {
         const frozen = deepFreeze(structuredClone(event));
         afterCommit(ctx, async (eventCtx) => {
             for (const listener of Array.from(this.#listeners)) {
@@ -124,6 +133,9 @@ export class UserSettingsModule implements AgentModule {
                 }
             }
         });
+        for (const listener of Array.from(this.#transactionalListeners)) {
+            await listener(ctx, frozen);
+        }
     }
 }
 
