@@ -386,6 +386,51 @@ describe("ProviderUsageModule", () => {
         expect(after?.refreshedAt).toBe(before?.refreshedAt);
     });
 
+    it("knows an account inference just reported spent, until its window resets", async () => {
+        vi.useFakeTimers({ now: 1_800_000_000_000 });
+        const harness = await createHarness({ start: true });
+        await vi.advanceTimersByTimeAsync(0);
+        const weeklyReset = Date.now() + 3 * 24 * 60 * 60_000;
+        expect(harness.module.spentAccount("claude")).toBeUndefined();
+
+        // The reading a rejected weekly limit produces: the spent window, over 100%.
+        harness.observe(
+            reading({
+                exhausted: true,
+                windows: { fiveHour: null, weekly: window(102, weeklyReset), monthly: null },
+            }),
+        );
+        expect(harness.module.spentAccount("claude")).toEqual({ resetsAt: weeklyReset });
+        expect(harness.module.spentAccount("codex")).toBeUndefined();
+
+        // A stale refusal says nothing about a throttle now.
+        await vi.advanceTimersByTimeAsync(16 * 60_000);
+        expect(harness.module.spentAccount("claude")).toBeUndefined();
+
+        // A refusal that names no window is dated by when inference reported it.
+        harness.observe(reading({ capturedAt: Date.now() - 60 * 60_000, exhausted: true }));
+        expect(harness.module.spentAccount("claude")).toEqual({ resetsAt: weeklyReset });
+
+        harness.observe(reading({ exhausted: false }));
+        expect(harness.module.spentAccount("claude")).toBeUndefined();
+    });
+
+    it("stops calling an account spent once its blocking window has reset", async () => {
+        vi.useFakeTimers({ now: 1_800_000_000_000 });
+        const harness = await createHarness({ start: true });
+        await vi.advanceTimersByTimeAsync(0);
+        const resetsAt = Date.now() + 60_000;
+        harness.observe(
+            reading({
+                exhausted: true,
+                windows: { fiveHour: window(100, resetsAt), weekly: null, monthly: null },
+            }),
+        );
+        expect(harness.module.spentAccount("claude")).toEqual({ resetsAt });
+        vi.setSystemTime(resetsAt + 1);
+        expect(harness.module.spentAccount("claude")).toBeUndefined();
+    });
+
     it("waits out a provider's own retry deadline instead of asking again", async () => {
         const harness = await createHarness();
         const retryAt = Date.now() + 2_699_000;

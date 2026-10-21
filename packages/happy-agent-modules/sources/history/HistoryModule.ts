@@ -1629,6 +1629,7 @@ export class HistoryModule implements AgentModule {
             provider: config.failureProvider(providerId),
             disabled: !config.isProviderEnabled(routeId),
             spentPool,
+            spentAccount: this.#providerUsage?.spentAccount(providerId),
             // The failed route itself is the one to move away from, even behind a smart alias.
             fallbackProviders:
                 modelId === undefined

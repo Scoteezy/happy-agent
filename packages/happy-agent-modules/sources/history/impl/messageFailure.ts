@@ -27,6 +27,8 @@ export function messageFailure(input: {
     readonly disabled: boolean;
     /** The chat's smart route ran out of usable accounts, and when its first one resets. */
     readonly spentPool: { readonly name: string; readonly resetsAt: number | null } | undefined;
+    /** The attempted account's own fresh usage reading says it is spent, and when it resets. */
+    readonly spentAccount?: { readonly resetsAt: number | null } | undefined;
     readonly fallbackProviders: readonly MessageFailureFallback[];
     readonly now: number;
 }): MessageFailure {
@@ -81,19 +83,30 @@ export function messageFailure(input: {
             resetsAt: pool.resetsAt,
         };
     }
+    const spent = input.spentAccount;
+    // A vendor may answer a spent account with the same throttle it uses for a busy moment; the
+    // account's own usage reading is what says waiting a minute will not help.
+    if (
+        attempt?.errorCode === "out_of_tokens" ||
+        (attempt?.errorCode === "rate_limit" && spent !== undefined)
+    ) {
+        // The blocking window's reset outranks a throttle's, which can name a side meter.
+        const resetsAt =
+            (attempt.errorCode === "rate_limit" ? spent?.resetsAt : attempt.resetsAt) ??
+            attempt.resetsAt ??
+            spent?.resetsAt ??
+            null;
+        return {
+            ...base,
+            kind: "usage_limit",
+            message: `${provider.vendorName} usage limit reached.${
+                resetsAt === null ? "" : ` It resets ${relativeTime(resetsAt, input.now)}.`
+            }`,
+            provider,
+            resetsAt,
+        };
+    }
     switch (attempt?.errorCode) {
-        case "out_of_tokens": {
-            const resetsAt = attempt.resetsAt ?? null;
-            return {
-                ...base,
-                kind: "usage_limit",
-                message: `${provider.vendorName} usage limit reached.${
-                    resetsAt === null ? "" : ` It resets ${relativeTime(resetsAt, input.now)}.`
-                }`,
-                provider,
-                resetsAt,
-            };
-        }
         case "rate_limit":
             return {
                 ...base,

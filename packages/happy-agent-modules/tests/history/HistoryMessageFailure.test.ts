@@ -113,6 +113,44 @@ describe("a failed turn's typed failure", () => {
         });
     });
 
+    it("calls a throttle on an account its vendor reports spent a usage limit", () => {
+        // Oct 21 2026 6pm America/Los_Angeles, the weekly reset Claude Code named.
+        const weeklyReset = 1_792_630_800_000;
+        const throttled = attempt({ errorCode: "rate_limit", resetsAt: now + 60_000 });
+        const failure = build({ attempt: throttled, spentAccount: { resetsAt: weeklyReset } });
+        expect(failure).toMatchObject({
+            kind: "usage_limit",
+            message: "Claude usage limit reached. It resets in about 37 hours.",
+            provider,
+            resetsAt: weeklyReset,
+        });
+        expect(isKnownMessageFailure(failure)).toBe(true);
+        // Without a reset of its own, the reading still outranks a guess.
+        expect(build({ attempt: throttled, spentAccount: { resetsAt: null } })).toMatchObject({
+            kind: "usage_limit",
+            resetsAt: now + 60_000,
+        });
+        // An account nobody reported spent is only throttled.
+        expect(build({ attempt: throttled })).toMatchObject({
+            kind: "rate_limited",
+            message: "Claude is rate-limited. Try again in a minute.",
+        });
+        // A vendor's own usage-limit verdict keeps its own reset.
+        expect(
+            build({
+                attempt: attempt({ errorCode: "out_of_tokens", resetsAt: weeklyReset }),
+                spentAccount: { resetsAt: now + 60_000 },
+            }),
+        ).toMatchObject({ kind: "usage_limit", resetsAt: weeklyReset });
+        // A sign-in problem is not hidden behind a spent reading.
+        expect(
+            build({
+                attempt: attempt({ errorCode: "authentication_failed" }),
+                spentAccount: { resetsAt: weeklyReset },
+            }).kind,
+        ).toBe("signin_missing");
+    });
+
     it("names the model a chat outgrew, ahead of a spent pool or a disabled route", () => {
         const failure = build({
             disabled: true,

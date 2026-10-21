@@ -235,6 +235,13 @@ version called every failed-over pool spent and hid sign-in problems. Its `reset
 earliest reset among the spent accounts. A retry reopens the smart route the way a sent message
 does, so its accounts are tried again.
 
+A spent subscription window must never read as a momentary throttle. Claude answers both with the
+same `rate_limit` error, and a spent weekly limit used to show "rate-limited, try again in a
+minute" when it would not reset for days. Providers now classify Claude's own limiter verdict as
+out of tokens, and History also checks ProviderUsage: a `rate_limit` on an account whose vendor
+reported it spent in the last fifteen minutes, with its blocking window not yet reset, becomes
+`usage_limit` with that window's reset. A sign-in, a disabled route, or a spent pool still wins.
+
 Record IDs are the API's message IDs, so they are CUID2s as API.md requires. Error rows once got
 UUIDs, which the retry and switch routes could not address. Rows recorded before that change keep
 their UUIDs, so those old failures cannot be retried or switched from their own message.

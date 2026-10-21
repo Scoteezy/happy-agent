@@ -7,6 +7,14 @@ the old windows forward and stamped the whole reading with the current time, so 
 looked just measured. Each window now carries its own `capturedAt`, a carried window keeps it, and
 a report that measured no window moves neither the reading's `capturedAt` nor `refreshedAt`.
 
+## A refusal is dated by when inference reported it
+
+`spentAccount` tells History that a throttled account is really spent. A Claude refusal that names
+no window keeps the reading's older `capturedAt`, so judging freshness by it alone would discard the
+very refusal that just happened. The module remembers when inference last reported each account
+refused, counts that as fresh for fifteen minutes, and stops calling the account spent once its
+blocking window has reset or a later reading is not exhausted.
+
 ## A failed read must be visible beside the reading it failed to renew
 
 A failed poll used to keep the old reading, stamp `checkedAt`, and clear `error`, which made a

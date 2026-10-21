@@ -18,7 +18,10 @@ import {
 import type { MessageFailureFallback } from "@slopus/happy-agent-client";
 
 import { ConfigModule } from "../config/index.js";
-import { rankFallbackProviders } from "./impl/rankFallbackProviders.js";
+import {
+    FALLBACK_READING_MAX_AGE_MS,
+    rankFallbackProviders,
+} from "./impl/rankFallbackProviders.js";
 
 /** How often every account is asked in the background, after the read at startup. */
 export const PROVIDER_USAGE_POLL_INTERVAL_MS = 24 * 60 * 60 * 1_000;
@@ -94,6 +97,8 @@ export class ProviderUsageModule implements AgentModule {
     /** A separate budget for actual fallback inference, including successful probes. */
     readonly #probes = new Map<string, { attempts: number; nextAt: number }>();
     readonly #rechecks = new Map<string, ResetRecheck>();
+    /** When inference last reported each account refused, which a windowless reading cannot date. */
+    readonly #refusedAt = new Map<string, number>();
     readonly #closing = new AbortController();
     #backgroundContext: Context | undefined;
     #unsubscribe: (() => void) | undefined;
@@ -202,6 +207,25 @@ export class ProviderUsageModule implements AgentModule {
     }
 
     /**
+     * Whether the vendor said within the last fifteen minutes that it refuses this account because
+     * its usage is spent, and when the window blocking it resets (null when unknown). Undefined
+     * when the account is not known to be spent, including once that window has reset.
+     */
+    spentAccount(providerId: string): { readonly resetsAt: number | null } | undefined {
+        const usage = this.#entries.get(providerId)?.usage;
+        if (usage === undefined || usage === null || !usage.exhausted) return undefined;
+        const now = Date.now();
+        // A refusal carrying no window keeps the reading's older capture time, so it is dated by
+        // when inference reported it instead.
+        const saidAt = Math.max(usage.capturedAt, this.#refusedAt.get(providerId) ?? 0);
+        const resetsAt = blockingResetAt(usage);
+        if (now - saidAt > FALLBACK_READING_MAX_AGE_MS || (resetsAt !== null && resetsAt <= now)) {
+            return undefined;
+        }
+        return { resetsAt };
+    }
+
+    /**
      * Observes every change to an entry — a read starting or finishing, an in-band reading, a
      * failure — in the order the changes happened, so consumers can republish them immediately.
      */
@@ -252,6 +276,8 @@ export class ProviderUsageModule implements AgentModule {
         // A reading from an account this installation does not have configured is not ours.
         if (previous === undefined) return;
         const now = Date.now();
+        if (usage.exhausted) this.#refusedAt.set(usage.providerId, now);
+        else this.#refusedAt.delete(usage.providerId);
         const measured = measuresWindow(usage);
         if (measured)
             this.#probes.set(usage.providerId, {
