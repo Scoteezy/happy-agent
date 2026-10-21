@@ -46,7 +46,7 @@ import {
     type AgentOptions,
     type AgentOptionsUsageWindow,
 } from "./impl/agentOptions.js";
-import type { ProviderUsageModule } from "../providerUsage/ProviderUsageModule.js";
+import type { ProviderUsageModule } from "../providerUsage/index.js";
 import type { ProviderUsage } from "@slopus/happy-providers";
 import { agentOptionsTool } from "./tools/agent_options.js";
 import { collaborationMigrations } from "./CollaborationMigrations.js";
