@@ -159,11 +159,22 @@ async function startAgentDaemonProcess(
     const client = createDaemonClient(paths, token);
     // A freshly spawned native executable may spend several seconds loading and
     // securing its runtime before it can publish the first health response.
-    const readiness = waitForReady(client, DAEMON_CHILD_STARTUP_TIMEOUT_MS);
-    if (child === undefined) {
-        await readiness;
-    } else {
-        await superviseSpawnedDaemon(child, readiness, DAEMON_CHILD_STARTUP_TIMEOUT_MS);
+    const readinessPolling = new AbortController();
+    const readiness = waitForReady(
+        client,
+        DAEMON_CHILD_STARTUP_TIMEOUT_MS,
+        readinessPolling.signal,
+    );
+    try {
+        if (child === undefined) {
+            await readiness;
+        } else {
+            await superviseSpawnedDaemon(child, readiness, DAEMON_CHILD_STARTUP_TIMEOUT_MS);
+        }
+    } finally {
+        // A start that failed early must not keep polling, and keep this process alive, until
+        // the readiness deadline.
+        readinessPolling.abort();
     }
     // The daemon may have created its own token when none existed; reread so the connection uses
     // whatever the daemon actually serves.
@@ -257,6 +268,7 @@ export async function superviseSpawnedDaemon<Result>(
     timeoutMs: number,
 ): Promise<Result> {
     let timer: NodeJS.Timeout | undefined;
+    let onExit: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
     try {
         const timeout = new Promise<never>((_, reject) => {
             timer = setTimeout(
@@ -265,7 +277,29 @@ export async function superviseSpawnedDaemon<Result>(
             );
             timer.unref();
         });
-        const result = await Promise.race([readiness, timeout]);
+        // A crash supervisor exits with a failure only once it has given up on a daemon that
+        // keeps failing during startup; waiting out the full timeout after that tells nobody
+        // anything. A clean exit is not a failure: the supervisor may have stood aside for a
+        // daemon that another start launched, and readiness still decides.
+        const failed = new Promise<never>((_, reject) => {
+            onExit = (code, signal) => {
+                if (code === 0 && signal === null) return;
+                reject(
+                    new AgentDaemonError(
+                        `The local daemon failed to start (${signal === null ? `exit code ${String(code)}` : `signal ${signal}`}).`,
+                        {
+                            hint: "Run 'happy-agent status', and see the daemon log for the reason.",
+                        },
+                    ),
+                );
+            };
+            if (child.exitCode !== null || child.signalCode !== null) {
+                onExit(child.exitCode, child.signalCode);
+            } else {
+                child.once("exit", onExit);
+            }
+        });
+        const result = await Promise.race([readiness, timeout, failed]);
         child.unref();
         return result;
     } catch (error) {
@@ -273,6 +307,7 @@ export async function superviseSpawnedDaemon<Result>(
         throw error;
     } finally {
         if (timer !== undefined) clearTimeout(timer);
+        if (onExit !== undefined) child.removeListener("exit", onExit);
     }
 }
 
@@ -320,11 +355,13 @@ function signalSpawnedDaemon(child: SpawnedAgentDaemonProcess, signal: NodeJS.Si
 export async function waitForReady(
     client: Pick<HappyAgentClient, "getHealth">,
     initialTimeoutMs = 5_000,
+    signal?: AbortSignal,
 ): Promise<HealthResponse> {
     let deadline = Date.now() + initialTimeoutMs;
     let observedStarting = false;
     let recoveredAfterStartingFailure = false;
     while (Date.now() < deadline) {
+        if (signal?.aborted === true) throw new Error("Stopped waiting for the local daemon.");
         let health: HealthResponse;
         try {
             health = await client.getHealth();

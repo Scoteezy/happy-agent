@@ -44,3 +44,26 @@ it.skipIf(process.platform === "win32")(
         expect(supervisor.exitCode !== null || supervisor.signalCode !== null).toBe(true);
     },
 );
+
+it.skipIf(process.platform === "win32")(
+    "a start fails at once when the crash supervisor gives up during startup",
+    async () => {
+        const supervisor = spawn("/bin/sh", ["-c", "exit 1"], { detached: true, stdio: "ignore" });
+        const started = Date.now();
+
+        await expect(
+            superviseSpawnedDaemon(supervisor, new Promise<never>(() => undefined), 30_000),
+        ).rejects.toThrow("The local daemon failed to start (exit code 1).");
+        expect(Date.now() - started).toBeLessThan(10_000);
+    },
+);
+
+it.skipIf(process.platform === "win32")(
+    "a supervisor that exits cleanly before readiness leaves readiness to decide",
+    async () => {
+        const supervisor = spawn("/bin/sh", ["-c", "exit 0"], { detached: true, stdio: "ignore" });
+        const readiness = new Promise<string>((resolve) => setTimeout(() => resolve("ready"), 300));
+
+        await expect(superviseSpawnedDaemon(supervisor, readiness, 30_000)).resolves.toBe("ready");
+    },
+);
