@@ -1861,7 +1861,8 @@ export class HistoryModule implements AgentModule {
     }
 
     /**
-     * The typed failure for a failed turn, with the alternatives the person can switch to. Without
+     * The typed failure for a failed turn. It names what failed, never the alternatives: clients
+     * read those live from the same catalog and usage as their model picker. Without
      * configuration there is no provider to describe, so the row keeps only its text.
      */
     async #failure(
@@ -1875,7 +1876,6 @@ export class HistoryModule implements AgentModule {
         const attempt = attempts?.at(-1);
         const { id: agentId, provider: routeId, model } = scope.agent;
         const providerId = unavailable?.providerId ?? attempt?.mode.providerId ?? routeId;
-        const modelId = attempt?.mode.modelId ?? model;
         let spentPool: { name: string; resetsAt: number | null } | undefined;
         if (await config.routeSpent(agentId, routeId, model)) {
             // The pool has an account again as soon as any one of its spent accounts resets.
@@ -1898,11 +1898,6 @@ export class HistoryModule implements AgentModule {
             disabled: !config.isProviderEnabled(routeId),
             spentPool,
             spentAccount: this.#providerUsage?.spentAccount(providerId),
-            // The failed route itself is the one to move away from, even behind a smart alias.
-            fallbackProviders:
-                modelId === undefined
-                    ? []
-                    : (this.#providerUsage?.fallbackProviders(scope.agent.provider, modelId) ?? []),
             now: Date.now(),
         });
     }
@@ -2939,7 +2934,17 @@ function parseStoredMessage(encoded: string): HistoryMessage {
     ) {
         throw new Error("The history module found an invalid persisted message.");
     }
-    return normalizeHistoryMessageProfile(parsed);
+    return withoutFailureSnapshot(normalizeHistoryMessageProfile(parsed));
+}
+
+/**
+ * Rows written before protocol 32 stored a ranked snapshot of switch targets and their usage in
+ * `failure.fallbackProviders`. It went stale the moment it was written, so it is never read back.
+ */
+function withoutFailureSnapshot(message: HistoryMessage): HistoryMessage {
+    return message.failure === undefined || message.failure.fallbackProviders.length === 0
+        ? message
+        : { ...message, failure: { ...message.failure, fallbackProviders: [] } };
 }
 
 async function readPendingMessage(

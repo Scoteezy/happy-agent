@@ -1,8 +1,4 @@
-import type {
-    MessageFailure,
-    MessageFailureFallback,
-    MessageFailureProvider,
-} from "@slopus/happy-agent-client";
+import type { MessageFailure, MessageFailureProvider } from "@slopus/happy-agent-client";
 
 import type { ProviderExecutionAttempt, UnavailableCredentialFailure } from "../../config/index.js";
 
@@ -17,6 +13,9 @@ const MAX_TEXT = 512;
  * `message` is the plain-text fallback for agents, collaboration reports, and clients that do not
  * know the kind. It never contains a clock time: a reset is a relative duration, because the
  * reader's time zone is unknown here; clients format `resetsAt` in the viewer's own.
+ *
+ * It names only what failed, never what to switch to: alternatives and their usage go stale the
+ * moment they are written, so neither is sent nor stored.
  */
 export function messageFailure(input: {
     readonly text: string;
@@ -29,11 +28,12 @@ export function messageFailure(input: {
     readonly spentPool: { readonly name: string; readonly resetsAt: number | null } | undefined;
     /** The attempted account's own fresh usage reading says it is spent, and when it resets. */
     readonly spentAccount?: { readonly resetsAt: number | null } | undefined;
-    readonly fallbackProviders: readonly MessageFailureFallback[];
     readonly now: number;
 }): MessageFailure {
     const { attempt, provider } = input;
-    const base = { fallbackProviders: [...input.fallbackProviders] };
+    // Switch targets and their usage are live data; clients read them from the model picker's
+    // own sources. The wire field stays, always empty, so older clients still parse the failure.
+    const base = { fallbackProviders: [] };
     const signIn = input.unavailable?.signIn ?? attempt?.signIn;
     if (input.unavailable !== undefined || attempt?.errorCode === "authentication_failed") {
         const command = signIn?.command ?? null;

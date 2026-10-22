@@ -1,9 +1,5 @@
 import { Value } from "@sinclair/typebox/value";
-import {
-    isKnownMessageFailure,
-    messageFailureSchema,
-    type MessageFailureFallback,
-} from "@slopus/happy-agent-client";
+import { isKnownMessageFailure, messageFailureSchema } from "@slopus/happy-agent-client";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderExecutionAttempt } from "../../sources/config/index.js";
@@ -11,14 +7,6 @@ import { messageFailure, relativeTime } from "../../sources/history/impl/message
 
 const now = Date.UTC(2026, 9, 20, 12, 0, 0);
 const provider = { id: "claude", type: "claude", vendorName: "Claude", label: "claude" };
-const fallback: MessageFailureFallback = {
-    providerId: "claude_work",
-    providerLabel: "claude_work",
-    modelId: "anthropic/opus-5-5",
-    usedPercent: 38,
-    usageWindow: "weekly",
-    group: "same_model",
-};
 const attempt = (fields: Partial<ProviderExecutionAttempt>): ProviderExecutionAttempt => ({
     mode: {
         providerId: "claude",
@@ -38,7 +26,6 @@ const build = (fields: Partial<Parameters<typeof messageFailure>[0]>) =>
         provider,
         disabled: false,
         spentPool: undefined,
-        fallbackProviders: [fallback],
         now,
         ...fields,
     });
@@ -89,7 +76,8 @@ describe("a failed turn's typed failure", () => {
                 signIn: { product: "Claude Code", command: "claude auth login" },
             }),
         });
-        expect(failure).toMatchObject({ ...expected, fallbackProviders: [fallback] });
+        // Switch targets and usage are live data; a failure never carries a snapshot of them.
+        expect(failure).toMatchObject({ ...expected, fallbackProviders: [] });
         expect(Value.Check(messageFailureSchema, failure)).toBe(true);
         expect(isKnownMessageFailure(failure)).toBe(true);
     });

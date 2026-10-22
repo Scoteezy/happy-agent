@@ -378,7 +378,7 @@ import {
 } from "./ApiSpaceProjection.js";
 import { SubtaskInputError, SubtasksModule } from "../subtasks/index.js";
 
-const API_PROTOCOL_VERSION = 31;
+const API_PROTOCOL_VERSION = 32;
 const createArtifactRequestSchema = Type.Composite([
     Type.Omit(publishedCreateArtifactRequestSchema, ["type"]),
     Type.Object({ type: artifactTypeSchema }),
@@ -4952,7 +4952,7 @@ export class ApiModule implements AgentModule {
     }
 
     /**
-     * Retry a failed turn on its own route, or switch to one of the failure's fallbacks and
+     * Retry a failed turn on its own route, or switch to any route the live catalog offers and
      * continue there. The resolution is recorded on the failed message in the same transaction
      * that queues a hidden notice asking the agent to answer the person's last request again, so
      * no user message is added and every client sees the same history line. A resolved failure
@@ -4996,14 +4996,13 @@ export class ApiModule implements AgentModule {
             action: "retried",
         };
         if (body.providerId !== undefined) {
-            const fallback = stored.failure.fallbackProviders.find(
-                (entry) => entry.providerId === body.providerId && entry.modelId === body.modelId,
-            );
+            // Any route the live catalog offers right now, the same one the model picker reads;
+            // the failure itself names no alternatives.
             const model = this.#config.models.find(
                 (entry) => entry.providerId === body.providerId && entry.id === body.modelId,
             );
-            if (fallback === undefined || model === undefined) {
-                throw invalidRequest("That route is not one of this failure's alternatives.");
+            if (model === undefined) {
+                throw invalidRequest("That route is not available.");
             }
             const failedEffort = stored.error?.mode?.effort;
             const failedTier = stored.error?.mode?.serviceTier;
@@ -5035,7 +5034,7 @@ export class ApiModule implements AgentModule {
                 serviceTier: switchedMode.serviceTier,
                 metadata: { ...options.metadata, mode: switchedMode },
             };
-            text = `The person switched this chat to ${fallback.providerLabel} · ${model.name} after the turn failed. Answer their last request again.`;
+            text = `The person switched this chat to ${this.#config.providerName(model.providerId)} · ${model.name} after the turn failed. Answer their last request again.`;
             resolution = {
                 at: resolution.at,
                 action: "switched",

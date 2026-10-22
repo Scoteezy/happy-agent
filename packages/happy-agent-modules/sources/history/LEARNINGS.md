@@ -239,11 +239,16 @@ reader; the row's text block is `failure.message`, the plain-text fallback for a
 clients. The kind comes only from typed classification — the last actual attempt's error code, or
 Config's missing credential — never from the text, which survives only as `internal`'s detail and
 message. A usage reset is written as a duration ("in about 2 hours") because the reader's time zone
-is unknown here; clients format `resetsAt` themselves. `fallbackProviders` comes from
-ProviderUsage: accounts with a reading at most fifteen minutes old that is not exhausted, ranked
-same model, same family, other provider, lowest usage first. Retry and Switch record `resolution`
+is unknown here; clients format `resetsAt` themselves. Retry and Switch record `resolution`
 on the failed row in the transaction that queues a hidden notice, so the history line survives a
 reload and no user message is added; a resolved failure starts nothing again.
+
+A failure names what failed, never what to switch to. Rows used to store a ranked snapshot of
+other accounts with their usage in `fallbackProviders`, and the failure card's switch menu showed
+that snapshot: one stale account at 39% while the model picker beside it listed four live accounts
+with current usage. Switch targets and usage are live data the picker already reads and refreshes,
+so History writes `fallbackProviders: []` (the field stays for older clients), reads rows stored
+earlier back with an empty array, and Switch accepts any route the live catalog offers.
 
 The route's own state also decides the kind. A chat whose provider is turned off, and which never
 reached a provider, gets `provider_disabled`. A smart route gets `no_account_available` only when

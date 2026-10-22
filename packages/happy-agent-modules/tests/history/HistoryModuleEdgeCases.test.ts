@@ -87,6 +87,52 @@ describe("HistoryModule edge cases", () => {
         }
     });
 
+    it("reads a failure stored with a switch-target snapshot back without it", async () => {
+        const history = new HistoryModule();
+        const database = moduleDatabase(history.migrations, "history-failure-snapshot");
+        await database.ready;
+        try {
+            // Rows written before protocol 32 stored ranked alternatives and their usage.
+            await history.record(database.context, "agent-a", {
+                blocks: [{ text: "Claude usage limit reached.", type: "text" }],
+                recordId: "record-failure",
+                role: "error",
+                failure: {
+                    kind: "usage_limit",
+                    message: "Claude usage limit reached.",
+                    provider: {
+                        id: "claude",
+                        type: "claude",
+                        vendorName: "Claude",
+                        label: "claude",
+                    },
+                    resetsAt: null,
+                    fallbackProviders: [
+                        {
+                            providerId: "claude_work",
+                            providerLabel: "claude_work",
+                            modelId: "anthropic/opus-5-5",
+                            usedPercent: 39,
+                            usageWindow: "weekly",
+                            group: "same_model",
+                        },
+                    ],
+                },
+            });
+            const page = await history.read(database.context, "agent-a");
+            expect(page.messages[0]?.message.failure).toMatchObject({
+                kind: "usage_limit",
+                fallbackProviders: [],
+            });
+            expect(
+                (await history.message(database.context, "agent-a", "record-failure"))?.failure
+                    ?.fallbackProviders,
+            ).toEqual([]);
+        } finally {
+            database.close();
+        }
+    });
+
     it("keeps SQL filtering consistent with the in-memory selector for an empty role list", async () => {
         const history = new HistoryModule();
         const database = moduleDatabase(history.migrations, "history-empty-role-filter");

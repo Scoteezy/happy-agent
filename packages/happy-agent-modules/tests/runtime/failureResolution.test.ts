@@ -51,11 +51,12 @@ it("records a retry on the failed message, runs again, and stays idempotent", as
                 .filter((row) => row.role === "user");
         expect(await userMessages()).toHaveLength(1);
 
-        // Only one of the failure's alternatives may be switched to; there are none here.
+        // The failure carries no switch targets; Switch accepts only what the live catalog offers.
+        expect(failed!.failure?.fallbackProviders).toEqual([]);
         const modeBeforeRejectedSwitch = await owner.getAgentMode(agent.id);
         await expect(
             owner.switchAndContinue(agent.id, failed!.id, {
-                providerId: "private_account",
+                providerId: "missing_account",
                 modelId: model,
             }),
         ).rejects.toMatchObject({ status: 400 });
@@ -100,6 +101,19 @@ it("records a retry on the failed message, runs again, and stays idempotent", as
             message: "private_account is turned off. Turn it on in settings, then retry.",
             provider: { id: "private_account", vendorName: "Claude" },
         });
+        // The live catalog no longer offers the turned-off account, so neither does Switch. The
+        // failed run may still be settling, which answers 409 until the agent is idle.
+        const third = (await failures())[2]!;
+        await vi.waitFor(
+            () =>
+                expect(
+                    owner.switchAndContinue(agent.id, third.id, {
+                        providerId: "private_account",
+                        modelId: model,
+                    }),
+                ).rejects.toMatchObject({ status: 400 }),
+            { timeout: 10_000, interval: 10 },
+        );
     } finally {
         await fixture?.close();
         vi.restoreAllMocks();
@@ -138,18 +152,6 @@ transport = "sse"`,
     .join("\n")}`,
         });
         const { owner, agent, runtime } = fixture;
-        // Usage ranking is covered by the gym. This fixture isolates a commit failure after
-        // real admission and metadata writes, without involving an external usage service.
-        vi.spyOn(runtime.modules.providerUsage, "fallbackProviders").mockReturnValue([
-            {
-                providerId: "codex",
-                providerLabel: "Codex",
-                modelId: writerMode.modelId,
-                group: "same_model",
-                usedPercent: 20,
-                usageWindow: "weekly",
-            },
-        ]);
         const mode = {
             ...writerMode,
             serviceTier: "priority",
@@ -168,6 +170,8 @@ transport = "sse"`,
             interval: 10,
         });
         const [failed] = await failures();
+        // No usage reading vouches for "codex", yet the live catalog offers it, so it is a target.
+        expect(failed!.failure?.fallbackProviders).toEqual([]);
         const before = await owner.getMessages(agent.id);
         const modeBefore = (await owner.getAgentMode(agent.id)).mode;
         expect(modeBefore).toEqual(mode);

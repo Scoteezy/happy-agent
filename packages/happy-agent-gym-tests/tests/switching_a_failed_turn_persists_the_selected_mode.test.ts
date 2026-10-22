@@ -24,7 +24,8 @@ it("keeps the switched account through a child report, the next composer send, a
     const childGate = new Promise<void>((resolve) => {
         releaseChild = resolve;
     });
-    // Account usage is real: the configured setup token's local probe supplies the fallback.
+    // Account usage is real: the configured setup token's local probe gives "healthy" a fresh
+    // reading, which the failure still must not snapshot.
     const server = createServer((request, response) => {
         request.resume();
         response.writeHead(200, {
@@ -126,9 +127,8 @@ it("keeps the switched account through a child report, the next composer send, a
                         message.role === "service" && message.failure !== undefined,
                 );
         }, "the original account to fail");
-        expect(failed.failure?.fallbackProviders).toContainEqual(
-            expect.objectContaining({ providerId: "healthy", modelId: healthyModelId }),
-        );
+        // Switch targets come from the live catalog the model picker reads, never the failure.
+        expect(failed.failure?.fallbackProviders).toEqual([]);
         const switched = await gym.client.switchAndContinue(primaryId, failed.id, {
             providerId: "healthy",
             modelId: healthyModelId,
