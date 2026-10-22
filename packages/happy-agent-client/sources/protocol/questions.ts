@@ -52,6 +52,11 @@ export interface Question {
     runId: Cuid2;
     /** `"canceled"` means the run stopped needing the answer. */
     status: "pending" | "answered" | "canceled";
+    /**
+     * Shared Markdown background for all prompts, 1–100,000 characters.
+     * Absent from daemons that predate question context.
+     */
+    context?: string;
     /** One or more prompts, answered together. */
     questions: QuestionPrompt[];
     /** When the agent proceeds on its own; `null` waits indefinitely. */

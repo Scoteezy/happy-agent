@@ -417,6 +417,10 @@ question prompt's optional `secretRequest`. A client that does not recognize it 
 as an ordinary free-text question; the daemon rejects any answer to it that is not the ID of an
 existing secret available to agents, so a value typed into that field is never stored.
 
+Question context is additive and does not increment the protocol version. A daemon that supports
+it includes the question's `context`; older compatible daemons omit it, and clients then show only
+the prompts.
+
 Secret deletion through `DELETE /v0/secrets/:secretId` is additive and does not increment the
 protocol version. An older compatible daemon answers that route with `404` even for a secret that
 `GET /v0/secrets/:secretId` still returns; clients then treat deletion as unavailable. The
@@ -6966,6 +6970,7 @@ The question object:
     "agentId": "a1b2c3d4",
     "runId": "tz4a98xxat96iws9zmbrgj3a",
     "status": "pending",
+    "context": "The new billing service needs persistent storage. It runs on one node for now.",
     "questions": [
         {
             "id": "q7m2p9r4t1v6x8z3b5n0c2d4",
@@ -6990,6 +6995,8 @@ The question object:
 - `agentId`, `runId` — whose run is waiting.
 - `status` — `"pending"`, `"answered"`, or `"canceled"`. Canceled means the run stopped
   needing the answer: it was aborted, or the question timed out into its default.
+- `context` — the shared Markdown background the agent wrote once for all of its prompts,
+  1–100,000 characters. Clients show it alongside the prompts. Older daemons omit it.
 - `questions` — one or more prompts, answered together. Each has its own `id`, a short
   `header`, the `question` text, `options` the person picks from (possibly empty — then the
   answer is free text), and `multiSelect`. A prompt may also carry `secretRequest`, described
