@@ -95,7 +95,7 @@ export function updateArtifactTool(
             "remove artifact file",
         ],
         description: [
-            "Change an artifact in one new version that keeps every earlier one, recorded as made by you, where you are working. title renames it, background changes the colour behind it, which almost every artifact leaves unset, and display changes where an html artifact is shown.",
+            "Change an artifact in one new version that keeps every earlier one, recorded as made by you, where you are working. title renames it, background changes the colour behind it, which almost every artifact leaves unset, and display changes how the chat first shows it.",
             'files copies files from your machine in, adding each path or replacing the file there — for example { "fromPath": "out/chart.png", "path": "images/chart.png" } to place an image you generated, or the files of an app you built and tried with the shell. A copy keeps its own name unless you give it a path. remove takes paths out. Write and edit text files with write_artifact_file and edit_artifact_file instead.',
             "Every change makes a minor version, such as 1.3 after 1.2. When the artifact reaches a meaningful milestone, mark it with major, exactly one more than the latest major version: 2 makes this version 2.0, alone or together with the other changes. A major version needs at least one change since the last one.",
             "For a live-URL artifact, url replaces its address while keeping the network captured at creation. Every update is reviewed in Auto. Do not supply files or remove: the fallback entry is generated, not editable. File artifacts and live artifacts cannot be converted into one another.",
