@@ -5,7 +5,11 @@ import { createRootContext } from "@steve.kite/stdlib";
 import { describe, expect, it, vi } from "vitest";
 
 import { eventIdSchema, type EventsModule } from "../../sources/events/index.js";
-import { agentResource, apiResourceVersion } from "../../sources/api/ApiResourceProjection.js";
+import {
+    agentResource,
+    apiResourceVersion,
+    questionResource,
+} from "../../sources/api/ApiResourceProjection.js";
 import {
     messageHiddenFromUser,
     messageResource,
@@ -73,6 +77,25 @@ describe("agentResource", () => {
         });
         const unread = await agentResource(ctx, agents, events, "child", "space", { config });
         expect(unread).toMatchObject({ version: "later", subtaskOrderKey: null });
+    });
+});
+
+describe("questionResource", () => {
+    it("sends the shared context the agent wrote for its prompts", () => {
+        const question = questionResource(
+            {
+                id: "question-1",
+                askingAgentId: "agent-1",
+                question: "Which database?",
+                context: "The billing service needs **persistent** storage.",
+                status: "pending",
+                createdAt: 1,
+                updatedAt: 1,
+            },
+            "run-1",
+        );
+
+        expect(question["context"]).toBe("The billing service needs **persistent** storage.");
     });
 });
 

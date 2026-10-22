@@ -31,6 +31,7 @@ describe("public question API matrix", () => {
             answers: null,
             runId: accepted.runId,
             status: "pending",
+            context: "The answer is needed to continue this public API scenario.",
             autoResolveAt: null,
             questions: [
                 {

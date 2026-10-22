@@ -539,6 +539,7 @@ export function questionResource(
                 : request.status === "answered"
                   ? "answered"
                   : "canceled",
+        context: request.context,
         questions,
         autoResolveAt: request.deadlineAt ?? null,
         answers: questionAnswers(request),
