@@ -14,14 +14,17 @@ it("keeps queued HTML when ordinary artifact tools change only metadata", async 
         await h.hold();
         expect(
             (
-                await h.call("update_artifact", {
-                    artifactId: initial.artifactId,
+                await h.call("edit_sidebar", {
                     baseVersion: initial.version,
-                    title: "Draft sidebar",
-                    files: [{ path: "index.html", content: html }],
+                    edits: [
+                        {
+                            oldText: "</nav>",
+                            newText: '<p class="note">Keep this queued HTML</p></nav>',
+                        },
+                    ],
                 })
             ).text,
-        ).toContain("proposal accepted");
+        ).toContain("queued");
         expect(
             (
                 await h.call("update_artifact", {
@@ -47,7 +50,7 @@ it("keeps queued HTML when ordinary artifact tools change only metadata", async 
             (await h.gym.client.listArtifactVersions(initial.artifactId)).versions.map(
                 (version) => version.title,
             ),
-        ).toEqual(["Renamed sidebar", "Draft sidebar", "Sidebar"]);
+        ).toEqual(["Renamed sidebar", "Sidebar", "Sidebar"]);
         await h.hold();
         await h.call("update_artifact", {
             artifactId: initial.artifactId,
@@ -383,18 +386,12 @@ it("guards manual and recent placements, versions each edit once, and briefs obs
     );
     expect(
         (
-            await call("update_artifact", {
-                artifactId: current.artifactId,
+            await call("edit_sidebar", {
                 baseVersion: current.version,
-                files: [
-                    {
-                        path: "index.html",
-                        content: current.html.replace("</nav>", '<p class="note">First</p></nav>'),
-                    },
-                ],
+                edits: [{ oldText: "</nav>", newText: '<p class="note">First</p></nav>' }],
             })
         ).text,
-    ).toContain("proposal accepted");
+    ).toContain("queued");
     expect(
         (
             await call("edit_sidebar", {

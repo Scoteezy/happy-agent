@@ -23,6 +23,15 @@ export async function sidebarGym() {
     const gym = await createAgentGym({
         timeoutMs: 30000,
         inference: (request) => {
+            if (request.instructions.includes("<outcome>"))
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "<review><outcome>allow</outcome><risk_level>medium</risk_level><user_authorization>high</user_authorization><rationale>Scripted sidebar artifact publication.</rationale></review>",
+                        },
+                    ],
+                };
             const last = request.messages.at(-1);
             if (
                 command !== undefined &&

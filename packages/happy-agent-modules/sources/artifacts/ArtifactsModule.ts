@@ -3,7 +3,6 @@ import { lookup } from "node:dns/promises";
 import type { Duplex } from "node:stream";
 
 import { createId } from "@paralleldrive/cuid2";
-import { createHash } from "node:crypto";
 import { ensurePrivateDirectory } from "@slopus/happy-agent-compute";
 import {
     type AgentModule,
