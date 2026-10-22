@@ -87,7 +87,8 @@ Spaces now owns a Surfaces event subscription and reconciles each seeded owner's
 one transaction, emitting private row events and refreshing names and pictures. Durable events
 read current membership so a delayed join cannot undo a later leave; closing Spaces unsubscribes.
 
-Only populated todo lists, documents, and calendars contribute rows. Content events reconcile
+Todo lists, documents, and calendars contribute rows once populated; other supported kinds,
+including existing reference Surfaces, keep their membership-based seeding. Content events reconcile
 current membership and current content, removing empty rows and restoring populated ones without
 moving rows that remain eligible. Startup reconciles already seeded owners too. Document edits
 have a durable internal notification independent of editor subscriptions; completed todos count

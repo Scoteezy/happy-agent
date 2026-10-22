@@ -9388,7 +9388,9 @@ Each person has their own sidebar. In standalone mode it belongs to the installa
 in team mode every route answers with the authenticated member's sidebar only, and `space.*`
 events reach only that member's connections. Rows and sections are created by the daemon: the
 first read makes a row for Happy, first in the list, and one row for every other active bot, joined
-task, and joined Surface the person already has. New work gets a row when it appears; archived or left work loses it.
+task, and joined Surface supported by Spaces that the person already has. Todo, document, and
+calendar Surfaces wait until they contain content; other supported kinds, including references,
+are seeded on membership alone. New work gets a row when it appears; archived or left work loses it.
 
 **Prioritizing.** Organisation belongs to Prioritizing, an ordinary subtask of Happy that runs
 on the cheapest model the installation offers. It is created with the person's first new work

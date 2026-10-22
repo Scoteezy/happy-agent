@@ -1,6 +1,11 @@
 import type { Surface } from "@slopus/happy-agent-client";
 import { expect, it } from "vitest";
-import { SpacesModule, spaceMigrations, type SpaceEvent } from "../../sources/spaces/index.js";
+import {
+    SpacesModule,
+    spaceMigrations,
+    type SpaceEvent,
+    type SpaceRecord,
+} from "../../sources/spaces/index.js";
 import type { SurfacesModule, SurfaceEvent } from "../../sources/surfaces/index.js";
 import {
     insertSpace,
@@ -120,3 +125,63 @@ it("refreshes Surface names and pictures from current state and removes its subs
         database.close();
     }
 });
+
+it.each([false, true])(
+    "keeps a joined reference Surface at startup (existing row: %s)",
+    async (existing) => {
+        const database = moduleDatabase(spaceMigrations, "reference-startup");
+        await database.ready;
+        const surface: Surface = {
+            id: "surfaceaaaaaaaaaaaaaaaaa",
+            type: "reference",
+            name: "Shared reference",
+            image: null,
+            members: [{ userId: null, joinedAt: 1, orderKey: "1" }],
+            updatedAt: 1,
+            version: "01991f3a-5c1e-7000-8000-2f9a1b3c4d5e",
+        };
+        const subscribe = () => () => undefined;
+        const spaces = new SpacesModule(
+            {} as ConstructorParameters<typeof SpacesModule>[0],
+            { onEvent: subscribe } as unknown as ConstructorParameters<typeof SpacesModule>[1],
+            { onEvent: subscribe } as unknown as ConstructorParameters<typeof SpacesModule>[2],
+            {
+                list: async () => [surface],
+                hasContent: async () => false,
+                onDocumentChanged: subscribe,
+                onEvent: subscribe,
+            } as unknown as ConstructorParameters<typeof SpacesModule>[3],
+            {} as ConstructorParameters<typeof SpacesModule>[4],
+            {} as ConstructorParameters<typeof SpacesModule>[5],
+            { register: () => undefined } as unknown as ConstructorParameters<
+                typeof SpacesModule
+            >[6],
+            {} as ConstructorParameters<typeof SpacesModule>[7],
+        );
+        try {
+            await writeOwnerState(database.context, { ownerUserId: "standalone" });
+            const original: SpaceRecord = {
+                id: "spaceaaaaaaaaaaaaaaaaaaa",
+                ownerUserId: "standalone",
+                role: "item",
+                contents: [{ kind: "surface", surfaceId: surface.id, surfaceType: "reference" }],
+                orderKey: "1",
+                placement: "settled",
+                visibility: "shown",
+                version: 1,
+                createdAt: 1,
+                updatedAt: 1,
+            };
+            if (existing) await insertSpace(database.context, original);
+            const hooks = spaces.beforeStart(database.context, primaryAgents());
+            await hooks.afterStart?.(database.context, {} as never);
+            const rows = await querySpaces(database.context, "standalone");
+            expect(rows).toHaveLength(1);
+            expect(rows[0]?.contents).toEqual(original.contents);
+            if (existing) expect(rows[0]).toEqual(original);
+        } finally {
+            await spaces.close();
+            database.close();
+        }
+    },
+);

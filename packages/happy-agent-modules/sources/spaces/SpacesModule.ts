@@ -1883,7 +1883,11 @@ export class SpacesModule implements AgentModule {
         for (const surface of await this.#surfaces.list(ctx)) {
             if (!joinedBy(surface.members, ownerUserId)) continue;
             const surfaceType = surfaceTypeOf(surface.type);
-            if (surfaceType === undefined || !(await this.#surfaces.hasContent(ctx, surface.id)))
+            if (
+                surfaceType === undefined ||
+                (surfaceNeedsContent(surfaceType) &&
+                    !(await this.#surfaces.hasContent(ctx, surface.id)))
+            )
                 continue;
             await seed(
                 { kind: "surface", surfaceId: surface.id, surfaceType },
@@ -2019,7 +2023,10 @@ export class SpacesModule implements AgentModule {
                 !ownerIds.some((owner) => joinedBy(surface.members, owner))
             )
                 continue;
-            if (await this.#surfaces.hasContent(ctx, surface.id))
+            if (
+                !surfaceNeedsContent(surfaceType) ||
+                (await this.#surfaces.hasContent(ctx, surface.id))
+            )
                 eligible.set(surface.id, { kind: "surface", surfaceId: surface.id, surfaceType });
         }
         for (const owner of ownerIds) {
@@ -2238,6 +2245,10 @@ function surfaceTypeOf(type: string): "todo" | "document" | "calendar" | "refere
     return type === "todo" || type === "document" || type === "calendar" || type === "reference"
         ? type
         : undefined;
+}
+
+function surfaceNeedsContent(type: NonNullable<ReturnType<typeof surfaceTypeOf>>): boolean {
+    return type === "todo" || type === "document" || type === "calendar";
 }
 
 /** Rows by key; Happy leads because it holds the first key. */
