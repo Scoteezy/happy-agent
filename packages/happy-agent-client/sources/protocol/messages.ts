@@ -485,7 +485,6 @@ export const messageFailureProviderSchema = Type.Object({
 });
 export type MessageFailureProvider = Static<typeof messageFailureProviderSchema>;
 
-/** One usable account and model to switch to, ranked by the daemon. */
 /** Ranking groups with understood labels; unknown wire values are still readable. */
 export const knownFallbackGroupSchema = Type.Union([
     Type.Literal("same_model"),
@@ -494,6 +493,10 @@ export const knownFallbackGroupSchema = Type.Union([
 ]);
 export type KnownFallbackGroup = Static<typeof knownFallbackGroupSchema>;
 
+/**
+ * One account and model to switch to, as daemons before protocol 32 ranked them. From protocol 32
+ * failures carry none; clients take switch targets from the live model catalog and usage.
+ */
 export const messageFailureFallbackSchema = Type.Object({
     providerId: Type.String({ minLength: 1, maxLength: 256 }),
     /** The provider entry's display label, such as "claude_work". */
@@ -548,7 +551,10 @@ export type MessageFailureResolution =
 const failureBaseSchema = Type.Object({
     /** One user-safe sentence without a clock time, for agents and unknown kinds. */
     message: Type.String({ minLength: 1, maxLength: 512 }),
-    /** Ranked usable alternatives; empty means there is nothing to switch to. */
+    /**
+     * Always empty from protocol 32, whose clients take switch targets from the live model catalog
+     * and usage. Older daemons send ranked alternatives and accept only those on `switch`.
+     */
     fallbackProviders: Type.Array(messageFailureFallbackSchema, { maxItems: 16 }),
     /** Absent until the person retries or switches. */
     resolution: Type.Optional(messageFailureResolutionSchema),

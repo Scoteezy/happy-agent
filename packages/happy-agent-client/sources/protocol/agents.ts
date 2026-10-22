@@ -198,7 +198,10 @@ export interface RetryFailedTurnRequest {
 
 /** `POST /v0/agents/:agentId/messages/:messageId/switch` */
 export interface SwitchAndContinueRequest {
-    /** One of the failure's `fallbackProviders`. */
+    /**
+     * A model the live catalog offers, from protocol 32; older daemons accept only one of the
+     * failure's `fallbackProviders`.
+     */
     providerId: string;
     modelId: string;
     mutationId?: string;

@@ -280,6 +280,12 @@ Protocol 31 guarantees default team membership for Surfaces and the independent 
 this preference require protocol 31 or newer: older daemons may accept the opaque setting without
 applying a membership policy. Existing Surface and generic user-settings requests remain valid.
 
+Protocol 32 stops typed failures from carrying switch targets. `fallbackProviders` stays on every
+failure for older clients but is always empty, including on failures stored earlier, and the
+`switch` route accepts any provider and model the live model catalog offers. Clients offering
+Switch on protocol 32 or newer take its targets and usage from the same live sources as their
+model picker. An older daemon accepts only targets from the failure's own `fallbackProviders`.
+
 Account provenance, configuration history blocks, and structured error details are additive output
 and do not increment the protocol version. Clients tolerate their absence and older clients keep
 their existing text rendering. Existing sends and idle-only compaction remain unchanged.
@@ -5872,16 +5878,7 @@ description the client renders the card from. The message's text block equals `f
     "message": "Claude usage limit reached. It resets in about 2 hours.",
     "provider": { "id": "claude", "type": "claude", "vendorName": "Claude", "label": "claude" },
     "resetsAt": 1755407200000,
-    "fallbackProviders": [
-        {
-            "providerId": "claude_work",
-            "providerLabel": "claude_work",
-            "modelId": "anthropic/opus-5-5",
-            "usedPercent": 38,
-            "usageWindow": "weekly",
-            "group": "same_model"
-        }
-    ]
+    "fallbackProviders": []
 }
 ```
 
@@ -5893,17 +5890,15 @@ Every variant carries:
   agents, collaboration reports, and clients that do not know the kind. It never contains a clock
   time; a reset is a relative duration ("in about 2 hours") or omitted. Clients that know the kind
   write their own text from the typed fields instead.
-- `fallbackProviders` — at most 16 usable alternatives, ranked by the daemon so every client
-  agrees. An entry qualifies when its provider is enabled, serves a compatible model, and its
-  latest usage reading is at most 15 minutes old and not exhausted. Order: the same model on other
-  accounts (`group: "same_model"`), then the same family's default model (`"same_family"`), then
-  other providers' default models (`"other_provider"`); lowest usage first within each group.
-  `group` is extensible. `providerLabel` is the configured entry's display label; clients name the
-  model from the model catalog. `usedPercent` (0–100) and `usageWindow` come from one usage window:
-  the weekly window when the provider reports one, otherwise the window the percentage comes
-  from, named in lowercase ("5h", "monthly"). Both are `null` without a fresh reading. Spent
-  accounts and accounts that need a sign-in are never listed. An empty array means there is
-  nothing to switch to.
+- `fallbackProviders` — always an empty array from protocol 32. A failure names what failed, never
+  what to switch to: alternatives and their usage go stale as soon as they are written, so the
+  daemon neither sends nor stores them, and reads failures stored earlier with an empty array.
+  Clients offering Switch take its targets, account labels, and usage from the live model catalog
+  (`GET /v0/config`) and provider usage (`GET /v0/usage`, `provider.usage.updated`), the same
+  sources as their model picker, and refresh usage when the person opens the switch menu as they
+  do when the picker opens. Before protocol 32 the array held at most 16 ranked alternatives with
+  `providerId`, `providerLabel`, `modelId`, `usedPercent`, `usageWindow`, and `group`; the
+  element shape remains valid.
 - `resolution` — absent until the person acts on the failure, then `{ "action": "retried",
 "at": <Unix milliseconds> }` or `{ "action": "switched", "at": <Unix milliseconds>,
 "providerId": "...", "modelId": "..." }`. The action set is extensible. The failed message is
@@ -5953,7 +5948,9 @@ unchanged and starts nothing. `404` when the message does not exist or carries n
 
 Moves the chat to another route and continues the failed turn there. Request:
 `{ "providerId": "claude_work", "modelId": "anthropic/opus-5-5", "mutationId": "..." }`. The pair
-must be one of the failure's `fallbackProviders`; otherwise `400`. The daemon records
+must be a model the live model catalog offers when the request arrives, the same catalog a send
+accepts, so an enabled provider's model; otherwise `400` with `invalid_request`. Daemons before
+protocol 32 accept only a pair from the failure's `fallbackProviders`. The daemon records
 `resolution: { "action": "switched", "providerId", "modelId" }` and starts a run on that route with
 the failed attempt's effort when the model supports it, else the model's default, and the same
 permission mode. A switch to an incompatible model resets the private context with the usual
