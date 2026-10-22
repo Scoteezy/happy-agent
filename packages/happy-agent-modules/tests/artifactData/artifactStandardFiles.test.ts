@@ -202,7 +202,65 @@ describe("standard files", () => {
         const style = text("style.css");
         expect(style).toContain(":where(happy-diff, happy-code) diffs-container");
         expect(style).toContain("--diffs-addition-color: var(--happy-diff-added)");
-        expect(style).toContain("--happy-diff-removed: light-dark(#d73a49, #f85149)");
+        expect(style).toContain(
+            "--happy-diff-removed: var(--happy-host-diff-removed, light-dark(#d73a49, #f85149))",
+        );
+    });
+
+    it("takes every page value from the host first, and insets the body by the host's inset", () => {
+        const style = text("style.css");
+        const root = /:where\(:root\) \{\n([^}]*)\}/.exec(style)?.[1] ?? "";
+        const tokens = [...root.matchAll(/^ {4}--happy-([a-z0-9-]+): (.*);$/gm)];
+        expect(tokens.map(([, name]) => name)).toEqual([
+            "text",
+            "muted",
+            "faint",
+            "border",
+            "surface",
+            "accent",
+            "added",
+            "removed",
+            "diff-added",
+            "diff-removed",
+            "chart-1",
+            "chart-2",
+            "chart-3",
+            "chart-4",
+            "chart-5",
+            "chart-6",
+            "scrollbar-thumb",
+            "scrollbar-thumb-hover",
+            "scrollbar-size",
+            "font",
+            "mono",
+            "font-size",
+            "line-height",
+            "page-inset",
+        ]);
+        for (const [, name, value] of tokens)
+            expect(value).toMatch(new RegExp(`^var\\(--happy-host-${name}, .+\\)$`));
+        expect(root).toContain("color-scheme: var(--happy-host-color-scheme, light dark);");
+        expect(style).toContain("--happy-page-inset: var(--happy-host-page-inset, 24px);");
+        // A host may insert the sheet at user origin, where !important would beat the page.
+        expect(style).not.toContain("!important");
+        expect(style).not.toContain("url(");
+        expect(style).toMatch(/:where\(body\) \{[^}]*padding: var\(--happy-page-inset\);/);
+    });
+
+    it("styles scrollbars like the app's at the least specificity, from the scrollbar values", () => {
+        const style = text("style.css");
+        expect(style).toMatch(
+            /:where\(\*\)::-webkit-scrollbar \{[^}]*width: var\(--happy-scrollbar-size\);/,
+        );
+        expect(style).toMatch(
+            /:where\(\*\)::-webkit-scrollbar-thumb \{[^}]*background: var\(--happy-scrollbar-thumb\)/,
+        );
+        expect(style).toMatch(
+            /::-webkit-scrollbar-thumb:hover,[^{]*\{[^}]*var\(--happy-scrollbar-thumb-hover\)/,
+        );
+        expect(style).toMatch(
+            /@supports not selector\(::-webkit-scrollbar\) \{\s*:where\(\*\) \{[^}]*scrollbar-color: var\(--happy-scrollbar-thumb\) transparent;/,
+        );
     });
 
     it("hands the host's renderer each file of a diff as the hunks it shows, and code as written", async () => {

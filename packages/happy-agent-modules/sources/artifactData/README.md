@@ -62,7 +62,9 @@ the write's time in its first 48 bits; `updatedAt` is that time.
 - `clientScript()` is the browser SDK served at `/api/v1/client.js`.
 - `impl/artifactStandardFiles.ts` holds the standard styles (`/api/v1/style.css`), components
   (`/api/v1/components.js`), and the diagram renderer they load (`/api/v1/diagrams.js`), which
-  every artifact page may load and which do not depend on the store. The renderer is Beautiful
+  every artifact page may load and which do not depend on the store. Each value the styles use
+  is a `--happy-*` property that takes the host's `--happy-host-*` input of the same name first,
+  so a page looks like the app showing it, colours, type, scrollbars, and inset included. The renderer is Beautiful
   Mermaid, bundled into `impl/artifactDiagramsScript.ts` by `scripts/build-artifact-diagrams.mjs`;
   regenerate it rather than editing it. The code renderer `<happy-diff>` and `<happy-code>` use
   is not the daemon's: they import `/api/v1/code.js` from the page's host, which Happy Desktop

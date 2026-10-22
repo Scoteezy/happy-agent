@@ -2,38 +2,50 @@
  * Happy's standard styles, which a page loads first with
  * `<link rel="stylesheet" href="/api/v1/style.css">`.
  *
- * They lay a page on whatever surface shows it, inline in a conversation or beside it: a
- * transparent root, inset by `--happy-page-inset`, which a client showing the page inline sets to
- * nothing so the page lines up with the reply around it; the chat's typeface and sizes; and colors
- * that follow the page's `color-scheme` through `light-dark()`, which a client sets to its own
- * scheme. Every rule sits inside `:where()`, so it has zero specificity and anything the page
- * writes itself wins. The styles of the standard components (`/api/v1/components.js`) live here
- * too, so a page that restyles one does so in its own stylesheet.
+ * They make a page look like part of whatever surface shows it, inline in a conversation or beside
+ * it: a transparent root, the app's typeface and sizes, its colours, its scrollbars, and its inset.
+ * Each value is a `--happy-*` custom property that takes the host's `--happy-host-*` value of the
+ * same name when the host sets one, and otherwise a fallback that follows the page's
+ * `color-scheme` through `light-dark()`; the scheme itself is the host's
+ * `--happy-host-color-scheme` unless the page declares its own. The host may set its inputs anywhere, since pages never
+ * write them, and a page that sets a `--happy-*` property itself wins over both. The body is inset
+ * by `--happy-page-inset`, a `padding` value of one or two lengths, which the host sets to its
+ * content inset beside the chat or on a page of its own, and to nothing inline, so the page lines up with the reply around it. Every rule sits
+ * inside `:where()`, so it has zero specificity and anything the page writes itself wins. The
+ * styles of the standard components (`/api/v1/components.js`) live here too, so a page that
+ * restyles one does so in its own stylesheet. A host may also insert this sheet itself at user
+ * origin for a page that does not link it, so it holds no `!important` and no relative `url()`.
  */
 export const ARTIFACT_STYLE_SHEET = String.raw`/* Happy standard styles, served by Happy Agent. */
 :where(:root) {
-    color-scheme: light dark;
-    --happy-text: light-dark(#18171a, #f4f3f6);
-    --happy-muted: light-dark(#5c5862, #b9b4c0);
-    --happy-faint: light-dark(#8f8a96, #807b87);
-    --happy-border: light-dark(#e4e2e8, #343238);
-    --happy-surface: light-dark(#f4f3f6, #232226);
-    --happy-accent: light-dark(#1683a3, #3cb9d8);
-    --happy-added: light-dark(#1a7f37, #4ac26b);
-    --happy-removed: light-dark(#cf222e, #f47067);
-    --happy-diff-added: light-dark(#34d058, #3fb950);
-    --happy-diff-removed: light-dark(#d73a49, #f85149);
-    --happy-chart-1: light-dark(#2f7fd6, #5aa2f0);
-    --happy-chart-2: light-dark(#e07b28, #f29a4e);
-    --happy-chart-3: light-dark(#2e9e6a, #4cc38a);
-    --happy-chart-4: light-dark(#8a5cd6, #a989ef);
-    --happy-chart-5: light-dark(#d4467a, #ec6f9c);
-    --happy-chart-6: light-dark(#7d8794, #9aa3ae);
-    --happy-font: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
-    --happy-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: var(--happy-host-color-scheme, light dark);
+    --happy-text: var(--happy-host-text, light-dark(#18171a, #f4f3f6));
+    --happy-muted: var(--happy-host-muted, light-dark(#5c5862, #b9b4c0));
+    --happy-faint: var(--happy-host-faint, light-dark(#8f8a96, #807b87));
+    --happy-border: var(--happy-host-border, light-dark(#e4e2e8, #343238));
+    --happy-surface: var(--happy-host-surface, light-dark(#f4f3f6, #232226));
+    --happy-accent: var(--happy-host-accent, light-dark(#1683a3, #3cb9d8));
+    --happy-added: var(--happy-host-added, light-dark(#1a7f37, #4ac26b));
+    --happy-removed: var(--happy-host-removed, light-dark(#cf222e, #f47067));
+    --happy-diff-added: var(--happy-host-diff-added, light-dark(#34d058, #3fb950));
+    --happy-diff-removed: var(--happy-host-diff-removed, light-dark(#d73a49, #f85149));
+    --happy-chart-1: var(--happy-host-chart-1, light-dark(#2f7fd6, #5aa2f0));
+    --happy-chart-2: var(--happy-host-chart-2, light-dark(#e07b28, #f29a4e));
+    --happy-chart-3: var(--happy-host-chart-3, light-dark(#2e9e6a, #4cc38a));
+    --happy-chart-4: var(--happy-host-chart-4, light-dark(#8a5cd6, #a989ef));
+    --happy-chart-5: var(--happy-host-chart-5, light-dark(#d4467a, #ec6f9c));
+    --happy-chart-6: var(--happy-host-chart-6, light-dark(#7d8794, #9aa3ae));
+    --happy-scrollbar-thumb: var(--happy-host-scrollbar-thumb, rgb(128 128 128 / 0.32));
+    --happy-scrollbar-thumb-hover: var(--happy-host-scrollbar-thumb-hover, rgb(128 128 128 / 0.68));
+    --happy-scrollbar-size: var(--happy-host-scrollbar-size, 8px);
+    --happy-font: var(--happy-host-font, "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif);
+    --happy-mono: var(--happy-host-mono, "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+    --happy-font-size: var(--happy-host-font-size, 16px);
+    --happy-line-height: var(--happy-host-line-height, 24px);
+    --happy-page-inset: var(--happy-host-page-inset, 24px);
     background: transparent;
     color: var(--happy-text);
-    font: 16px/24px var(--happy-font);
+    font: var(--happy-font-size) / var(--happy-line-height) var(--happy-font);
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
 }
@@ -44,8 +56,44 @@ export const ARTIFACT_STYLE_SHEET = String.raw`/* Happy standard styles, served 
 
 :where(body) {
     margin: 0;
-    padding: var(--happy-page-inset, 24px);
+    padding: var(--happy-page-inset);
     background: transparent;
+}
+
+/* Scrollbars are the app's: a thin rounded thumb on a clear track, held off the far edge by a
+   clear border. Chromium and WebKit draw them from the pseudo-elements, which an element's own
+   scrollbar-color turns off in Chromium, so a page restyles them either way; Firefox, which has no
+   pseudo-elements, gets the thumb's colour. */
+:where(*)::-webkit-scrollbar {
+    width: var(--happy-scrollbar-size);
+    height: var(--happy-scrollbar-size);
+    background: transparent;
+}
+:where(*)::-webkit-scrollbar-corner {
+    background: transparent;
+}
+:where(*)::-webkit-scrollbar-thumb {
+    border: 0 solid transparent;
+    border-radius: var(--happy-scrollbar-size);
+    background: var(--happy-scrollbar-thumb) padding-box;
+}
+:where(*)::-webkit-scrollbar-thumb:vertical {
+    min-height: 24px;
+    border-right-width: 2px;
+}
+:where(*)::-webkit-scrollbar-thumb:horizontal {
+    min-width: 24px;
+    border-bottom-width: 2px;
+}
+:where(*)::-webkit-scrollbar-thumb:hover,
+:where(*)::-webkit-scrollbar-thumb:active {
+    background-color: var(--happy-scrollbar-thumb-hover);
+}
+@supports not selector(::-webkit-scrollbar) {
+    :where(*) {
+        scrollbar-width: thin;
+        scrollbar-color: var(--happy-scrollbar-thumb) transparent;
+    }
 }
 
 :where(h1, h2, h3, h4) {

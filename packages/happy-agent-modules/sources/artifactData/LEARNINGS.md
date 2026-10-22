@@ -87,3 +87,24 @@ socket before any byte is sent, which is the "applied but response lost" case id
 exist for. The debug log route is never faulted so the log covers outages. `--from` reads a
 published artifact's data once through the daemon's own routes and never writes back; a workspace
 service cannot reach the daemon, so `artifact snapshot` writes a dump for `--seed`.
+
+## A page looks like the app by default, and the host's values come first
+
+Kirill asked that artifacts by default have exactly the app's fonts, theme, insets, and even
+scrollbars, without hardcoding any of it: the model may still style a page its own way. So
+`style.css` defines every value a page uses as a `--happy-*` property that resolves through a
+host input of the same name, `--happy-host-*`, before its own `light-dark()` fallback. The host
+may set its inputs anywhere, an inline style on `<html>` included, because pages never write them;
+a page that sets a `--happy-*` property at any specificity still wins. Having the host override
+`--happy-*` directly was rejected: it loses to a page's zero-specificity overrides only by source
+order, and an inline style would beat the page outright. The colour scheme follows the same rule
+through `--happy-host-color-scheme`, so the app's own light or dark choice reaches the page while a
+page that declares its own `color-scheme` keeps it. Happy Desktop inserts the sheet itself at user
+origin for a page that does not link it, so it must never hold `!important` or a relative `url()`.
+
+Scrollbars are styled at the least specificity from `--happy-scrollbar-size`, `-thumb`, and
+`-thumb-hover`, through the WebKit pseudo-elements where they exist and `scrollbar-color`
+elsewhere; a page's own `scrollbar-color` turns the pseudo-elements off in Chromium, so either way
+of restyling them works. Kirill also asked that the same page sit flush inline but inset beside the
+chat or on its own page: the body's padding is `--happy-page-inset`, which the host sets to its
+content inset there and to nothing inline, so one page fits every place it is shown.

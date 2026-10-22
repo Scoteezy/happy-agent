@@ -104,13 +104,22 @@ content, not as a second window frame. See §9.6.
 
 An HTML artifact is the one case where Happy does serve styles and components.
 Its page loads `<link rel="stylesheet" href="/api/v1/style.css">` first and
-`<script src="/api/v1/components.js"></script>` last. The style sheet defines
-its own `--happy-*` colour variables for artifact pages — `--happy-text`,
-`--happy-muted`, `--happy-faint`, `--happy-border`, `--happy-surface`,
-`--happy-accent`, `--happy-added`, `--happy-removed`, `--happy-diff-added`,
-`--happy-diff-removed`, `--happy-chart-1` to `--happy-chart-6`, `--happy-font`,
-and `--happy-mono` — and an artifact page uses those instead of the §5
-vocabulary. The components are `<happy-diff>`, `<happy-code>`, `<happy-files>`,
+`<script src="/api/v1/components.js"></script>` last. With nothing else, the
+page already looks like part of the app: its fonts, colours, scrollbars, and
+inset are the app's, and follow its theme. Change any of them only on purpose;
+everything the style sheet sets has the lowest specificity, so your own CSS
+wins.
+
+The style sheet defines its own `--happy-*` variables for artifact pages, which
+carry the app's values, and an artifact page uses those instead of the §5
+vocabulary and instead of fixed colours: `--happy-text`, `--happy-muted`,
+`--happy-faint`, `--happy-border`, `--happy-surface`, `--happy-accent`,
+`--happy-added`, `--happy-removed`, `--happy-diff-added`,
+`--happy-diff-removed`, `--happy-chart-1` to `--happy-chart-6`,
+`--happy-scrollbar-thumb`, `--happy-scrollbar-thumb-hover`, and
+`--happy-scrollbar-size`; `--happy-font`, `--happy-mono`, `--happy-font-size`,
+and `--happy-line-height` for type; and `--happy-page-inset`, the body's
+padding. The components are `<happy-diff>`, `<happy-code>`, `<happy-files>`,
 `<happy-chart>`, and `<happy-diagram>`; `recipe/artifact-apps.md` shows each
 one. In Happy Desktop, `<happy-diff>` and `<happy-code>` draw diffs and code
 with the same renderer and styling as the desktop's changed-file pane and code
@@ -123,6 +132,12 @@ and no background of its own. Lay it out as that part of the reply would read:
 headings, prose, code, quotes, file trees, and clean visualizations, separated
 by spacing and hairlines. A stack of rounded cards, tinted callout boxes, and a
 coloured stripe down a block's left edge are never acceptable (§16).
+
+The same page is also shown beside the chat and on a page of its own. There the
+body is inset by the app's content inset; inline it is not inset at all, so it
+lines up with the reply's text. Give `html` and `body` no margin or padding of
+your own and the page fits all three. To adapt a layout, use
+`--happy-page-inset` as a `padding` value; it may hold two lengths. This replaces the §2.5 gutters for an artifact page.
 
 ---
 
@@ -387,7 +402,9 @@ Rules:
   padding, so scrolling cannot clip it. A 2 px ring with a 2 px offset needs at
   least 4 px of clearance — the 16 px gutter covers it.
 - Style the scrollbar with the design-system thumb colour, or leave it native. Do not hide
-  it.
+  it. An artifact page's scrollbars are already the app's (§1.5); leave them
+  unless you mean them to differ, and then draw them from the
+  `--happy-scrollbar-*` variables.
 
 ```css
 .scrollport {
@@ -2082,6 +2099,9 @@ in **both** light and dark, at **three** container widths: **400**, **640**, and
       named colours outside `var(…, fallback)` positions.
 - [ ] Opened standalone in a browser tab, the page is still legible
       in both OS appearances (the fallbacks work) and no variable is cyclic.
+- [ ] An artifact page loads `/api/v1/style.css` first, paints every colour from
+      its `--happy-*` variables, and sets no font, scrollbar, or `body` padding
+      of its own unless it means to differ from the app (§1.5).
 
 **Layout**
 
