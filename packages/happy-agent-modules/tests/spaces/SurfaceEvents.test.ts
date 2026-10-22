@@ -5,6 +5,7 @@ import type { SurfacesModule, SurfaceEvent } from "../../sources/surfaces/index.
 import {
     insertSpace,
     querySpace,
+    querySpaces,
     writeOwnerState,
 } from "../../sources/spaces/persistence/SpacesPersistence.js";
 import { moduleDatabase } from "../support/moduleDatabase.js";
@@ -15,6 +16,7 @@ it("refreshes Surface names and pictures from current state and removes its subs
     await database.ready;
     const listeners = new Set<Parameters<SurfacesModule["onEvent"]>[0]>();
     const events: SpaceEvent[] = [];
+    let content = true;
     let surface: Surface = {
         id: "surfaceaaaaaaaaaaaaaaaaa",
         type: "todo",
@@ -31,6 +33,8 @@ it("refreshes Surface names and pictures from current state and removes its subs
         { onEvent: subscribe } as unknown as ConstructorParameters<typeof SpacesModule>[2],
         {
             list: async () => [surface],
+            hasContent: async () => content,
+            onDocumentChanged: () => () => undefined,
             onEvent(listener: Parameters<SurfacesModule["onEvent"]>[0]) {
                 listeners.add(listener);
                 return () => {
@@ -83,6 +87,32 @@ it("refreshes Surface names and pictures from current state and removes its subs
         expect(events).toContainEqual(
             expect.objectContaining({ type: "space_updated", ownerUserId: "standalone" }),
         );
+        const todoEvent: SurfaceEvent = {
+            type: "todo.updated",
+            payload: {
+                surfaceId: surface.id,
+                todoId: "todoaaaaaaaaaaaaaaaaaaaa",
+                previousVersion: surface.version,
+                version: surface.version,
+                changes: { status: "deleted", updatedAt: 3 },
+            },
+        };
+        content = false;
+        for (const listener of listeners) await listener(database.context, todoEvent);
+        expect(await querySpace(database.context, row.id)).toBeUndefined();
+        expect(events).toContainEqual(
+            expect.objectContaining({ type: "space_removed", spaceId: row.id }),
+        );
+        content = true;
+        for (const listener of listeners) await listener(database.context, todoEvent);
+        const restored = await querySpaces(database.context, "standalone");
+        expect(restored).toHaveLength(1);
+        for (const listener of listeners) await listener(database.context, todoEvent);
+        expect(await querySpaces(database.context, "standalone")).toEqual(restored);
+        surface = { ...surface, members: [] };
+        // An old content notification cannot undo a newer leave.
+        for (const listener of listeners) await listener(database.context, todoEvent);
+        expect(await querySpaces(database.context, "standalone")).toEqual([]);
         await spaces.close();
         expect(listeners.size).toBe(0);
     } finally {

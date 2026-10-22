@@ -87,6 +87,13 @@ Spaces now owns a Surfaces event subscription and reconciles each seeded owner's
 one transaction, emitting private row events and refreshing names and pictures. Durable events
 read current membership so a delayed join cannot undo a later leave; closing Spaces unsubscribes.
 
+Only populated todo lists, documents, and calendars contribute rows. Content events reconcile
+current membership and current content, removing empty rows and restoring populated ones without
+moving rows that remain eligible. Startup reconciles already seeded owners too. Document edits
+have a durable internal notification independent of editor subscriptions; completed todos count
+as content, deleted records do not, and calendar existence does not depend on a displayed range.
+System monitors remain outside Spaces.
+
 ## The API is only what the desktop uses
 
 Kirill reviewed the contract before it was specified. Everything the desktop did not read was

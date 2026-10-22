@@ -222,6 +222,7 @@ export class SpacesModule implements AgentModule {
     readonly #hooks: AgentModuleHooks = {
         afterStart: async (ctx: Context): Promise<void> => {
             this.#subscribe();
+            await ctx.inTx((tx) => this.#reconcileSurfaces(tx));
             const lifetime = this.#lifetime;
             if (lifetime === undefined) return;
             // The calm check belongs to the daemon and stops when this module closes.
@@ -1882,7 +1883,8 @@ export class SpacesModule implements AgentModule {
         for (const surface of await this.#surfaces.list(ctx)) {
             if (!joinedBy(surface.members, ownerUserId)) continue;
             const surfaceType = surfaceTypeOf(surface.type);
-            if (surfaceType === undefined) continue;
+            if (surfaceType === undefined || !(await this.#surfaces.hasContent(ctx, surface.id)))
+                continue;
             await seed(
                 { kind: "surface", surfaceId: surface.id, surfaceType },
                 surface.image === null ? undefined : { type: "image" },
@@ -1970,41 +1972,21 @@ export class SpacesModule implements AgentModule {
                 }
             }),
             this.#surfaces.onEvent(async (_eventCtx, event) => {
-                if (event.type !== "surface.created" && event.type !== "surface.updated") return;
                 const lifetime = this.#lifetime;
                 if (lifetime === undefined) return;
                 const ctx = lifetime.named("spaces-surface-event");
                 const surfaceId =
                     event.type === "surface.created"
                         ? event.payload.surface.id
-                        : event.payload.surfaceId;
+                        : event.type === "todo.created"
+                          ? event.payload.todo.surfaceId
+                          : event.type === "calendar_event.created"
+                            ? event.payload.event.surfaceId
+                            : event.payload.surfaceId;
                 await ctx.inTx(async (txCtx) => {
                     // Notifications are durable and may lag later membership changes. Reconcile
                     // against current state so a delayed join cannot resurrect a row after leave.
-                    const surface = (await this.#surfaces.list(txCtx)).find(
-                        (candidate) => candidate.id === surfaceId,
-                    );
-                    const surfaceType =
-                        surface === undefined ? undefined : surfaceTypeOf(surface.type);
-                    if (surface === undefined || surfaceType === undefined) return;
-                    for (const state of await queryOwnerStates(txCtx)) {
-                        if (joinedBy(surface.members, state.ownerUserId)) {
-                            await this.#addWork(
-                                txCtx,
-                                state.ownerUserId,
-                                {
-                                    kind: "surface",
-                                    surfaceId,
-                                    surfaceType,
-                                },
-                                surface.image === null ? undefined : { type: "image" },
-                            );
-                        } else {
-                            await this.#closeWork(txCtx, `surface:${surfaceId}`, [
-                                state.ownerUserId,
-                            ]);
-                        }
-                    }
+                    await this.#reconcileSurfaces(txCtx, surfaceId);
                     if (event.type === "surface.updated") {
                         // Names and pictures are projected live; advance rows and emit their
                         // complete snapshots so connected sidebars refresh those projections.
@@ -2012,7 +1994,61 @@ export class SpacesModule implements AgentModule {
                     }
                 });
             }),
+            this.#surfaces.onDocumentChanged(async (_ctx, surfaceId) => {
+                const lifetime = this.#lifetime;
+                if (lifetime === undefined) return;
+                await lifetime
+                    .named("spaces-document-event")
+                    .inTx((tx) => this.#reconcileSurfaces(tx, surfaceId));
+            }),
         );
+    }
+
+    /** Eligibility is current content plus membership; existing placement remains the person's. */
+    async #reconcileSurfaces(ctx: Context, onlySurfaceId?: string): Promise<void> {
+        const ownerIds = (await queryOwnerStates(ctx)).map((state) => state.ownerUserId);
+        if (ownerIds.length === 0) return;
+        const eligible = new Map<string, SpaceRef & { kind: "surface" }>();
+        const surfaces = (await this.#surfaces.list(ctx)).filter(
+            (surface) => onlySurfaceId === undefined || surface.id === onlySurfaceId,
+        );
+        for (const surface of surfaces) {
+            const surfaceType = surfaceTypeOf(surface.type);
+            if (
+                surfaceType === undefined ||
+                !ownerIds.some((owner) => joinedBy(surface.members, owner))
+            )
+                continue;
+            if (await this.#surfaces.hasContent(ctx, surface.id))
+                eligible.set(surface.id, { kind: "surface", surfaceId: surface.id, surfaceType });
+        }
+        for (const owner of ownerIds) {
+            for (const row of await querySpaces(ctx, owner)) {
+                const content = row.contents[0];
+                if (
+                    content?.kind !== "surface" ||
+                    (onlySurfaceId !== undefined && content.surfaceId !== onlySurfaceId)
+                )
+                    continue;
+                const surface = surfaces.find((candidate) => candidate.id === content.surfaceId);
+                if (
+                    !eligible.has(content.surfaceId) ||
+                    surface === undefined ||
+                    !joinedBy(surface.members, owner)
+                )
+                    await this.#closeWork(ctx, `surface:${content.surfaceId}`, [owner]);
+            }
+            for (const surface of surfaces) {
+                const content = eligible.get(surface.id);
+                if (content !== undefined && joinedBy(surface.members, owner))
+                    await this.#addWork(
+                        ctx,
+                        owner,
+                        content,
+                        surface.image === null ? undefined : { type: "image" },
+                    );
+            }
+        }
     }
 
     /**

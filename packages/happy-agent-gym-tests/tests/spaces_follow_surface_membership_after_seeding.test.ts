@@ -26,6 +26,7 @@ it("adds newly created Surfaces after seeding and reconciles leaving and rejoini
     const snapshot = () => gym.http.ok<Snapshot>("GET", "/v0/spaces");
     const before = await snapshot();
     const surface = (await gym.client.createSurface({ type: "todo", name: "Shopping" })).surface;
+    await gym.client.createTodo(surface.id, { text: "Milk" });
     const row = await gym.waitUntil(
         async () => (await snapshot()).spaces.find((space) => space.target.id === surface.id),
         "the new Surface's row",
@@ -72,7 +73,9 @@ it("keeps Surface rows and events private to each seeded member", async () => {
     // Exercise explicit membership without the automatic participation policy.
     await bob.saveUserSetting("surfaces.autoJoin", { value: false });
     const [a, b] = await Promise.all([snapshot(owner), snapshot(member)]);
-    const surface = (await alice.createSurface({ type: "document", name: "Shared notes" })).surface;
+    const surface = (
+        await alice.createSurface({ type: "document", name: "Shared notes", text: "Team notes" })
+    ).surface;
     const ownerRow = await gym.waitUntil(
         async () => (await snapshot(owner)).spaces.find((space) => space.target.id === surface.id),
         "the creator's row",
