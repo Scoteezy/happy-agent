@@ -161,7 +161,7 @@ Guidelines:
             // for, so a snapshot that fails leaves the result without a presentation.
             const presentation = await chatMedia
                 .snapshot(image.bytes, fileName)
-                .then((item) => chatMedia.presentation([item]))
+                .then((item) => chatMedia.presentation([item], { type: "columns", columns: 1 }))
                 .catch((error: unknown) => {
                     ctx.log.warn("A generated image could not be shown in the chat.", {}, error);
                     return undefined;

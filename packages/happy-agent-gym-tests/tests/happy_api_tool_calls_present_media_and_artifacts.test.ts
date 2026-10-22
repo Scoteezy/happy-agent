@@ -268,6 +268,98 @@ describe("tool calls present media and artifacts in the chat", () => {
         expect(gym.inference.unscripted).toEqual([]);
     });
 
+    it("arranges presented files by the agent's layout and reports what it ignored", async () => {
+        const { gym, call } = await harness();
+        const { block } = await call("present_files", {
+            filepaths: ["out/chart.png", "out/report.pdf"],
+            layout:
+                '<figure><img src="out/chart.png" alt="Chart"><figcaption style="tone: muted">Q3</figcaption></figure>' +
+                '<div style="display: grid; grid-template-columns: repeat(2, 1fr)"><img src="out/report.pdf"></div>',
+        });
+        const layout = {
+            type: "tree",
+            root: [
+                {
+                    type: "element",
+                    tag: "figure",
+                    children: [
+                        { type: "item", index: 0, alt: "Chart" },
+                        {
+                            type: "element",
+                            tag: "figcaption",
+                            style: { tone: "muted" },
+                            children: [{ type: "text", text: "Q3" }],
+                        },
+                    ],
+                },
+                {
+                    type: "element",
+                    tag: "div",
+                    style: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)" },
+                    children: [{ type: "item", index: 1 }],
+                },
+            ],
+        };
+        expect(block).toMatchObject({
+            status: "completed",
+            presentation: { type: "media", layout },
+        });
+        expect(JSON.stringify(block.presentation)).not.toContain("<");
+        await gym.restart();
+        expect(await toolBlock(gym, "present_files", 1)).toEqual(block);
+
+        const lenient = await call("present_files", {
+            filepaths: ["out/chart.png", "out/report.pdf"],
+            layout: '<img src="out/chart.png" style="position: fixed; width: 100%"><script>x()</script>',
+        });
+        expect(lenient.block).toMatchObject({
+            status: "completed",
+            presentation: {
+                type: "media",
+                layout: {
+                    type: "tree",
+                    root: [
+                        { type: "item", index: 0, style: { width: "100%" } },
+                        { type: "item", index: 1 },
+                    ],
+                },
+            },
+        });
+        expect(lenient.result.text).toContain(
+            "Layout ignored: position on <img>; <script> and its contents.",
+        );
+        expect(lenient.result.text).toContain(
+            'The layout did not place "out/report.pdf", so it is shown after it.',
+        );
+        expect(gym.inference.unscripted).toEqual([]);
+    });
+
+    it("shows an image the agent views and tells the model the user sees it", async () => {
+        const { gym, call } = await harness();
+        const { result, block } = await call("view_image", { path: "out/chart.png" });
+        expect(result.text).toContain(
+            "The user also sees this image inline in the chat, so do not present it again.",
+        );
+        expect(block).toMatchObject({
+            status: "completed",
+            presentation: {
+                type: "media",
+                items: [{ kind: "image", name: "chart.png", width: 6, height: 4 }],
+                layout: { type: "columns", columns: 2 },
+            },
+        });
+        const shown = await media(
+            gym,
+            `/v0/agents/${gym.defaultSessionId}/tool-calls/${block.id}/media/0`,
+        );
+        expect(shown.body).toEqual(CHART);
+
+        // A view that fails shows no media.
+        const page = await call("view_image", { path: "out/report.pdf" });
+        expect(page.block.presentation).toMatchObject({ type: "exploration" });
+        expect(gym.inference.unscripted).toEqual([]);
+    });
+
     it("records no media for a call that fails", async () => {
         const { gym, call } = await harness();
         const { result, block } = await call("present_files", { filepaths: ["out"] });

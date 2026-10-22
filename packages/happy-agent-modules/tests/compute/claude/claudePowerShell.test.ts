@@ -22,6 +22,7 @@ async function toolsFor(platform: string, kind: "host" | "docker" | "emulated") 
             compute,
             undefined as never,
             new AbortController().signal,
+            undefined,
         );
         return {
             compute,

@@ -446,16 +446,14 @@ describe("HistoryModule durability", () => {
         const hooks = await resolveModuleHooks(database.context, history);
 
         const values = new Map<string, unknown>();
-        const scope = {
-            agent: { id: "agent-a" },
-            runKV: {
-                delete: async () => undefined,
-                read: async (_ctx: unknown, key: string) => values.get(key),
-                write: async (_ctx: unknown, key: string, value: unknown) => {
-                    values.set(key, value);
-                },
+        const store = {
+            delete: async () => undefined,
+            read: async (_ctx: unknown, key: string) => values.get(key),
+            write: async (_ctx: unknown, key: string, value: unknown) => {
+                values.set(key, value);
             },
-        } as never;
+        };
+        const scope = { agent: { id: "agent-a" }, historyKV: store, runKV: store } as never;
 
         try {
             await history.record(database.context, "agent-a", {
@@ -502,16 +500,14 @@ describe("HistoryModule durability", () => {
         const hooks = await resolveModuleHooks(database.context, history);
 
         const values = new Map<string, unknown>();
-        const scope = {
-            agent: { id: "agent-a" },
-            runKV: {
-                delete: async () => undefined,
-                read: async (_ctx: unknown, key: string) => values.get(key),
-                write: async (_ctx: unknown, key: string, value: unknown) => {
-                    values.set(key, value);
-                },
+        const store = {
+            delete: async () => undefined,
+            read: async (_ctx: unknown, key: string) => values.get(key),
+            write: async (_ctx: unknown, key: string, value: unknown) => {
+                values.set(key, value);
             },
-        } as never;
+        };
+        const scope = { agent: { id: "agent-a" }, historyKV: store, runKV: store } as never;
 
         try {
             await history.record(database.context, "agent-a", {

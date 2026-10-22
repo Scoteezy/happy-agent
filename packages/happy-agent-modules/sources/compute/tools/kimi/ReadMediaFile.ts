@@ -1,17 +1,24 @@
 import { Type } from "@sinclair/typebox";
 import { defineAgentTool } from "@slopus/happy-agent-base";
+import { ChatMediaModule } from "../../../chatMedia/index.js";
 import type { FileReadLog } from "../../../impl/FileReadLog.js";
 import type { Compute } from "../../Compute.js";
 import { computePermissionsForContext } from "../../impl/computePermissionsForContext.js";
 import { computeImageSchema } from "../../impl/readImage.js";
 import { resolveComputePath } from "../../impl/resolveComputePath.js";
+import { READ_IMAGE_SHOWN_NOTICE, showReadImage } from "../../impl/showReadImage.js";
 import { kimiEscalationProperties, kimiPathPolicy } from "./impl/kimiPathPolicy.js";
 
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const MAX_PIXELS = 40_000_000;
 
-export function kimiReadMediaFileTool(compute: Compute, reads: FileReadLog) {
+/** Kimi's image reader. With chat media, the whole original image is shown to the user as well. */
+export function kimiReadMediaFileTool(
+    compute: Compute,
+    reads: FileReadLog,
+    chatMedia?: ChatMediaModule,
+) {
     return defineAgentTool({
         name: "ReadMediaFile",
         defer: false,
@@ -49,6 +56,8 @@ export function kimiReadMediaFileTool(compute: Compute, reads: FileReadLog) {
                 height: Type.Integer(),
                 region_x: Type.Integer(),
                 region_y: Type.Integer(),
+                /** The original file shown to the user; absent when it could not be shown. */
+                presentation: Type.Optional(ChatMediaModule.presentationSchema),
             },
             { additionalProperties: false },
         ),
@@ -112,6 +121,7 @@ export function kimiReadMediaFileTool(compute: Compute, reads: FileReadLog) {
             if ((await compute.fs.stat(permissions, path)).mtimeMs !== stat.mtimeMs)
                 throw new Error("The image changed while it was being read. Read it again.");
             await reads.record(ctx, path, stat.mtimeMs);
+            const presentation = await showReadImage(ctx, chatMedia, bytes, path);
             return {
                 path,
                 image: {
@@ -125,12 +135,13 @@ export function kimiReadMediaFileTool(compute: Compute, reads: FileReadLog) {
                 height: info.height,
                 region_x: args.region?.x ?? 0,
                 region_y: args.region?.y ?? 0,
+                ...(presentation === undefined ? {} : { presentation }),
             };
         },
         toLLM: (result) => [
             {
                 type: "text",
-                text: `Image ${result.path}: original ${result.original_width}×${result.original_height}, delivered ${result.width}×${result.height}; region offset (${result.region_x}, ${result.region_y}).`,
+                text: `Image ${result.path}: original ${result.original_width}×${result.original_height}, delivered ${result.width}×${result.height}; region offset (${result.region_x}, ${result.region_y}).${result.presentation === undefined ? "" : `\n${READ_IMAGE_SHOWN_NOTICE}`}`,
             },
             { type: "image", data: result.image.data, mimeType: result.image.mime_type },
         ],

@@ -1,5 +1,6 @@
 import type { AnyAgentTool } from "@slopus/happy-agent-base";
 
+import type { ChatMediaModule } from "../../../chatMedia/index.js";
 import type { Compute } from "../../Compute.js";
 import type { FileReadLog } from "../../../impl/FileReadLog.js";
 import { claudeBashTool } from "./Bash.js";
@@ -23,12 +24,13 @@ export function assembleClaudeComputeTools(
     compute: Compute,
     reads: FileReadLog,
     outputWaitsReleased: AbortSignal | undefined,
+    chatMedia: ChatMediaModule | undefined,
 ): readonly AnyAgentTool[] {
     const shellName = claudeShellName(compute);
     return [
         claudeBashOutputTool(compute, shellName, outputWaitsReleased),
         claudeBashTool(compute, shellName),
-        claudeReadTool(compute, reads),
+        claudeReadTool(compute, reads, chatMedia),
         claudeEditTool(compute, reads),
         claudeWriteTool(compute, reads),
         claudeGlobTool(compute),

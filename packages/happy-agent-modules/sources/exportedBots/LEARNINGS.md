@@ -104,8 +104,9 @@ that conversation; the person's next message starts a new one.
 Text the model writes before a tool call is commentary on its work. Sending it would flood the
 chat, so only the text after the last tool call is delivered, once the run settles. A run that
 ends without that text but with an error sends a short apology instead of silence. `NO_REPLY` lets
-the agent deliberately stay quiet. Images it generated and files it showed with `present_files`
-go with the reply. They are found through the run's tool call IDs, noted as each call ends,
+the agent deliberately stay quiet. Images it generated or read and files it showed with
+`present_files` go with the reply, in order and without their layout; the agent is told that
+reading an image shares it. They are found through the run's tool call IDs, noted as each call ends,
 because tool-call hooks see only call-scoped stores that are erased when the call commits.
 
 ## The cursor and the message move together

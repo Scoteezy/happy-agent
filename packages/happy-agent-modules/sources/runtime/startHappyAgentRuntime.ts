@@ -416,10 +416,17 @@ export async function startHappyAgentRuntime(
         const secrets = new SecretsModule(botSettings);
         const runners = new RunnersModule(config, botSettings);
         registerShutdown("runners", async () => await runners.close());
+        const events = new EventsModule();
+        const providerUsage = new ProviderUsageModule(config);
+        registerShutdown("provider-usage", async () => await providerUsage.close());
+        const history = new HistoryModule(events, botSettings, config, providerUsage);
+        history.onAppend(observation.recordHistory);
+        // The machine's tools show what they read in the chat, so chat media comes first.
+        const chatMedia = new ChatMediaModule(config, history);
         const suppliedCompute = options.compute;
         const computeModule =
             suppliedCompute === undefined
-                ? new ComputeModule(config, secrets, runners, botSettings)
+                ? new ComputeModule(config, secrets, runners, botSettings, chatMedia)
                 : ComputeModule.withProvider(
                       config,
                       secrets,
@@ -430,6 +437,7 @@ export async function startHappyAgentRuntime(
                       },
                       runners,
                       botSettings,
+                      chatMedia,
                   );
         const durableFunctions = new DurableFunctionsModule();
         const globalSkills = new GlobalSkillsModule(config, durableFunctions);
@@ -443,11 +451,6 @@ export async function startHappyAgentRuntime(
             await compute.computeModule.dispose(shutdownCtx);
         });
 
-        const events = new EventsModule();
-        const providerUsage = new ProviderUsageModule(config);
-        registerShutdown("provider-usage", async () => await providerUsage.close());
-        const history = new HistoryModule(events, botSettings, config, providerUsage);
-        history.onAppend(observation.recordHistory);
         const presence = new PresenceModule(config);
         const systemPrompt = new SystemPromptModule(config, compute.computeModule);
         const autoModule = new AutoModule(
@@ -646,7 +649,6 @@ export async function startHappyAgentRuntime(
             tasks,
         );
         const goal = new GoalModule();
-        const chatMedia = new ChatMediaModule(config, compute.computeModule, history);
         const exportedBots = new ExportedBotsModule(
             config,
             bots,

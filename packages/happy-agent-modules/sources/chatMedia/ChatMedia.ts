@@ -1,4 +1,5 @@
 import { Type, type Static } from "@sinclair/typebox";
+import { mediaLayoutSchema } from "@slopus/happy-agent-client";
 
 const MIB = 1024 * 1024;
 
@@ -29,6 +30,8 @@ export const chatMediaItemSchema = Type.Union([
             width: Type.Integer({ minimum: 1 }),
             height: Type.Integer({ minimum: 1 }),
             thumbhash: Type.String({ minLength: 1, maxLength: 128 }),
+            /** Pixels per point from the file's density; absent means 1. */
+            scale: Type.Optional(Type.Number({ exclusiveMinimum: 1, maximum: 4 })),
         },
         { additionalProperties: false },
     ),
@@ -52,6 +55,8 @@ export const chatMediaPresentationSchema = Type.Object(
     {
         type: Type.Literal("media"),
         items: Type.Array(chatMediaItemSchema, { minItems: 1, maxItems: MAX_CHAT_MEDIA_ITEMS }),
+        /** How a client arranges the items; absent for its automatic layout. */
+        layout: Type.Optional(mediaLayoutSchema),
     },
     { additionalProperties: false },
 );

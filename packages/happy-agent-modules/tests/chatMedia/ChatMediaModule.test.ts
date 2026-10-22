@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import type { AgentModuleScope } from "@slopus/happy-agent-base";
+import { Value } from "@sinclair/typebox/value";
 import { createRootContext } from "@steve.kite/stdlib";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
@@ -9,17 +10,34 @@ import { describe, expect, it } from "vitest";
 import { ChatMediaModule } from "../../sources/chatMedia/index.js";
 import { HistoryModule } from "../../sources/history/index.js";
 import { FakeCompute } from "../compute/support/FakeCompute.js";
-import { scriptedComputeModule, testConfig } from "../support/computeModule.js";
+import { computeToolset } from "../compute/support/computeTools.js";
+import { testConfig } from "../support/computeModule.js";
 import { resolveModuleHooks } from "../support/moduleHooks.js";
 
 const ctx = createRootContext().named("happy-agent-modules-chat-media");
 
-function chatMedia(compute: FakeCompute | undefined) {
-    return new ChatMediaModule(
-        testConfig,
-        scriptedComputeModule(async () => compute),
-        new HistoryModule(),
+function chatMedia() {
+    return new ChatMediaModule(testConfig, new HistoryModule());
+}
+
+/** The present_files tool an agent on this machine receives. */
+async function presentFilesOn(compute: FakeCompute, module = chatMedia()) {
+    return (await computeToolset(ctx, compute, { agentId: "agent-one", chatMedia: module })).tool(
+        "present_files",
     );
+}
+
+async function presentFiles(
+    compute: FakeCompute,
+    filepaths: readonly string[],
+    layout?: string,
+): Promise<{ readonly items: readonly any[]; readonly layout?: unknown }> {
+    const tool = await presentFilesOn(compute);
+    const result = await tool.execute(ctx, {
+        filepaths,
+        ...(layout === undefined ? {} : { layout }),
+    });
+    return result.presentation;
 }
 
 function place(compute: FakeCompute, path: string, bytes: Uint8Array): void {
@@ -62,7 +80,7 @@ describe("ChatMediaModule", () => {
         place(compute, "/workspace/logo.svg", svg);
         place(compute, "/workspace/data", unknown);
 
-        const { items } = await chatMedia(compute).presentFiles(ctx, "agent-one", [
+        const { items, layout } = await presentFiles(compute, [
             "photo.jpeg",
             "/workspace/out/misnamed.jpg",
             "report.pdf",
@@ -71,6 +89,7 @@ describe("ChatMediaModule", () => {
             "data",
         ]);
 
+        expect(layout).toBeUndefined();
         expect(items).toEqual([
             {
                 kind: "image",
@@ -135,54 +154,49 @@ describe("ChatMediaModule", () => {
         place(compute, "/workspace/empty.txt", new Uint8Array());
         place(compute, "/workspace/huge.png", new Uint8Array(32 * 1024 * 1024 + 1));
         place(compute, "/workspace/note.txt", Buffer.from("note"));
-        const module = chatMedia(compute);
 
-        await expect(module.presentFiles(ctx, "agent-one", ["out"])).rejects.toThrow(
-            '"out" is not a file.',
-        );
-        await expect(module.presentFiles(ctx, "agent-one", ["empty.txt"])).rejects.toThrow(
-            '"empty.txt" is empty.',
-        );
-        await expect(module.presentFiles(ctx, "agent-one", ["huge.png"])).rejects.toThrow(
+        await expect(presentFiles(compute, ["out"])).rejects.toThrow('"out" is not a file.');
+        await expect(presentFiles(compute, ["empty.txt"])).rejects.toThrow('"empty.txt" is empty.');
+        await expect(presentFiles(compute, ["huge.png"])).rejects.toThrow(
             "larger than the 32 MiB a presented image may be",
         );
-        await expect(
-            module.presentFiles(ctx, "agent-one", Array(11).fill("note.txt")),
-        ).rejects.toThrow("Present one to 10 files at a time.");
-        await expect(
-            chatMedia(undefined).presentFiles(ctx, "agent-one", ["note.txt"]),
-        ).rejects.toThrow("This conversation has no machine to present files from.");
+        const tool = await presentFilesOn(compute);
+        expect(Value.Check(tool.parameters, { filepaths: Array(11).fill("note.txt") })).toBe(false);
+        // Without chat media, nothing on the machine can be shown in the chat.
+        const without = await computeToolset(ctx, compute);
+        expect(without.tools.map((each) => each.name)).not.toContain("present_files");
     });
 
     it("offers present_files to every agent and says where the user sees the files", async () => {
         const compute = new FakeCompute();
         place(compute, "/workspace/note.txt", Buffer.from("note"));
-        const module = chatMedia(compute);
+        const module = chatMedia();
         const hooks = await resolveModuleHooks(ctx, module);
-        expect(hooks.instructions?.(ctx, {} as AgentModuleScope)).toContain(
-            "not in any parent or child chat",
+        const instructions = hooks.instructions?.(ctx, {} as AgentModuleScope);
+        expect(instructions).toContain("not in any parent or child chat");
+        expect(instructions).toContain(
+            "An image you have read with a file-reading tool is already shown, so do not present it again.",
         );
-        expect(hooks.instructions?.(ctx, {} as AgentModuleScope)).toContain(
-            "Link text, code, and Markdown files instead",
+        expect(instructions).toContain("Link text, code, and Markdown files instead");
+        expect(instructions).toContain("the parent should link text files and present only media");
+        expect(instructions).not.toContain("show_page");
+        expect(hooks.tools).toBeUndefined();
+        const tool = await presentFilesOn(compute, module);
+        expect(tool.description).toContain(
+            "images you read with your file-reading tool, and artifacts are already shown",
         );
-        expect(hooks.instructions?.(ctx, {} as AgentModuleScope)).toContain(
-            "the parent should link text files and present only media",
-        );
-        const tools = await hooks.tools!(ctx, { agent: { id: "agent-one" } } as AgentModuleScope);
-        expect(tools.map((tool) => tool.name)).toEqual(["present_files"]);
-        const [tool] = tools;
-        expect(tool!.description).toContain("Do not present text, code, or Markdown files");
-        expect(tool!.durable).toBe(true);
-        expect(await tool!.shouldReviewInAutoMode({ filepaths: ["note.txt"] }, ctx)).toBe(false);
-        expect(await tool!.shouldReviewInAutoMode({ filepaths: ["/etc/passwd"] }, ctx)).toBe(true);
+        expect(tool.description).toContain("Do not present text, code, or Markdown files");
+        expect(tool.durable).toBe(true);
+        expect(await tool.shouldReviewInAutoMode({ filepaths: ["note.txt"] }, ctx)).toBe(false);
+        expect(await tool.shouldReviewInAutoMode({ filepaths: ["/etc/passwd"] }, ctx)).toBe(true);
         expect(
-            await tool!.shouldRunInFullAccessInAutoMode!({ filepaths: ["/etc/passwd"] }, ctx),
+            await tool.shouldRunInFullAccessInAutoMode!({ filepaths: ["/etc/passwd"] }, ctx),
         ).toBe(true);
-        expect(tool!.describeAutoPermissionAction!({ filepaths: ["/etc/passwd"] }, ctx)).toContain(
+        expect(tool.describeAutoPermissionAction!({ filepaths: ["/etc/passwd"] }, ctx)).toContain(
             '"/etc/passwd"',
         );
 
-        const result = await tool!.execute(ctx, { filepaths: ["note.txt"] }, {
+        const result = await tool.execute(ctx, { filepaths: ["note.txt"] }, {
             id: "callpresent",
         } as never);
         expect(result).toEqual({
@@ -199,11 +213,117 @@ describe("ChatMediaModule", () => {
                 ],
             },
         });
-        expect(tool!.toLLM(result)).toEqual([
+        expect(tool.toLLM(result)).toEqual([
             {
                 type: "text",
                 text: 'Presented 1 file to the user in this chat: "note.txt" (file, text/plain, 4 bytes). The user sees them inline now, so do not repeat their paths or describe them as if the user cannot see them. They appear only in this chat\'s history, not in any parent or child chat; the agent in another chat should link text files and present only media there.',
             },
         ]);
+    });
+
+    it("arranges presented files by the agent's layout and reports what it ignored", async () => {
+        const compute = new FakeCompute();
+        const wide = await sharp({
+            create: { width: 8, height: 2, channels: 3, background: { r: 0, g: 0, b: 0 } },
+        })
+            .png()
+            .toBuffer();
+        place(compute, "/workspace/out/wide.png", wide);
+        place(compute, "/workspace/out/notes.pdf", Buffer.from("%PDF-1.7\n"));
+        place(compute, "/workspace/out/extra.pdf", Buffer.from("%PDF-1.7\n"));
+        const tool = await presentFilesOn(compute);
+
+        const result = await tool.execute(ctx, {
+            filepaths: ["out/wide.png", "out/notes.pdf", "out/extra.pdf"],
+            layout: `<figure style="margin: 0; position: absolute">
+               <img src="out/wide.png" alt="Wide &amp; short">
+               <figcaption style="tone: muted; font-size: small">Overview</figcaption>
+             </figure>
+             <script>alert(1)</script>
+             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px">
+               <img src="out/notes.pdf" style="grid-column: span 2">
+             </div>`,
+        });
+
+        expect(result.presentation.items.map((item: { name: string }) => item.name)).toEqual([
+            "wide.png",
+            "notes.pdf",
+            "extra.pdf",
+        ]);
+        expect(result.presentation.layout).toEqual({
+            type: "tree",
+            root: [
+                {
+                    type: "element",
+                    tag: "figure",
+                    style: { margin: "0" },
+                    children: [
+                        { type: "item", index: 0, alt: "Wide & short" },
+                        {
+                            type: "element",
+                            tag: "figcaption",
+                            style: { tone: "muted", fontSize: "small" },
+                            children: [{ type: "text", text: "Overview" }],
+                        },
+                    ],
+                },
+                {
+                    type: "element",
+                    tag: "div",
+                    style: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" },
+                    children: [{ type: "item", index: 1, style: { gridColumn: "span 2" } }],
+                },
+                { type: "item", index: 2 },
+            ],
+        });
+        expect(result.layout_notes).toEqual({
+            ignored: ["position on <figure>", "<script> and its contents"],
+            appended: ["out/extra.pdf"],
+        });
+        const [output] = tool.toLLM(result);
+        expect(output?.type === "text" ? output.text : undefined).toContain(
+            'Layout ignored: position on <figure>; <script> and its contents. The layout did not place "out/extra.pdf", so it is shown after it.',
+        );
+
+        // A layout that places nothing leaves the automatic layout, and the call still succeeds.
+        const unusable = await tool.execute(ctx, {
+            filepaths: ["out/wide.png"],
+            layout: "<table>Nothing here</table>",
+        });
+        expect(unusable.presentation).not.toHaveProperty("layout");
+        expect(unusable.layout_notes.ignored).toContain(
+            "the whole layout, which placed none of the files",
+        );
+
+        // Listing a file twice is still an argument error when a layout names files.
+        await expect(
+            tool.execute(ctx, {
+                filepaths: ["out/wide.png", "out/wide.png"],
+                layout: '<img src="out/wide.png">',
+            }),
+        ).rejects.toThrow("list each file in filepaths once");
+    });
+
+    it("records a Retina screenshot's scale from its density", async () => {
+        const compute = new FakeCompute();
+        const retina = await sharp({
+            create: { width: 40, height: 20, channels: 3, background: { r: 9, g: 9, b: 9 } },
+        })
+            .png()
+            .withMetadata({ density: 144 })
+            .toBuffer();
+        const plain = await sharp({
+            create: { width: 40, height: 20, channels: 3, background: { r: 9, g: 9, b: 9 } },
+        })
+            .png()
+            .withMetadata({ density: 72 })
+            .toBuffer();
+        place(compute, "/workspace/retina.png", retina);
+        place(compute, "/workspace/plain.png", plain);
+
+        const { items } = await presentFiles(compute, ["retina.png", "plain.png"]);
+
+        expect(items[0]).toMatchObject({ kind: "image", width: 40, height: 20, scale: 2 });
+        expect(items[1]).not.toHaveProperty("scale");
     });
 });

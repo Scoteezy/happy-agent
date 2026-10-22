@@ -8,6 +8,7 @@ import {
 } from "@slopus/happy-agent-base";
 import type { Context } from "@steve.kite/stdlib";
 
+import type { ChatMediaModule } from "../../../sources/chatMedia/index.js";
 import {
     ComputeModule,
     type HostCompute,
@@ -90,6 +91,7 @@ export async function computeToolset(
         readonly agentId?: string;
         readonly model?: string;
         readonly providerKind?: "bedrock" | "claude" | "codex" | "grok" | "gym";
+        readonly chatMedia?: ChatMediaModule;
     } = {},
 ): Promise<ComputeToolset> {
     const agentId = options.agentId ?? "compute-agent";
@@ -97,7 +99,14 @@ export async function computeToolset(
         id: "host",
         create: async () => compute,
     };
-    const module = ComputeModule.withProvider(testConfig, new SecretsModule(), provider);
+    const module = ComputeModule.withProvider(
+        testConfig,
+        new SecretsModule(),
+        provider,
+        undefined,
+        undefined,
+        options.chatMedia,
+    );
     const agentCtx = withAgentConfig(ctx, {
         modules: { compute: { cwd: compute.cwd, providerId: "host" } },
     });

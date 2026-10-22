@@ -226,6 +226,7 @@ function publicPresentation(presentation: HistoryToolPresentation): ToolPresenta
     return {
         type: "media",
         items: presentation.items.map(({ sha256: _sha256, ...item }) => item),
+        ...(presentation.layout === undefined ? {} : { layout: presentation.layout }),
     };
 }
 

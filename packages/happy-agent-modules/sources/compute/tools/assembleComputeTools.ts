@@ -1,5 +1,6 @@
 import type { AnyAgentTool } from "@slopus/happy-agent-base";
 
+import type { ChatMediaModule } from "../../chatMedia/index.js";
 import type { Compute } from "../Compute.js";
 import type { ComputeToolVendor } from "../ComputeToolVendor.js";
 import type { FileReadLog } from "../../impl/FileReadLog.js";
@@ -21,16 +22,17 @@ export function assembleComputeTools(
     compute: Compute,
     reads: FileReadLog,
     outputWaitsReleased: AbortSignal | undefined,
+    chatMedia: ChatMediaModule | undefined,
 ): readonly AnyAgentTool[] {
     switch (vendor) {
         case "claude":
-            return assembleClaudeComputeTools(compute, reads, outputWaitsReleased);
+            return assembleClaudeComputeTools(compute, reads, outputWaitsReleased, chatMedia);
         case "codex":
-            return assembleCodexComputeTools(compute, reads, outputWaitsReleased);
+            return assembleCodexComputeTools(compute, reads, outputWaitsReleased, chatMedia);
         case "grok":
             return assembleGrokComputeTools(compute, reads, outputWaitsReleased);
         case "kimi":
-            return assembleKimiComputeTools(compute, reads);
+            return assembleKimiComputeTools(compute, reads, chatMedia);
         case "glm":
             return assembleGlmComputeTools(compute, reads, outputWaitsReleased);
         case "foreign":

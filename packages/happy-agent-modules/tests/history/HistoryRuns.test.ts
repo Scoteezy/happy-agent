@@ -64,21 +64,23 @@ function accepted(id: string, kind: "send" | "steering"): AgentBaseAcceptedMessa
 
 function scope(): AgentModuleScope {
     const values = new Map<string, unknown>();
+    const store = {
+        delete: async (_ctx: unknown, key: string) => {
+            values.delete(key);
+        },
+        read: async (_ctx: unknown, key: string) => values.get(key),
+        write: async (_ctx: unknown, key: string, value: unknown) => {
+            values.set(key, value);
+        },
+    } as unknown as AgentModuleScope["runKV"];
     return {
         agent: {
             id: "agent-a",
             model: "openai/gpt-5.6-sol",
             provider: "codex",
         },
-        runKV: {
-            delete: async (_ctx, key) => {
-                values.delete(key);
-            },
-            read: async (_ctx, key) => values.get(key),
-            write: async (_ctx, key, value) => {
-                values.set(key, value);
-            },
-        },
+        historyKV: store,
+        runKV: store,
     } as AgentModuleScope;
 }
 

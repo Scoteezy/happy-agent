@@ -271,3 +271,12 @@ already being fixed. The reset's own transaction records the "Context reset" ser
 `notice: { kind: "context_reset" }`, and the API reports the one retry as `retrying` with
 `kind: "context_too_long"`. Only an overflow later in the same run becomes the `context_too_long`
 failure.
+
+## A transactional tool's presentation outlives its commit
+
+An image the agent read never reached the chat: `Read`, `view_image`, and `ReadMediaFile` are
+transactional, so Agent Base commits their result inside the tool's transaction and ends the call's
+stores before `afterToolCall` runs. The presentation History wrote there was refused, and the
+result was recorded without it. History now keeps each successful presentation in its history
+store under the call ID until `afterToolCallTransact` records it and deletes it, which works for
+every tool whether or not it commits its own result.

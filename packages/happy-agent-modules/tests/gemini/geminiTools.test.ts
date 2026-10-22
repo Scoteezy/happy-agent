@@ -88,7 +88,7 @@ describe("the Gemini module's tools", () => {
         const module = new GeminiModule(
             testConfig,
             compute,
-            new ChatMediaModule(testConfig, compute, new HistoryModule()),
+            new ChatMediaModule(testConfig, new HistoryModule()),
         );
 
         const hooks = await resolveModuleHooks(ctx, module);
@@ -103,7 +103,7 @@ describe("the Gemini module's tools", () => {
         const module = new GeminiModule(
             testConfig,
             computeModule,
-            new ChatMediaModule(testConfig, computeModule, new HistoryModule()),
+            new ChatMediaModule(testConfig, new HistoryModule()),
         );
 
         const hooks = await resolveModuleHooks(ctx, module);
@@ -140,6 +140,7 @@ describe("the Gemini module's tools", () => {
                     size: bytes.byteLength,
                 },
             ],
+            layout: { type: "columns", columns: 1 },
         });
         expect(await readFile(result.path)).toEqual(bytes);
         expect(requestBody(request)).toMatchObject({

@@ -541,7 +541,7 @@ const presentFilesArgumentsSchema = Type.Object(
 
 /**
  * What an agent shows in the chat, said in words, because the phone shows none of it: the row is
- * all a person reading along there learns of a page, an artifact, or a presented file. An
+ * all a person reading along there learns of an artifact or a presented file. An
  * artifact is named by its reference tag, which the connection turns into its current title.
  */
 function shownDescription(name: string, args: Record<string, unknown>): string | undefined {

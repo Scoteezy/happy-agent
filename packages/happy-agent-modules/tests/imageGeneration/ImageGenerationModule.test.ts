@@ -13,7 +13,6 @@ import { ChatMediaModule } from "../../sources/chatMedia/index.js";
 import { ConfigModule } from "../../sources/config/index.js";
 import { HistoryModule } from "../../sources/history/index.js";
 import { ImageGenerationModule } from "../../sources/imageGeneration/ImageGenerationModule.js";
-import { scriptedComputeModule } from "../support/computeModule.js";
 import { resolveModuleHooks } from "../support/moduleHooks.js";
 
 const ctx = createRootContext().named("happy-agent-modules-image-generation");
@@ -66,14 +65,7 @@ async function moduleWith(
     const config = await ConfigModule.load(join(happyRoot, ".happy"), {
         inference: { models: [], providers },
     });
-    return new ImageGenerationModule(
-        config,
-        new ChatMediaModule(
-            config,
-            scriptedComputeModule(async () => undefined),
-            new HistoryModule(),
-        ),
-    );
+    return new ImageGenerationModule(config, new ChatMediaModule(config, new HistoryModule()));
 }
 
 function scope(model: string): AgentModuleScope {
@@ -136,6 +128,7 @@ describe("ImageGenerationModule", () => {
                     thumbhash: expect.any(String),
                 },
             ],
+            layout: { type: "columns", columns: 1 },
         });
         expect(
             await readFile(join(happyRoot, ".happy", "agent", "media", sha256.slice(0, 2), sha256)),

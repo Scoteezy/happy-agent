@@ -50,12 +50,19 @@ export function imageMediaTypeForPath(path: string): string | undefined {
     return dot < 0 ? undefined : IMAGE_MEDIA_TYPES[name.slice(dot)];
 }
 
+/** One image read for the model, with the file's bytes exactly as stored. */
+export interface ComputeImageRead {
+    readonly image: ComputeImage;
+    readonly original: Uint8Array;
+}
+
 /**
  * Read a bounded image and remember it as a file the agent has seen.
  *
  * Without `maxDimension` the bytes are shown exactly as stored. With it, the image is decoded and
  * any side longer than the limit is scaled down, so a tool whose provider refuses larger images
- * never puts one into the history that every later request replays.
+ * never puts one into the history that every later request replays. The original bytes come back
+ * too, for showing the file itself to the user.
  */
 export async function readImageForModel(
     compute: Compute,
@@ -64,7 +71,7 @@ export async function readImageForModel(
     permissions: Parameters<Compute["fs"]["readFileBuffer"]>[0],
     path: string,
     options: { readonly maxDimension?: number } = {},
-): Promise<ComputeImage> {
+): Promise<ComputeImageRead> {
     const mediaType = imageMediaTypeForPath(path);
     if (mediaType === undefined) {
         throw new Error(`This is not a supported image file: ${path}`);
@@ -93,7 +100,7 @@ export async function readImageForModel(
               }
             : await fitImage(path, bytes, options.maxDimension);
     await reads.record(ctx, path, stat.mtimeMs);
-    return image;
+    return { image, original: bytes };
 }
 
 async function fitImage(

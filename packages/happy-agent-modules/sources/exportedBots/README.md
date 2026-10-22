@@ -137,7 +137,7 @@ following links, at most 10 of at most 32 MiB each. Pictures are shown to the mo
 are named by path.
 
 The reply is the text the run produced after its last tool call, together with the images it
-generated and the files it showed with `present_files` during the run. The tool calls are noted
+generated or read and the files it showed with `present_files` during the run. The tool calls are noted
 as they end, because tool-call hooks see only call-scoped stores, and their media is read from
 `ChatMediaModule.storedItems` when the run settles. The reply is then owed through the
 `exportedBots.reply` Durable Function, invoked in the settlement transaction and sent after commit

@@ -1,5 +1,6 @@
 import { getImageProcessor } from "../../impl/images/getImageProcessor.js";
 import { rgbaToThumbHash } from "../../impl/images/rgbaToThumbHash.js";
+import { readImageScale } from "./readImageScale.js";
 
 const MAX_DECODED_PIXELS = 40_000_000;
 
@@ -16,6 +17,8 @@ export interface MeasuredChatImage {
     readonly width: number;
     readonly height: number;
     readonly thumbhash: string;
+    /** Pixels per point from the file's density, when it is a Retina 2× or 3×. */
+    readonly scale?: number;
 }
 
 /**
@@ -49,10 +52,12 @@ export async function measureChatImage(
                 withoutEnlargement: true,
             },
         });
+        const scale = readImageScale(bytes, mimeType);
         return {
             mimeType,
             width: metadata.width,
             height: metadata.height,
+            ...(scale === undefined ? {} : { scale }),
             thumbhash: Buffer.from(
                 rgbaToThumbHash(placeholder.width, placeholder.height, placeholder.data),
             ).toString("base64"),

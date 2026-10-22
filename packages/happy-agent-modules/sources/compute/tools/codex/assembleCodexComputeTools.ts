@@ -1,5 +1,6 @@
 import type { AnyAgentTool } from "@slopus/happy-agent-base";
 
+import type { ChatMediaModule } from "../../../chatMedia/index.js";
 import type { Compute } from "../../Compute.js";
 import type { FileReadLog } from "../../../impl/FileReadLog.js";
 import { codexApplyPatchTool } from "./apply_patch.js";
@@ -18,12 +19,13 @@ export function assembleCodexComputeTools(
     compute: Compute,
     reads: FileReadLog,
     outputWaitsReleased: AbortSignal | undefined,
+    chatMedia: ChatMediaModule | undefined,
 ): readonly AnyAgentTool[] {
     return [
         codexExecCommandTool(compute),
         codexWriteStdinTool(compute, outputWaitsReleased),
         codexKillSessionTool(compute),
         codexApplyPatchTool(compute, reads),
-        codexViewImageTool(compute, reads),
+        codexViewImageTool(compute, reads, chatMedia),
     ];
 }

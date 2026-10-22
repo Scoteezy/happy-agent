@@ -96,6 +96,11 @@ on. These departures from that truth are deliberate:
   process lifecycle. Search uses bounded filesystem traversal and JavaScript regex, and media
   accepts filesystem images only. See [the Kimi tools](./tools/kimi/README.md) for bounds,
   supported arguments, and native differences. Provider reference descriptors remain unchanged.
+- **Image reads are shown to the user.** With chat media, Claude's `Read`, Codex's `view_image`,
+  and Kimi's `ReadMediaFile` snapshot the original file they read, not the model's resized copy,
+  and return a `media` presentation laid out in two columns. The model gets the same pixels as
+  before plus one sentence saying the user already sees the image. A snapshot that fails, or a
+  picture no chat client shows, leaves the read unchanged. Reviewer arrays never show anything.
 - **GLM's Claude-shaped Read returns text only.** Its model rejects image input, so the fixed
   GLM array refuses image paths before producing image blocks. See [the GLM tools](./tools/glm/README.md).
 
@@ -144,6 +149,13 @@ vendor-shaped skin over one shared helper in `impl/`, so behavior cannot drift b
   drains, so a waiting read answers at once with what it has.
 - `shouldReviewComputePath`, `canonicalComputePath`, `boundOutputText` — permission and bounding
   mechanics. `FileReadLog` is shared beyond this module and lives in the package's `sources/impl/`.
+
+One tool is not a vendor's at all. With chat media, `present_files` joins whichever vendor array
+the agent gets, Claude's, Codex's, Grok's, Kimi's, GLM's, or a foreign agent's empty one, because
+showing a file from the machine works the same for every model. It reads the files under the call's
+permissions, asks chat media to snapshot them, and, when the agent passes `layout` HTML, asks chat
+media to check it before any file is read. `showReadImage` is the shared step that shows an image a
+reading tool read.
 
 A vendor tool's own `impl/` directory holds only what is genuinely that vendor's: parsing Claude's
 shell IDs, Codex's patch format, Grok's task IDs. Nothing there is shared across vendors.

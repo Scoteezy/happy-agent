@@ -33,6 +33,47 @@ it. `present_files` has no such cost, so its snapshot failures fail the call.
 ## Live pages belong to artifacts
 
 Kirill replaced standalone page presentations with live-URL artifacts created through
-`create_artifact` with a URL. Chat Media owns only media snapshots and `present_files`, and its
-instructions direct new live pages to artifact creation. The client loads live pages through
-their recorded network, so every live create or update remains reviewed in Auto.
+`create_artifact` with a URL, and removed `show_page` entirely. Chat Media owns only media
+snapshots, and its instructions direct new live pages to artifact creation. The client loads live
+pages through their recorded network, so every live create or update remains reviewed in Auto.
+The legacy `page` presentation stays in the protocol and History's schema only because recorded
+calls still carry it.
+
+## What an agent reads, the user sees
+
+Kirill asked for every image an agent reads to appear in the chat as well, at full quality. The
+image readers snapshot the original file, not the scaled copy the model gets, and present it in two
+columns; the model's own output is unchanged apart from one sentence saying the user already sees
+it, and the instructions and `present_files` say not to present such an image again. The read is
+what the model asked for, so a snapshot that fails, or a picture no client shows, costs the read
+nothing: it simply shows no image. Reading a machine's files is compute's work, so `present_files`
+moved to compute with the readers, and chat media no longer depends on compute; that is what lets
+compute ask it to snapshot.
+
+## Agents lay out what they present, but clients never see HTML
+
+Kirill wanted agents to arrange presented files, such as a figure with its caption, a two-column
+grid, or one wide image, without any HTML reaching a client. `present_files` takes layout HTML that
+the daemon parses with parse5 into a typed tree; style values travel as normalized CSS strings
+that the client package's `mediaLayoutStyleValue` accepts, so daemon and clients check one grammar
+instead of keeping two serializers in step. Image generation presents in one column. Exported bots
+ignore layouts and send the items in order.
+
+## A layout is followed leniently, never refused
+
+The first version failed the call on anything outside a narrow allowlist. Kirill found that too
+strict: agents write ordinary CSS, and a refused layout cost the whole presentation. The grammar
+now follows CSS closely for layout properties, and a layout never fails the call: an invalid
+declaration, attribute, or `img` is dropped on its own, an unknown harmless tag is unwrapped, a
+dangerous tag goes with its contents, a file left out is appended, and an unusable layout is
+omitted. The result tells the model briefly what was ignored, so it can fix the next one. The
+security line did not move: nothing that loads a resource, positions outside the layout, names a
+colour, animates, or escapes is ever kept. Only a repeated path in `filepaths` stays an error,
+because it makes an `img src` ambiguous.
+
+## Images show at their natural size
+
+An image without explicit sizing shows at its natural size and only shrinks to fit; `width: 100%`
+fills. Screenshots from Retina displays have twice the pixels of their natural size, so items carry
+`scale` from the file's recorded density, and clients use it in every layout, automatic ones
+included.

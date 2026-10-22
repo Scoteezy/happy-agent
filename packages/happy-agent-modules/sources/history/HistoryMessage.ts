@@ -5,6 +5,7 @@ import {
     clientMetadataSchema,
     clientMetadataValueSchema,
     configurationBlockSchema,
+    mediaLayoutSchema,
     messageErrorSchema,
     messageFailureSchema,
     serviceNoticeSchema,
@@ -294,6 +295,8 @@ export const historyMediaItemSchema = Type.Union([
             width: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
             height: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
             thumbhash: Type.String({ minLength: 1, maxLength: 128 }),
+            /** Pixels per point from the file's density; absent on older records and for 1. */
+            scale: Type.Optional(Type.Number({ exclusiveMinimum: 1, maximum: 4 })),
         },
         { additionalProperties: false },
     ),
@@ -316,6 +319,8 @@ const historyMediaPresentationSchema = Type.Object(
     {
         type: Type.Literal("media"),
         items: Type.Array(historyMediaItemSchema, { minItems: 1, maxItems: 10 }),
+        /** How clients arrange the items; absent on records from before it and for automatic. */
+        layout: Type.Optional(mediaLayoutSchema),
     },
     { additionalProperties: false },
 );

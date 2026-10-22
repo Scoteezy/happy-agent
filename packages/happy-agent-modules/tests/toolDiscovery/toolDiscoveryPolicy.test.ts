@@ -8,7 +8,16 @@ import { assembleComputeTools } from "../../sources/compute/tools/assembleComput
 import { assembleReviewerTools } from "../../sources/compute/tools/assembleReviewerTools.js";
 
 const sourcesRoot = join(dirname(fileURLToPath(import.meta.url)), "../../sources");
-const eagerDirectories = ["codeMode", "compute", "userInput"];
+// Every vendor's machine tools are eager; present_files is a common tool and stays deferred.
+const eagerDirectories = [
+    "codeMode",
+    "compute/tools/claude",
+    "compute/tools/codex",
+    "compute/tools/grok",
+    "compute/tools/kimi",
+    "compute/tools/glm",
+    "userInput",
+];
 /** Prioritizing's whole tool array, which it receives without tool search. */
 const eagerFiles = ["spaces/tools/prioritizingTools.ts"];
 
@@ -65,7 +74,13 @@ describe("tool discovery policy", () => {
             const compute = {} as never;
             const reads = {} as never;
             const surfaces = [
-                assembleComputeTools(vendor, compute, reads, new AbortController().signal),
+                assembleComputeTools(
+                    vendor,
+                    compute,
+                    reads,
+                    new AbortController().signal,
+                    undefined,
+                ),
                 assembleReviewerTools(vendor, compute, reads, new AbortController().signal),
             ];
 

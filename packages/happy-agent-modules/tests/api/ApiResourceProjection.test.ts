@@ -14,7 +14,7 @@ import {
     toolResultPresentations,
 } from "../../sources/api/ApiMessageProjection.js";
 import { toolCallResource } from "../../sources/api/ApiToolPresentation.js";
-import type { HistoryMessage } from "../../sources/history/index.js";
+import { historyMessageSchema, type HistoryMessage } from "../../sources/history/index.js";
 
 describe("apiResourceVersion", () => {
     it("renders a PowerShell command through the existing terminal presentation", () => {
@@ -646,6 +646,104 @@ describe("messageResource", () => {
                 presentation: card,
             },
         ]);
+    });
+
+    it("passes a media layout through and shows a completed image read as media", () => {
+        const sha256 = "b".repeat(64);
+        const image = {
+            kind: "image" as const,
+            name: "shot.png",
+            mimeType: "image/png",
+            size: 120,
+            width: 4,
+            height: 3,
+            thumbhash: "AAAA",
+            scale: 2,
+        };
+        const tree = {
+            type: "tree" as const,
+            root: [
+                {
+                    type: "element" as const,
+                    tag: "figure" as const,
+                    style: { tone: "muted", gridTemplateColumns: "1fr 2fr" },
+                    children: [
+                        { type: "item" as const, index: 0, alt: "Shot" },
+                        { type: "text" as const, text: "Caption" },
+                        { type: "break" as const },
+                    ],
+                },
+            ],
+        };
+        const historyMessage = {
+            at: 100,
+            blocks: [
+                {
+                    type: "tool_call" as const,
+                    callId: "callread",
+                    name: "Read",
+                    arguments: { file_path: "/workspace/shot.png" },
+                },
+                {
+                    type: "tool_result" as const,
+                    callId: "callread",
+                    toolName: "Read",
+                    output: "Image: /workspace/shot.png",
+                    presentation: {
+                        type: "media" as const,
+                        items: [{ ...image, sha256 }],
+                        layout: { type: "columns" as const, columns: 2 as const },
+                    },
+                },
+                {
+                    type: "tool_call" as const,
+                    callId: "calllayout",
+                    name: "present_files",
+                    arguments: { filepaths: ["shot.png"], layout: "<figure>…</figure>" },
+                },
+                {
+                    type: "tool_result" as const,
+                    callId: "calllayout",
+                    toolName: "present_files",
+                    output: "Presented 1 file to the user in this chat.",
+                    presentation: {
+                        type: "media" as const,
+                        items: [{ ...image, sha256 }],
+                        layout: tree,
+                    },
+                },
+                {
+                    type: "tool_call" as const,
+                    callId: "callplain",
+                    name: "Read",
+                    arguments: { file_path: "/workspace/notes.md" },
+                },
+                {
+                    type: "tool_result" as const,
+                    callId: "callplain",
+                    toolName: "Read",
+                    output: "1\t# Notes",
+                },
+            ],
+            recordId: "message-layout",
+            role: "assistant" as const,
+        };
+        expect(Value.Check(historyMessageSchema, historyMessage)).toBe(true);
+
+        const content = messageResource(historyMessage, { omitToolData: true }).content as {
+            presentation?: unknown;
+        }[];
+        const presentations = content.map((block) => block.presentation);
+
+        expect(presentations).toEqual([
+            { type: "media", items: [image], layout: { type: "columns", columns: 2 } },
+            { type: "media", items: [image], layout: tree },
+            { type: "exploration", operations: [{ kind: "read", name: "/workspace/notes.md" }] },
+        ]);
+        expect(JSON.stringify(presentations)).not.toContain(sha256);
+        for (const presentation of presentations) {
+            expect(Value.Check(toolPresentationSchema, presentation)).toBe(true);
+        }
     });
 
     it("omits raw data only after projecting a presentation", () => {

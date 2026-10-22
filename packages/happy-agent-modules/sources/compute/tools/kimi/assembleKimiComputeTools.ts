@@ -1,4 +1,5 @@
 import type { AnyAgentTool } from "@slopus/happy-agent-base";
+import type { ChatMediaModule } from "../../../chatMedia/index.js";
 import type { Compute } from "../../Compute.js";
 import type { FileReadLog } from "../../../impl/FileReadLog.js";
 import { kimiBashTool } from "./Bash.js";
@@ -15,6 +16,7 @@ import { kimiTaskStopTool } from "./TaskStop.js";
 export function assembleKimiComputeTools(
     compute: Compute,
     reads: FileReadLog,
+    chatMedia: ChatMediaModule | undefined,
 ): readonly AnyAgentTool[] {
     return [
         kimiBashTool(compute),
@@ -23,7 +25,7 @@ export function assembleKimiComputeTools(
         kimiEditTool(compute, reads),
         kimiGlobTool(compute),
         kimiGrepTool(compute),
-        kimiReadMediaFileTool(compute, reads),
+        kimiReadMediaFileTool(compute, reads, chatMedia),
         kimiTaskOutputTool(compute),
         kimiTaskInputTool(compute),
         kimiTaskStopTool(compute),

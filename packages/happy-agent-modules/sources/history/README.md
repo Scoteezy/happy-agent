@@ -160,10 +160,13 @@ module, under these keys:
   used only when a block arrives without an active `pending_inference_id` or is recovered from an
   interrupted run before `afterInferenceTransact` or `afterAgentSettledTransact` flushes it.
 
-Per-call presentation state uses that call's scoped `scope.runKV` instead: `tool_name` is written by
-`beforeToolCallTransact`, and `tool_presentation` — a bounded `file_diff`, `media`, or `artifact`
-presentation the tool returned — is written after successful execution. Both are
-read by `afterToolCallTransact`; the run store clears them when the agent settles.
+Per-call presentation state is kept apart from the response: `tool_name` is written to that call's
+scoped `scope.runKV` by `beforeToolCallTransact`, and `tool_presentation.<callId>` — a bounded
+`file_diff`, `media`, or `artifact` presentation the tool returned — is written to
+`scope.historyKV` after successful execution. Both are read by `afterToolCallTransact`, which
+deletes the presentation as it records it; the run store clears the name when the agent settles.
+The presentation cannot use the call's run store, because a transactional tool commits its result
+before `afterToolCall` runs, and the commit ends that call's stores.
 
 Sub-agent creation is different: its resolved identity must exist before execution creates the
 child, not only with a successful result. Its bounded `spawnPresentation` stays on the original

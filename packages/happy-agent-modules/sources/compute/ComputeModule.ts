@@ -32,6 +32,7 @@ import { detach, mapAsyncLock, type Context, type MapAsyncLock } from "@steve.ki
 import type { Duplex } from "node:stream";
 
 import type { BotSettingsModule } from "../botSettings/index.js";
+import type { ChatMediaModule } from "../chatMedia/index.js";
 import type { ConfigModule } from "../config/index.js";
 import type { RunnersModule } from "../runners/index.js";
 import { FileReadLog } from "../impl/FileReadLog.js";
@@ -61,6 +62,7 @@ import {
 } from "./impl/resolveComputePath.js";
 import { shouldReviewComputePath } from "./impl/shouldReviewComputePath.js";
 import { assembleComputeTools } from "./tools/assembleComputeTools.js";
+import { presentFilesTool } from "./tools/present_files.js";
 import { assembleReviewerTools } from "./tools/assembleReviewerTools.js";
 
 /**
@@ -256,6 +258,7 @@ export class ComputeModule implements AgentModule {
     readonly #secrets: SecretsModule;
     readonly #runners: RunnersModule | undefined;
     readonly #botSettings: BotSettingsModule | undefined;
+    readonly #chatMedia: ChatMediaModule | undefined;
     /** Present only for the named alternate construction used by scripted machines. */
     #provider: HostComputeProvider | undefined;
     readonly #computes = new Map<string, CachedCompute>();
@@ -297,17 +300,22 @@ export class ComputeModule implements AgentModule {
      * @param botSettings Where a bot runs the agents it governs. A bot that chooses Docker gets
      * each governed agent's machine built in a container of its image, on the machine that holds
      * the agent's folder. Without this module, no agent's machine is chosen by a bot.
+     * @param chatMedia Where files the agent shows the user are kept. With it, every agent gets
+     * `present_files`, and an image the agent reads is shown to the user as well. Without it,
+     * nothing on the machine is shown in the chat.
      */
     constructor(
         config: ConfigModule,
         secrets: SecretsModule,
         runners?: RunnersModule,
         botSettings?: BotSettingsModule,
+        chatMedia?: ChatMediaModule,
     ) {
         this.#config = config;
         this.#secrets = secrets;
         this.#runners = runners;
         this.#botSettings = botSettings;
+        this.#chatMedia = chatMedia;
         this.#provider = undefined;
     }
 
@@ -325,12 +333,13 @@ export class ComputeModule implements AgentModule {
         provider: HostComputeProvider,
         runners?: RunnersModule,
         botSettings?: BotSettingsModule,
+        chatMedia?: ChatMediaModule,
     ): ComputeModule {
         const candidate = { id: provider.id, create: provider.create };
         if (!Value.Check(hostComputeProviderSchema, candidate)) {
             throw new Error("The host compute provider is invalid.");
         }
-        const module = new ComputeModule(config, secrets, runners, botSettings);
+        const module = new ComputeModule(config, secrets, runners, botSettings, chatMedia);
         module.#provider = provider;
         return module;
     }
@@ -877,12 +886,17 @@ export class ComputeModule implements AgentModule {
             const compute = await this.resolve(ctx, scope.agent.id);
             if (compute === undefined) return [];
             const reads = new FileReadLog(scope.kv, this.#readLocks, scope.agent.id);
-            return assembleComputeTools(
+            const vendorTools = assembleComputeTools(
                 vendorFor(scope),
                 compute,
                 reads,
                 this.#outputWaitsFor(compute),
+                this.#chatMedia,
             );
+            // Showing a file is the same for every model, so it joins whichever array was chosen.
+            return this.#chatMedia === undefined
+                ? vendorTools
+                : [...vendorTools, presentFilesTool(compute, this.#chatMedia)];
         },
 
         beforeInferenceTransact: async (ctx: Context, scope: AgentModuleScope): Promise<void> => {

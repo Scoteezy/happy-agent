@@ -26,7 +26,7 @@ export class ScriptedGeminiModule extends GeminiModule {
     readonly #fetch: typeof fetch | undefined;
 
     constructor(config: ConfigModule, compute: ComputeModule, transport?: typeof fetch) {
-        super(config, compute, new ChatMediaModule(config, compute, new HistoryModule()));
+        super(config, compute, new ChatMediaModule(config, new HistoryModule()));
         this.#fetch = transport;
     }
 

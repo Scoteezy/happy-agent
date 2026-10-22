@@ -154,6 +154,7 @@ const EXECUTION_ANCHOR_KEY = "execution_anchor";
 /** Set once a run has overflowed its context and Agent Base reset it to retry. */
 const CONTEXT_RESET_KEY = "context_reset";
 const TOOL_NAME_KEY = "tool_name";
+/** Prefix of the history-store key holding one call's presentation until its result is recorded. */
 const TOOL_PRESENTATION_KEY = "tool_presentation";
 const toolOutcomePresentationSchema = Type.Object(
     { presentation: historyToolPresentationSchema },
@@ -1263,10 +1264,10 @@ export class HistoryModule implements AgentModule {
         const toolName = Value.Check(historyToolResultBlockSchema.properties.toolName, storedName)
             ? storedName
             : "Invalid tool name";
+        const presentationKey = toolPresentationKey(result.callId);
         const storedPresentation =
-            result.isError === true
-                ? undefined
-                : await scope.runKV.read(ctx, TOOL_PRESENTATION_KEY);
+            result.isError === true ? undefined : await scope.historyKV.read(ctx, presentationKey);
+        await scope.historyKV.delete(ctx, presentationKey);
         if (
             storedPresentation !== undefined &&
             !Value.Check(historyToolPresentationSchema, storedPresentation)
@@ -2612,10 +2613,12 @@ export class HistoryModule implements AgentModule {
         },
 
         /**
-         * Keep a successful tool result's bounded presentation in this call's durable run KV.
-         * The transactional result hook below then records it beside the result itself. If the
-         * process stops between these hooks, the call-scoped value survives for result recovery;
-         * failed results deliberately ignore it.
+         * Keep a successful tool result's bounded presentation in the durable history store, keyed
+         * by its call. The transactional result hook below then records it beside the result
+         * itself and removes it. If the process stops between these hooks, the value survives for
+         * result recovery; failed results deliberately ignore it. The call's own run store would
+         * not do: a transactional tool commits its result before this hook runs, which ends the
+         * call's stores, so its presentation would be lost.
          */
         afterToolCall: async (
             ctx: Context,
@@ -2629,9 +2632,9 @@ export class HistoryModule implements AgentModule {
             ) {
                 return;
             }
-            await scope.runKV.write(
+            await scope.historyKV.write(
                 ctx,
-                TOOL_PRESENTATION_KEY,
+                toolPresentationKey(outcome.callId),
                 structuredClone(outcome.result.presentation),
             );
         },
@@ -3431,4 +3434,8 @@ function toStoreQuery(query: HistoryQuery): HistoryStoreQuery {
         ...(query.query === undefined ? {} : { query: query.query }),
         ...(query.roles === undefined ? {} : { roles: query.roles }),
     };
+}
+
+function toolPresentationKey(callId: string): string {
+    return `${TOOL_PRESENTATION_KEY}.${callId}`;
 }

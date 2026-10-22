@@ -1,15 +1,10 @@
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 
-import type {
-    AgentModule,
-    AgentModuleHooks,
-    AgentModuleScope,
-    AnyAgentTool,
-} from "@slopus/happy-agent-base";
+import type { MediaLayout } from "@slopus/happy-agent-client";
+import type { AgentModule, AgentModuleHooks } from "@slopus/happy-agent-base";
 import type { Context } from "@steve.kite/stdlib";
 
-import type { ComputeModule } from "../compute/index.js";
 import type { ConfigModule } from "../config/index.js";
 import type { HistoryModule } from "../history/index.js";
 import { quoteVisibleExact } from "../impl/quoteVisibleExact.js";
@@ -21,44 +16,49 @@ import {
     type ChatMediaPresentation,
     type ChatMediaStoredItem,
 } from "./ChatMedia.js";
-import { chatMediaCandidate, chatMediaName } from "./impl/chatMediaKind.js";
+import {
+    chatMediaCandidate,
+    chatMediaName,
+    type ChatMediaCandidate,
+} from "./impl/chatMediaKind.js";
 import { measureChatImage } from "./impl/measureChatImage.js";
+import { parseMediaLayout, type ParsedMediaLayout } from "./impl/parseMediaLayout.js";
 import { writeChatMediaContent } from "./impl/writeChatMediaContent.js";
-import { presentFilesTool } from "./tools/present_files.js";
 
 /** What every agent is told about media it shows in a chat. */
 export const CHAT_MEDIA_INSTRUCTIONS =
-    'Images you generate, artifacts you create or update, and files you show with present_files appear inline in this chat for the user automatically. Do not paste their paths or links, and do not describe them as if the user cannot see them. They appear only in this chat\'s history, not in any parent or child chat: when you work for another agent, its user does not see what you showed here, so give that agent the file paths or artifact IDs it needs; the parent should link text files and present only media, and mention artifacts by their reference tags. Someone following this chat from a phone sees only their titles, so when what you showed answers the request, also give its main point in a sentence of your reply. Use present_files for images, videos, PDFs, and files the user should receive or download, including when the reader is not on this machine. Link text, code, and Markdown files instead, so the link opens the live file in the viewer. For a running web page such as your dev server, use create_artifact with type "html" and url.';
+    'Images you generate or read, artifacts you create or update, and files you show with present_files appear inline in this chat for the user automatically. An image you have read with a file-reading tool is already shown, so do not present it again. Do not paste their paths or links, and do not describe them as if the user cannot see them. They appear only in this chat\'s history, not in any parent or child chat: when you work for another agent, its user does not see what you showed here, so give that agent the file paths or artifact IDs it needs; the parent should link text files and present only media, and mention artifacts by their reference tags. Someone following this chat from a phone sees only their titles, so when what you showed answers the request, also give its main point in a sentence of your reply. Use present_files for images, videos, PDFs, and files the user should receive or download, including when the reader is not on this machine. Link text, code, and Markdown files instead, so the link opens the live file in the viewer. For a running web page such as your dev server, use create_artifact with type "html" and url.';
 
 /**
- * Media shown inline in a chat: generated images and files an agent presents.
+ * Media shown inline in a chat: generated images, images an agent reads, and files it presents.
  *
  * History never holds the bytes. Each item is snapshotted once into the daemon's private,
  * content-addressed media folder, so later edits to or removal of its source change nothing the
  * chat shows, and History records only the item's measurements and digest with the call that
- * showed it. A route then serves an item by that call's identity and the item's position.
+ * showed it. A route then serves an item by that call's identity and the item's position. The
+ * tools that read files from an agent's machine belong to compute, which asks this module to
+ * snapshot what they show.
  */
 export class ChatMediaModule implements AgentModule {
     readonly name = "chat-media";
 
     /** The shape of a tool result's `presentation`, for tools of other modules to declare. */
     static readonly presentationSchema = chatMediaPresentationSchema;
+    /** How many items one call may show. */
+    static readonly maxItems = MAX_CHAT_MEDIA_ITEMS;
+    /** The most one call may show in all, in bytes. */
+    static readonly maxCallBytes = MAX_CHAT_MEDIA_CALL_BYTES;
 
     readonly #config: ConfigModule;
-    readonly #compute: ComputeModule;
     readonly #history: HistoryModule;
 
-    constructor(config: ConfigModule, compute: ComputeModule, history: HistoryModule) {
+    constructor(config: ConfigModule, history: HistoryModule) {
         this.#config = config;
-        this.#compute = compute;
         this.#history = history;
     }
 
     readonly #hooks: AgentModuleHooks = {
         instructions: () => CHAT_MEDIA_INSTRUCTIONS,
-        tools: (_ctx: Context, scope: AgentModuleScope): readonly AnyAgentTool[] => [
-            presentFilesTool(this, this.#compute, scope.agent.id),
-        ],
     };
 
     readonly beforeStart = (): AgentModuleHooks => this.#hooks;
@@ -91,66 +91,34 @@ export class ChatMediaModule implements AgentModule {
         return item;
     }
 
-    /** Wrap snapshotted items as the presentation a tool result carries. */
-    presentation(items: readonly ChatMediaItem[]): ChatMediaPresentation {
-        if (items.length === 0 || items.length > MAX_CHAT_MEDIA_ITEMS) {
-            throw new Error(`A call presents one to ${String(MAX_CHAT_MEDIA_ITEMS)} items.`);
-        }
-        return { type: "media", items: [...items] };
+    /**
+     * What a file of this name would be shown as, and the most it may be, before any byte of it
+     * is read. Its bytes decide the rest when it is snapshotted.
+     */
+    limit(name: string): ChatMediaCandidate {
+        return chatMediaCandidate(chatMediaName(name));
     }
 
     /**
-     * Read files from the agent's machine under the call's permissions and snapshot each. Every
-     * file is measured before it is read, so a directory, an empty file, or one over its limit is
-     * refused without reading it.
+     * Turn layout HTML an agent wrote for files it presents into the typed tree clients render.
+     * This never fails: what the layout subset lacks is left out and reported, files the layout
+     * does not place are added after it, and a layout that places none of them is not used.
+     * `filepaths` are the call's paths exactly as written; an `<img src>` naming one of them
+     * becomes that item's index.
      */
-    async presentFiles(
-        ctx: Context,
-        agentId: string,
-        filepaths: readonly string[],
-    ): Promise<{ readonly items: readonly ChatMediaItem[] }> {
-        if (filepaths.length === 0 || filepaths.length > MAX_CHAT_MEDIA_ITEMS) {
-            throw new Error(`Present one to ${String(MAX_CHAT_MEDIA_ITEMS)} files at a time.`);
+    parseLayout(html: string, filepaths: readonly string[]): ParsedMediaLayout {
+        return parseMediaLayout(html, filepaths);
+    }
+
+    /**
+     * Wrap snapshotted items as the presentation a tool result carries. Without a layout, a
+     * client arranges them automatically.
+     */
+    presentation(items: readonly ChatMediaItem[], layout?: MediaLayout): ChatMediaPresentation {
+        if (items.length === 0 || items.length > MAX_CHAT_MEDIA_ITEMS) {
+            throw new Error(`A call presents one to ${String(MAX_CHAT_MEDIA_ITEMS)} items.`);
         }
-        const compute = await this.#compute.resolve(ctx, agentId);
-        if (compute === undefined) {
-            throw new Error("This conversation has no machine to present files from.");
-        }
-        const permissions = this.#compute.permissionsForContext(ctx);
-        const sources: { readonly path: string; readonly name: string; readonly size: number }[] =
-            [];
-        let total = 0;
-        for (const filepath of filepaths) {
-            const path = this.#compute.resolvePath(compute, filepath);
-            const name = chatMediaName(this.#compute.pathName(path));
-            const facts = await compute.fs.stat(permissions, path);
-            if (!facts.isFile) throw new Error(`${quoteVisibleExact(filepath)} is not a file.`);
-            if (facts.size === 0) throw new Error(`${quoteVisibleExact(filepath)} is empty.`);
-            const candidate = chatMediaCandidate(name);
-            if (facts.size > candidate.maxBytes) {
-                throw new Error(
-                    `${quoteVisibleExact(filepath)} is larger than the ${formatMiB(candidate.maxBytes)} a presented ${candidate.kind} may be.`,
-                );
-            }
-            total += facts.size;
-            if (total > MAX_CHAT_MEDIA_CALL_BYTES) {
-                throw new Error(
-                    `One call may present at most ${formatMiB(MAX_CHAT_MEDIA_CALL_BYTES)} in all.`,
-                );
-            }
-            sources.push({ path, name, size: facts.size });
-        }
-        const items: ChatMediaItem[] = [];
-        for (const source of sources) {
-            const bytes = await compute.fs.readFileBuffer(permissions, source.path, {
-                maxBytes: chatMediaCandidate(source.name).maxBytes,
-            });
-            if (bytes.byteLength === 0) {
-                throw new Error(`${quoteVisibleExact(source.name)} is empty.`);
-            }
-            items.push(await this.snapshot(bytes, source.name));
-        }
-        return { items };
+        return { type: "media", items: [...items], ...(layout === undefined ? {} : { layout }) };
     }
 
     /**

@@ -8,23 +8,21 @@ import type { HistoryMessage } from "../../sources/history/index.js";
 import { messageResource } from "../../sources/api/ApiMessageProjection.js";
 import { FakeCompute } from "../compute/support/FakeCompute.js";
 import { computeToolset } from "../compute/support/computeTools.js";
-import { scriptedComputeModule, testConfig } from "../support/computeModule.js";
+import { testConfig } from "../support/computeModule.js";
 import { moduleDatabase } from "../support/moduleDatabase.js";
 import { resolveModuleHooks } from "../support/moduleHooks.js";
 
 function scopeFor(values: Map<string, unknown>): AgentModuleScope {
-    return {
-        agent: { id: "agent-a", provider: "codex" },
-        runKV: {
-            delete: async (_ctx: unknown, key: string) => {
-                values.delete(key);
-            },
-            read: async (_ctx: unknown, key: string) => values.get(key),
-            write: async (_ctx: unknown, key: string, value: unknown) => {
-                values.set(key, structuredClone(value));
-            },
+    const store = {
+        delete: async (_ctx: unknown, key: string) => {
+            values.delete(key);
         },
-    } as never;
+        read: async (_ctx: unknown, key: string) => values.get(key),
+        write: async (_ctx: unknown, key: string, value: unknown) => {
+            values.set(key, structuredClone(value));
+        },
+    };
+    return { agent: { id: "agent-a", provider: "codex" }, historyKV: store, runKV: store } as never;
 }
 
 describe("History tool presentations", () => {
@@ -254,11 +252,7 @@ describe("History tool presentations", () => {
             mtimeMs: 1,
         });
         const history = new HistoryModule();
-        const chatMedia = new ChatMediaModule(
-            testConfig,
-            scriptedComputeModule(async () => compute),
-            history,
-        );
+        const chatMedia = new ChatMediaModule(testConfig, history);
         const database = moduleDatabase(history.migrations, "history-media-presentation");
         await database.ready;
         const ctx = database.context;
@@ -266,11 +260,9 @@ describe("History tool presentations", () => {
         const values = new Map<string, unknown>();
         const scope = scopeFor(values);
         try {
-            const [present] = await (
-                await resolveModuleHooks(ctx, chatMedia)
-            ).tools!(ctx, {
-                agent: { id: "agent-a" },
-            } as never);
+            const present = (
+                await computeToolset(ctx, compute, { agentId: "agent-a", chatMedia })
+            ).tool("present_files");
             const argumentsValue = { filepaths: ["note.txt"] };
             const result = await present!.execute(ctx, argumentsValue, {
                 id: "callpresent",

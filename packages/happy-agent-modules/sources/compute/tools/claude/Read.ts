@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import { defineAgentTool } from "@slopus/happy-agent-base";
 
+import { ChatMediaModule } from "../../../chatMedia/index.js";
 import type { Compute } from "../../Compute.js";
 import { boundOutputText } from "../../impl/boundOutputText.js";
 import { computePermissionsForContext } from "../../impl/computePermissionsForContext.js";
@@ -14,6 +15,7 @@ import {
 } from "../../impl/readImage.js";
 import { resolveComputePath } from "../../impl/resolveComputePath.js";
 import { shouldReviewComputePath } from "../../impl/shouldReviewComputePath.js";
+import { READ_IMAGE_SHOWN_NOTICE, showReadImage } from "../../impl/showReadImage.js";
 
 /** How many lines one read returns when the model does not ask for fewer. */
 const MAX_LINES_TO_READ = 2_000;
@@ -67,6 +69,8 @@ const claudeReadResultSchema = Type.Union([
             outcome: Type.Literal("image"),
             path: Type.String(),
             image: computeImageSchema,
+            /** The original file shown to the user; absent when it could not be shown. */
+            presentation: Type.Optional(ChatMediaModule.presentationSchema),
         },
         exact,
     ),
@@ -80,17 +84,25 @@ const claudeReadResultSchema = Type.Union([
     ),
 ]);
 
-/** Claude's `Read`: a numbered page of a file, an image, or a plain refusal to parse a format. */
-export function claudeReadTool(compute: Compute, reads: FileReadLog) {
-    return createClaudeReadTool(compute, reads, true);
+/**
+ * Claude's `Read`: a numbered page of a file, an image, or a plain refusal to parse a format.
+ * With chat media, an image it reads is shown to the user as well.
+ */
+export function claudeReadTool(compute: Compute, reads: FileReadLog, chatMedia?: ChatMediaModule) {
+    return createClaudeReadTool(compute, reads, true, chatMedia);
 }
 
 /** The same Claude-shaped reader for GLM's text-only fixed tool array. */
 export function claudeTextReadTool(compute: Compute, reads: FileReadLog) {
-    return createClaudeReadTool(compute, reads, false);
+    return createClaudeReadTool(compute, reads, false, undefined);
 }
 
-function createClaudeReadTool(compute: Compute, reads: FileReadLog, images: boolean) {
+function createClaudeReadTool(
+    compute: Compute,
+    reads: FileReadLog,
+    images: boolean,
+    chatMedia: ChatMediaModule | undefined,
+) {
     return defineAgentTool({
         name: "Read",
         defer: false,
@@ -163,10 +175,21 @@ function createClaudeReadTool(compute: Compute, reads: FileReadLog, images: bool
                     };
                 }
                 const permissions = computePermissionsForContext(ctx);
-                const image = await readImageForModel(compute, reads, ctx, permissions, filePath, {
-                    maxDimension: MAX_IMAGE_DIMENSION,
-                });
-                return { outcome: "image" as const, path: filePath, image };
+                const { image, original } = await readImageForModel(
+                    compute,
+                    reads,
+                    ctx,
+                    permissions,
+                    filePath,
+                    { maxDimension: MAX_IMAGE_DIMENSION },
+                );
+                const presentation = await showReadImage(ctx, chatMedia, original, filePath);
+                return {
+                    outcome: "image" as const,
+                    path: filePath,
+                    image,
+                    ...(presentation === undefined ? {} : { presentation }),
+                };
             }
 
             const page = await readComputeTextFile(compute, reads, ctx, {
@@ -196,13 +219,17 @@ function createClaudeReadTool(compute: Compute, reads: FileReadLog, images: bool
         toLLM: (result) => {
             if (result.outcome === "image") {
                 const resized = result.image.resized;
+                const described =
+                    resized === undefined
+                        ? `Image: ${result.path}`
+                        : `Image: ${result.path} (original ${String(resized.original_width)}×${String(resized.original_height)}, shown at ${String(resized.width)}×${String(resized.height)})`;
                 return [
                     {
                         type: "text",
                         text:
-                            resized === undefined
-                                ? `Image: ${result.path}`
-                                : `Image: ${result.path} (original ${String(resized.original_width)}×${String(resized.original_height)}, shown at ${String(resized.width)}×${String(resized.height)})`,
+                            result.presentation === undefined
+                                ? described
+                                : `${described}\n${READ_IMAGE_SHOWN_NOTICE}`,
                     },
                     { type: "image", data: result.image.data, mimeType: result.image.mime_type },
                 ];

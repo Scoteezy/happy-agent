@@ -1,16 +1,19 @@
 # Chat media
 
 Images, videos, documents, and other files shown inline in a chat: images the generation tools
-make, and files an agent presents with `present_files`.
+make, images an agent reads, and files it presents with `present_files`.
 
 ```ts
-const chatMedia = new ChatMediaModule(config, computeModule, history);
+const chatMedia = new ChatMediaModule(config, history);
+const computeModule = new ComputeModule(config, secrets, runners, botSettings, chatMedia);
 const imageGeneration = new ImageGenerationModule(config, chatMedia);
 const gemini = new GeminiModule(config, computeModule, chatMedia);
 ```
 
-Configuration owns the private media folder, compute owns the agent's machine and its file
-boundary, and History owns the durable call record an item is served by.
+Configuration owns the private media folder and History owns the durable call record an item is
+served by. Reading files from the agent's machine is compute's work, so the tools that do it,
+`present_files` and the image readers, belong to compute and ask this module to snapshot what they
+show. Chat media therefore comes before compute, and depends on nothing that reads a machine.
 
 ## What is stored where
 
@@ -33,24 +36,59 @@ media type, and a base64 ThumbHash. Anything else that claims to be an image is 
 `video/*` names are videos, PDFs are documents, and everything else is a file. Content already
 held under its digest is not written again; new content is published by rename.
 
-`presentation(items)` wraps items as the tool result's `presentation`, which History records
-with the successful call. The API removes `sha256` from the public presentation and serves an item
+`presentation(items, layout?)` wraps items as the tool result's `presentation`, which History
+records with the successful call. The API removes `sha256` from the public presentation and serves an item
 through `storedItem(ctx, agentId, callId, index)`, which reads the recorded presentation through
 History and returns the snapshot path only when the snapshot is still present.
 `storedItems(ctx, agentId, callId)` returns every item of one call whose snapshot is still
 present; the exported bots module sends those with an exported bot's reply.
 
+## Layouts
+
+A presentation's optional `layout` tells clients how to arrange its items. Absent, a client uses
+its automatic layout. Image generation asks for one column, image reads for two, and
+`present_files` for none unless the agent writes one:
+
+```text
+layout HTML ──parse5──▶ DOM ──lenient walk──▶ { type: "tree", root: MediaLayoutNode[] }
+(agent-written)                │                 element · item(index) · text · break
+                               ├─ style ──mediaLayoutStyleValue per declaration──▶ MediaLayoutStyle
+                               ├─ what it could not use ──▶ ignored[]  (reported to the model)
+                               └─ files it left out ──▶ appended[]     (placed at the end)
+```
+
+`parseLayout(html, filepaths)` parses with parse5, so tags, attributes, and entities mean what a
+browser would make of them, and keeps only what the protocol can carry. A layout never fails the
+call; whatever is dropped is listed in `ignored` so `present_files` can tell the model in one
+sentence. The kept tags are `div`, `section`, `figure`, `figcaption`, `p`, `span`, `strong`, `em`,
+and `code`, plus `img` as an item and `br` as a break. An unknown tag is unwrapped and its text
+kept; a tag that embeds, loads, or runs something, such as `script`, `style`, `iframe`, `svg`, or
+a form control, is dropped with its contents, as is anything parse5 puts in `head`. The
+attributes are `style` everywhere but `br`, and `src` and `alt` on `img`. Each `img src` must equal
+one of the call's `filepaths` exactly and becomes that item's index; an `img` with any other `src`,
+or a second one for the same file, is dropped. Files the layout leaves out are appended at the end,
+so every item is placed exactly once, and a layout that places none is dropped whole.
+
+`style` declarations are checked one at a time against the client's `mediaLayoutStyleValue`, the
+same grammar every client checks again: a closed subset of CSS covering flexbox, grid, sizing,
+spacing, alignment, `object-fit`, and text, with `tone` and named font sizes instead of colours.
+An unknown property or a value outside its grammar drops that declaration only. A style holding a
+backslash or a quote is dropped whole, which keeps escapes, strings, and `url()` out. The input is
+at most 32 KiB, elements deeper than 12 are unwrapped, and a tree holds at most 500 nodes and
+8,000 characters of text and alt. Clients receive only the typed tree, never HTML.
+
+An image item carries `scale` when its PNG `pHYs`, JPEG JFIF, or EXIF density says 144 or 216 DPI,
+so a Retina screenshot shows at its natural CSS size. Clients show an image without explicit
+sizing at that natural size at most, in every layout.
+
 ## The tools
 
-`present_files` is a common tool every agent receives. It takes `filepaths`, one to ten paths on
-the agent's machine, and reads them through compute under the call's permissions, so runners and
-containers work like any other file tool. Each file is measured before it is read: a directory, an
-empty file, an image over 32 MiB, a video over 256 MiB, another file over 64 MiB, or more than
-256 MiB in one call fails the call. A path outside the workspace is reviewed in Auto and runs with
-Full access only when allowed, through compute's shared path-boundary helpers. The tool is
-durable: a repeated call reads the same files and records the same items.
+This module owns no tools. Compute gives every agent with a machine `present_files`, which takes
+`filepaths`, one to ten paths, and an optional `layout`, measures every file before reading it, and snapshots each through this module; the image
+readers snapshot the original image they read the same way, and show nothing when that fails.
 
 Live pages belong to the Artifacts module. Use `create_artifact` with `type: "html"` and `url`.
 
-Every agent is told, through this module's instructions, that generated images, artifact cards,
-and presented files appear inline in its own chat only, not in parent or child chats.
+Every agent is told, through this module's instructions, that generated images, images it reads,
+artifact cards, and presented files appear inline in its own chat only, not in parent or child
+chats, and that an image it has read is already shown.
