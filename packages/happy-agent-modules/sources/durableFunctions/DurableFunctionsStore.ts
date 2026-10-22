@@ -13,6 +13,16 @@ import {
 
 export const MAX_DURABLE_FUNCTION_RECOVERY_BATCH = 1_000;
 
+/** SQLite insertion order is storage metadata, never part of invoke or executor envelopes. */
+export const storedDurableFunctionCallSchema = Type.Composite(
+    [
+        durableFunctionCallSchema,
+        Type.Object({ sequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }),
+    ],
+    { additionalProperties: false },
+);
+export type StoredDurableFunctionCall = Static<typeof storedDurableFunctionCallSchema>;
+
 export const durableFunctionContextSchema = Type.Unsafe<Context>(
     Type.Object({}, { additionalProperties: true }),
 );
@@ -28,7 +38,7 @@ export const durableFunctionRecoveryQuerySchema = Type.Union([
         {
             limit: durableFunctionRecoveryLimitSchema,
             afterCreatedAt: durableFunctionTimestampSchema,
-            afterId: durableFunctionCallIdSchema,
+            afterSequence: storedDurableFunctionCallSchema.properties.sequence,
         },
         { additionalProperties: false },
     ),
@@ -44,16 +54,16 @@ export const durableFunctionsStoreSchema = Type.Object(
         ),
         readCall: Type.Function(
             [durableFunctionContextSchema, durableFunctionCallIdSchema],
-            Type.Promise(Type.Union([durableFunctionCallSchema, Type.Undefined()])),
+            Type.Promise(Type.Union([storedDurableFunctionCallSchema, Type.Undefined()])),
         ),
         readCallByOperationId: Type.Function(
             [durableFunctionContextSchema, durableFunctionOperationIdSchema],
-            Type.Promise(Type.Union([durableFunctionCallSchema, Type.Undefined()])),
+            Type.Promise(Type.Union([storedDurableFunctionCallSchema, Type.Undefined()])),
         ),
         listCalls: Type.Function(
             [durableFunctionContextSchema, durableFunctionRecoveryQuerySchema],
             Type.Promise(
-                Type.Array(durableFunctionCallSchema, {
+                Type.Array(storedDurableFunctionCallSchema, {
                     maxItems: MAX_DURABLE_FUNCTION_RECOVERY_BATCH,
                 }),
             ),
@@ -103,5 +113,13 @@ export function assertDurableFunctionsStore(
 export function assertDurableFunctionCall(value: unknown): asserts value is DurableFunctionCall {
     if (!Value.Check(durableFunctionCallSchema, value)) {
         throw new Error("Durable Functions storage returned an invalid pending call.");
+    }
+}
+
+export function assertStoredDurableFunctionCall(
+    value: unknown,
+): asserts value is StoredDurableFunctionCall {
+    if (!Value.Check(storedDurableFunctionCallSchema, value)) {
+        throw new Error("Durable Functions storage returned an invalid ordered pending call.");
     }
 }

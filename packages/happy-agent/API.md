@@ -221,7 +221,7 @@ none of the mobile credentials. See "Credentials on the connector's socket".
 
 All routes are prefixed with `/v0`. Independently of the path version, every daemon advertises
 its identity through the health endpoint as a single `version` object: a numeric `protocol`
-(integer, currently 30) and the `daemon` product version string. Protocol versions from 22 onward
+(integer, currently 31) and the `daemon` product version string. Protocol versions from 22 onward
 are backward-compatible and additive. Clients support that compatibility range for existing
 capabilities instead of requiring equality with their own protocol number. A client may require
 a newer protocol for a capability it needs and must explain that an upgrade is required when the
@@ -274,6 +274,11 @@ messages, the optional `retrying` field on agents, and the failed-turn `retry` a
 routes, all described under [Typed failures](#typed-failures). A client that offers those actions
 requires protocol 30 or newer. With an older compatible daemon, `failure` is absent and the
 client renders the error text and legacy `error` details as before; the two routes answer `404`.
+
+Protocol 31 guarantees default team membership for Surfaces and the independent per-person
+`surfaces.autoJoin` preference described under Surface catalog and members. Clients that offer
+this preference require protocol 31 or newer: older daemons may accept the opaque setting without
+applying a membership policy. Existing Surface and generic user-settings requests remain valid.
 
 Account provenance, configuration history blocks, and structured error details are additive output
 and do not increment the protocol version. Clients tolerate their absence and older clients keep
@@ -7778,7 +7783,24 @@ like other catalogs. It places this Surface in this person's sidebar, not in any
 joined. To render a person's sidebar, select Surfaces containing their member record and order
 them by that record's key, with Surface ID as a tie-breaker.
 
-Each person starts with an empty Surface list. Requests cannot supply another person's identity.
+In team mode, enrolled sign-in-capable members join all catalog Surfaces by default, including
+existing Surfaces during startup catch-up and profile enrollment, and newly created Surfaces.
+Guests never participate. Withdrawn types remain excluded. Reference membership never joins
+anyone to the target or grants additional access, including when the target is unavailable.
+Standalone creation keeps its existing local-person membership rule.
+
+The independent per-person `surfaces.autoJoin` preference uses the existing user-settings routes.
+Only JSON boolean `false` disables autojoin; missing, cleared, and all other values enable it.
+Disabling preserves memberships. Enabling catches up missing memberships without changing
+existing order keys or join times. The explicit creator always joins, even when opted out.
+Setting changes and their derived joins commit together, with the setting event before membership
+events. Startup catches up in bounded resumable batches, checking the preference between batches.
+Surfaces have no deletion or archive lifecycle; referenced targets keep their independent lifecycle.
+
+An explicit leave persistently excludes that Surface from autojoin for that person, even when
+they were not a member, across restarts and preference changes. An explicit join clears the
+exclusion. Missing memberships from before this behavior was introduced are eligible for catch-up.
+Requests cannot supply another person's identity.
 A new join appends to the caller's list; rejoining after leaving appends too. Mutations do not
 require `If-Match`: the latest reorder wins within one person's list. Leaving never removes
 Surface data or history. Changing one member never changes another member's order or join time.
@@ -7818,8 +7840,8 @@ collide through short route words used as IDs. Paths such as `/v0/surfaces/todo/
 
 `POST /v0/surfaces/:surfaceId/join` and `/leave` accept `{}` or `{ "mutationId": "..." }` and
 return `200 { "surface": {...} }`. Unknown Surface IDs return `404 not_found`.
-Joining an existing member or leaving an absent member is an exact no-op, including versions
-and events. A changed member record updates the
+Joining an existing member or leaving an absent member changes no Surface version or event;
+the explicit autojoin exclusion is still cleared or recorded respectively. A changed member record updates the
 Surface's `members` and version atomically and emits shared `surface.updated` after commit,
 echoing `mutationId` when supplied.
 
@@ -8226,8 +8248,8 @@ Reading needs no review; updates are durable and own ordinary shared-data Auto r
 filesystem elevation. Active admin bots additionally receive `create_document_surface`,
 accepting `name`, required explicit `creatorUserId`, optional initial Markdown `text`, and
 optional absolute `imagePath`. Its authority, attribution, creator join rules, image handling,
-and permission boundaries match `create_todo_surface`. No document operation joins anyone
-automatically other than the explicit creator rule during Surface creation.
+and permission boundaries match `create_todo_surface`. Creation follows the catalog's default
+team membership policy; reading or editing document content never joins anyone.
 
 ### Calendar Surfaces
 

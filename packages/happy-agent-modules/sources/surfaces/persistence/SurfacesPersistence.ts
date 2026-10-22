@@ -223,4 +223,13 @@ export const surfacesMigrations: readonly AgentModuleMigration[] = [
             );
         },
     ],
+    [
+        "004-surface-explicit-leaves",
+        async (_ctx, database) => {
+            await agentDatabaseRun(
+                database,
+                sql`CREATE TABLE happy_agent_surface_leaves (user_id TEXT NOT NULL, surface_id TEXT NOT NULL, PRIMARY KEY (user_id, surface_id))`,
+            );
+        },
+    ],
 ];

@@ -1,5 +1,13 @@
 # API module learnings
 
+## Opaque settings support cannot advertise a membership policy
+
+An older daemon accepts arbitrary `surfaces.autoJoin` values but does not interpret them, so
+generic user-settings support cannot make that preference functional. The daemon advertises
+protocol 31 for default Surface membership; clients show the preference only at 31 or newer.
+Health already carries an integer protocol, so no new wire field or client schema is needed.
+Existing clients retain their additive compatibility from protocol 22 onward.
+
 ## GitHub credential selection was explicitly retired
 
 The user approved removing `secret` from project clone requests as an exception to the additive

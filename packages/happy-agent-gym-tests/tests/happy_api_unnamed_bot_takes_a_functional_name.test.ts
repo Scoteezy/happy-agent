@@ -1,6 +1,5 @@
 import { stat } from "node:fs/promises";
 
-import { HAPPY_AGENT_PROTOCOL_VERSION } from "@slopus/happy-agent-client";
 import { createAgentGym, type AgentGym } from "@slopus/happy-agent-gym";
 import { afterEach, expect, it } from "vitest";
 
@@ -28,9 +27,7 @@ it("creates without a name, names from the first user message, and preserves man
     });
     running.add(gym);
 
-    await expect(gym.client.getHealth()).resolves.toMatchObject({
-        version: { protocol: HAPPY_AGENT_PROTOCOL_VERSION },
-    });
+    expect((await gym.client.getHealth()).version.protocol).toBeGreaterThanOrEqual(24);
     const created = (await gym.client.createBot({})).bot;
     expect(created).toMatchObject({
         name: "New Bot",

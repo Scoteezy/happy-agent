@@ -64,6 +64,12 @@ import type { RunnersModule } from "../runners/index.js";
 import { apiResourceVersion } from "../utils/apiResourceVersion.js";
 import { isUserOriginMetadata } from "../impl/messageOrigin.js";
 import { SurfacesPersistence, surfacesMigrations } from "./persistence/SurfacesPersistence.js";
+import {
+    clearSurfaceLeave,
+    queryAutomaticSurfaceIds,
+    queryLastSurfaceOrderKey,
+    saveSurfaceLeave,
+} from "./persistence/surfaceAutomaticMembership.js";
 import { SurfaceError } from "./SurfaceError.js";
 import { compareStrings, surfaceOrderKey } from "./impl/surfaceOrderKey.js";
 import {
@@ -327,7 +333,8 @@ export class SurfacesModule implements AgentModule {
                 type: "surface.created",
                 payload: { surface, ...echo(input.mutationId) },
             });
-            return this.#present(tx, surface);
+            // Transactional participation may have added members after the creation snapshot.
+            return this.#present(tx, await this.#surface(tx, id));
         });
     }
     /**
@@ -469,6 +476,16 @@ export class SurfacesModule implements AgentModule {
             return settle(tx, await this.#present(tx, surface));
         });
     }
+    /** One bounded batch; callers own the preference policy and repeated catch-up. */
+    async joinAutomatically(ctx: Context, userId: string, surfaceId?: string): Promise<number> {
+        if (!this.team.enabled) return 0;
+        return ctx.inTx(async (tx) => {
+            await this.#validateUser(tx, userId);
+            const ids = await queryAutomaticSurfaceIds(tx, userId, surfaceId);
+            for (const id of ids) await this.changeMember(tx, id, userId, "join");
+            return ids.length;
+        });
+    }
     async changeMember(
         ctx: Context,
         id: string,
@@ -482,6 +499,10 @@ export class SurfacesModule implements AgentModule {
             if (this.team.enabled && userId === null)
                 throw new SurfaceError("not_found", "The Surface user was not found.");
             const current = await this.#surface(tx, id);
+            if (this.team.enabled && userId !== null) {
+                if (action === "join") await clearSurfaceLeave(tx, userId, id);
+                else if (action === "leave") await saveSurfaceLeave(tx, userId, id);
+            }
             const member = current.members.find((m) => m.userId === userId);
             if (
                 (action === "join" && member !== undefined) ||
@@ -1181,10 +1202,7 @@ export class SurfacesModule implements AgentModule {
             throw new SurfaceError("not_found", "The Surface user was not found.");
     }
     async #memberTail(ctx: Context, userId: string | null): Promise<string> {
-        const keys = (await this.#stored(ctx))
-            .flatMap((s) => s.members.filter((m) => m.userId === userId).map((m) => m.orderKey))
-            .sort(compareStrings);
-        return surfaceOrderKey(keys.at(-1) ?? null, null);
+        return surfaceOrderKey((await queryLastSurfaceOrderKey(ctx, userId)) ?? null, null);
     }
     async #todoTail(ctx: Context, surfaceId: string): Promise<string> {
         return surfaceOrderKey(
@@ -1209,12 +1227,13 @@ export class SurfacesModule implements AgentModule {
         await this.#kv.write(ctx, `todo.${todo.surfaceId}.${todo.id}`, todo);
     }
     async #event(ctx: Context, event: SurfaceEvent): Promise<void> {
-        for (const listener of this.#transactional) await listener(ctx, structuredClone(event));
+        // Reserve the initiating event before transactional listeners enqueue derived changes.
         await this.durable.invoke(ctx, {
             function: "surfaces.notify",
             arguments: event,
             lockKeys: ["surfaces.notify"],
         });
+        for (const listener of this.#transactional) await listener(ctx, structuredClone(event));
     }
 }
 

@@ -89,6 +89,7 @@ import { UsageModule } from "../usage/index.js";
 import { UserInputModule } from "../userInput/index.js";
 import { UserSettingsModule } from "../userSettings/index.js";
 import { TaskAutoJoinModule } from "../taskAutoJoin/index.js";
+import { SurfaceAutoJoinModule } from "../surfaceAutoJoin/index.js";
 import { SurfacesModule } from "../surfaces/index.js";
 import { WorkflowsModule } from "../workflows/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
@@ -544,6 +545,12 @@ export async function startHappyAgentRuntime(
             config,
             runners,
         );
+        const surfaceAutoJoin = new SurfaceAutoJoinModule(
+            surfaces,
+            team,
+            userSettings,
+            durableFunctions,
+        );
         const node = new NodeModule(config, bots, compute.computeModule, durableFunctions);
         const skillFolders = new SkillFoldersModule(config, bots);
         const tailcat = new TailcatModule(config, bots, durableFunctions);
@@ -808,6 +815,7 @@ export async function startHappyAgentRuntime(
             durableFunctions,
             taskAutoJoin,
             surfaces,
+            surfaceAutoJoin,
             botSettings,
             globalSkills,
             live,

@@ -4,6 +4,11 @@ One module-owned key-value table backs AgentKV. `surface.*` and `todo.*` hold cu
 `revision.*` holds immutable full revisions and `image.*` holds bounded managed WebP assets.
 All SQL stays here. Revision reads use indexed key ranges and a SQL limit before decoding.
 
+`happy_agent_surface_leaves` records explicit per-user exclusions, including absent memberships.
+Automatic participation selects at most 100 missing, non-excluded `surface.*` heads in SQL before
+decoding; withdrawn types never qualify. Existing heads and immutable history are not migrated.
+Appending memberships reads only the last relevant order key, preserving other people's ordering.
+
 `happy_agent_surface_document_changes` is each document's permanent change log: one row per
 `seq` with the Yjs update, its log entry, and the mutation ID, unique per document when present.
 `happy_agent_surface_document_snapshots` holds the full state at some `seq` values, written every

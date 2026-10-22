@@ -47,9 +47,13 @@ not wait on another. The returned call ID is informational only.
 
 Every executor runs on the module's detached `durable-functions` context. Calls without lock keys
 run fully in parallel. A call with keys acquires its complete set atomically; overlapping calls are
-FIFO by creation time and ID, while disjoint calls remain concurrent. Locks exist only in this
+FIFO by creation time and persisted insertion order, while disjoint calls remain concurrent. Locks exist only in this
 process because the agent store has one owner. Pending call rows are the durable truth rebuilt on
 restart.
+
+SQLite's existing row ID breaks equal-millisecond ties in both dispatch and recovery, without
+changing stored tables or public call envelopes. Recovery carries the numeric insertion cursor
+even when its last row was discarded, so deleting an incompatible call cannot skip the next page.
 
 The executor receives a real `AgentKV` scoped to `call.<callId>.`. Its values live in the module's
 own table and its transactions compose with the agent database transaction on the supplied

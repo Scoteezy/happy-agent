@@ -7,7 +7,6 @@ import {
     type Socket,
 } from "node:net";
 
-import { HAPPY_AGENT_PROTOCOL_VERSION } from "@slopus/happy-agent-client";
 import { createAgentGym, type AgentGym } from "@slopus/happy-agent-gym";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -23,8 +22,7 @@ afterEach(async () => {
 describe("agent networks", () => {
     it("names this computer's network once for every agent here and keeps it past an archive", async () => {
         const gym = await started();
-        expect((await gym.client.getHealth()).version.protocol).toBe(HAPPY_AGENT_PROTOCOL_VERSION);
-        expect(HAPPY_AGENT_PROTOCOL_VERSION).toBeGreaterThanOrEqual(28);
+        expect((await gym.client.getHealth()).version.protocol).toBeGreaterThanOrEqual(28);
         const agentId = gym.defaultSessionId;
         const { workspaceId } = (await gym.client.getAgent(agentId)).agent;
         const other = (await gym.client.createAgent({ workspaceId, title: "Second" })).agent.id;

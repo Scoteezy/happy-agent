@@ -113,6 +113,8 @@ it("attributes team HTTP creation to the authenticated local user and preserves 
     ] as const) {
         const { profile } = await client.getProfile();
         await client.updateProfile({ name }, { ifMatch: profile.version });
+        // This attribution scenario exercises explicit membership independently of autojoin.
+        await client.saveUserSetting("surfaces.autoJoin", { value: false });
     }
     const aliceId = (await alice.getProfile()).profile.userId;
     const bobId = (await bob.getProfile()).profile.userId;

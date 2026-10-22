@@ -197,6 +197,9 @@ describe("reference Surfaces resolve live targets without granting access", () =
     it("lets every team member see a reference without joining its task or widening task rights", async () => {
         const { gym, alice, bob, aliceId, bobId } = await surfaceTeamClients();
         running.push(gym);
+        // Exercise explicit reference membership without either automatic participation policy.
+        await bob.saveUserSetting("tasks.autoJoin", { value: false });
+        await bob.saveUserSetting("surfaces.autoJoin", { value: false });
         const task = (await alice.createTask({ name: "Alice's launch" })).task;
         const surface = (
             await alice.createSurface({ type: "task", name: "Launch", taskId: task.id })

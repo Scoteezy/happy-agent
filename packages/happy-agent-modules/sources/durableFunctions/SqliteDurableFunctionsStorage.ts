@@ -17,6 +17,8 @@ import {
 } from "./DurableFunctions.js";
 import {
     durableFunctionRecoveryQuerySchema,
+    storedDurableFunctionCallSchema,
+    type StoredDurableFunctionCall,
     type DurableFunctionRecoveryQuery,
     type DurableFunctionsStore,
 } from "./DurableFunctionsStore.js";
@@ -60,10 +62,10 @@ export function createSqliteDurableFunctionsStorage<
     const readCall = async (
         ctx: Context,
         callId: string,
-    ): Promise<DurableFunctionCall | undefined> => {
+    ): Promise<StoredDurableFunctionCall | undefined> => {
         const rows = await agentDatabaseRows<CallRow>(
             dbFor(ctx),
-            sql`SELECT id, operation_id, "function" AS function_name, arguments_json,
+            sql`SELECT rowid AS sequence, id, operation_id, "function" AS function_name, arguments_json,
                     lock_keys_json, created_at
                 FROM durable_function_calls
                 WHERE id = ${callId}
@@ -74,10 +76,10 @@ export function createSqliteDurableFunctionsStorage<
     const readCallByOperationId = async (
         ctx: Context,
         operationId: string,
-    ): Promise<DurableFunctionCall | undefined> => {
+    ): Promise<StoredDurableFunctionCall | undefined> => {
         const rows = await agentDatabaseRows<CallRow>(
             dbFor(ctx),
-            sql`SELECT id, operation_id, "function" AS function_name, arguments_json,
+            sql`SELECT rowid AS sequence, id, operation_id, "function" AS function_name, arguments_json,
                     lock_keys_json, created_at
                 FROM durable_function_calls
                 WHERE operation_id = ${operationId}
@@ -129,21 +131,21 @@ export function createSqliteDurableFunctionsStorage<
     const listCalls = async (
         ctx: Context,
         query: DurableFunctionRecoveryQuery,
-    ): Promise<DurableFunctionCall[]> => {
+    ): Promise<StoredDurableFunctionCall[]> => {
         if (!Value.Check(durableFunctionRecoveryQuerySchema, query)) {
             throw new Error("Durable Functions recovery query is invalid.");
         }
         const after = !("afterCreatedAt" in query)
             ? sql``
             : sql`WHERE created_at > ${query.afterCreatedAt}
-                    OR (created_at = ${query.afterCreatedAt} AND id > ${query.afterId})`;
+                    OR (created_at = ${query.afterCreatedAt} AND rowid > ${query.afterSequence})`;
         const rows = await agentDatabaseRows<CallRow>(
             dbFor(ctx),
-            sql`SELECT id, operation_id, "function" AS function_name, arguments_json,
+            sql`SELECT rowid AS sequence, id, operation_id, "function" AS function_name, arguments_json,
                     lock_keys_json, created_at
                 FROM durable_function_calls
                 ${after}
-                ORDER BY created_at, id
+                ORDER BY created_at, rowid
                 LIMIT ${query.limit}`,
         );
         return rows.map(callOf);
@@ -218,6 +220,7 @@ export function createSqliteDurableFunctionsStorage<
 }
 
 type CallRow = {
+    readonly sequence: unknown;
     readonly id: unknown;
     readonly operation_id: unknown;
     readonly function_name: unknown;
@@ -236,8 +239,9 @@ const storedValueSchema = Type.Object(
     { additionalProperties: false },
 );
 
-function callOf(row: CallRow): DurableFunctionCall {
+function callOf(row: CallRow): StoredDurableFunctionCall {
     const call = {
+        sequence: row.sequence,
         id: row.id,
         ...(row.operation_id === null ? {} : { operationId: row.operation_id }),
         function: row.function_name,
@@ -245,7 +249,7 @@ function callOf(row: CallRow): DurableFunctionCall {
         lockKeys: parseJson(row.lock_keys_json, "call lock keys"),
         createdAt: row.created_at,
     };
-    if (!Value.Check(durableFunctionCallSchema, call)) {
+    if (!Value.Check(storedDurableFunctionCallSchema, call)) {
         throw new Error("Durable Functions database returned an invalid pending call.");
     }
     return call;

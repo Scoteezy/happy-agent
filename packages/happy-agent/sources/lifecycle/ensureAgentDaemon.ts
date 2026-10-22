@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 
 import {
     HappyAgentClient,
-    HAPPY_AGENT_PROTOCOL_VERSION,
+    HAPPY_AGENT_MIN_PROTOCOL_VERSION,
     type HealthResponse,
 } from "@slopus/happy-agent-client";
 import { loadHappyAgentConfiguration } from "@slopus/happy-agent-modules";
@@ -397,16 +397,16 @@ async function resolveReadyHealth(
 }
 
 function assertCompatibleProtocol(health: HealthResponse): void {
-    if (health.version.protocol === HAPPY_AGENT_PROTOCOL_VERSION) return;
+    if (health.version.protocol >= HAPPY_AGENT_MIN_PROTOCOL_VERSION) return;
     throw new AgentDaemonError(
-        `The running daemon uses protocol ${String(health.version.protocol)}, but this client expects protocol ${String(HAPPY_AGENT_PROTOCOL_VERSION)}.`,
-        { hint: "Restart the daemon with this client's version." },
+        `The running daemon uses protocol ${String(health.version.protocol)}, but this client requires protocol ${String(HAPPY_AGENT_MIN_PROTOCOL_VERSION)} or newer.`,
+        { hint: "Update the daemon to a compatible version." },
     );
 }
 
 function daemonVersionsMatch(identity: AgentDaemonIdentity, health: HealthResponse): boolean {
     return (
-        health.version.protocol === HAPPY_AGENT_PROTOCOL_VERSION &&
+        health.version.protocol >= HAPPY_AGENT_MIN_PROTOCOL_VERSION &&
         health.version.daemon === identity.version
     );
 }

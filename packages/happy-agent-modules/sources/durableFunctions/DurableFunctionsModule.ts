@@ -32,10 +32,11 @@ import {
     type DurableFunctionInvokeResult,
 } from "./DurableFunctions.js";
 import {
-    assertDurableFunctionCall,
+    assertStoredDurableFunctionCall,
     assertDurableFunctionsStore,
     MAX_DURABLE_FUNCTION_RECOVERY_BATCH,
     type DurableFunctionsStore,
+    type StoredDurableFunctionCall,
 } from "./DurableFunctionsStore.js";
 import {
     createSqliteDurableFunctionsStorage,
@@ -44,7 +45,7 @@ import {
 
 type AnyDurableFunctionDefinition = DurableFunctionDefinition<TSchema, TSchema>;
 type RunningCall = {
-    readonly call: DurableFunctionCall;
+    readonly call: StoredDurableFunctionCall;
     readonly controller: AbortController;
     readonly lockKeys: ReadonlySet<string>;
 };
@@ -64,7 +65,7 @@ export class DurableFunctionsModule implements AgentModule {
     readonly #store: DurableFunctionsStore;
     readonly #definitions = new Map<string, AnyDurableFunctionDefinition>();
     readonly #dispatchLock: AsyncLock = asyncLock({ reentry: "block" });
-    readonly #waiting = new Map<string, DurableFunctionCall>();
+    readonly #waiting = new Map<string, StoredDurableFunctionCall>();
     readonly #running = new Map<string, RunningCall>();
     readonly #heldLockKeys = new Set<string>();
     readonly #moduleLifetime = new AbortController();
@@ -178,7 +179,12 @@ export class DurableFunctionsModule implements AgentModule {
                     // hook supplies its dispatcher context. The row is the delivery guarantee;
                     // startup recovery will enqueue it once the whole system opens.
                     if (this.#dispatchCtx === undefined) return;
-                    await this.#enqueue(call);
+                    // Load the committed insertion sequence; cancellation may already have
+                    // removed this call, in which case there is nothing left to dispatch.
+                    const pending = await this.#requireDispatchContext().inTx(async (readCtx) =>
+                        this.#store.readCall(readCtx, call.id),
+                    );
+                    if (pending !== undefined) await this.#enqueue(pending);
                 });
             }
             return result;
@@ -193,7 +199,7 @@ export class DurableFunctionsModule implements AgentModule {
         return await ctx.inTx(async (txCtx) => {
             const pending = await this.#store.readCallByOperationId(txCtx, operationId);
             if (pending === undefined) return false;
-            assertDurableFunctionCall(pending);
+            assertStoredDurableFunctionCall(pending);
             if (!(await this.#store.deleteCallAndState(txCtx, pending.id))) return false;
             afterCommit(txCtx, async () => {
                 await this.#cancelDispatch(pending.id);
@@ -214,19 +220,19 @@ export class DurableFunctionsModule implements AgentModule {
     /** Recover calls in durable FIFO order, discarding registrations that no longer match. */
     async #recoverPending(ctx: Context): Promise<void> {
         let afterCreatedAt: number | undefined;
-        let afterId: string | undefined;
+        let afterSequence: number | undefined;
         for (;;) {
             const pending = await ctx.inTx(
                 async (txCtx) =>
                     await this.#store.listCalls(txCtx, {
                         limit: MAX_DURABLE_FUNCTION_RECOVERY_BATCH,
-                        ...(afterCreatedAt === undefined || afterId === undefined
+                        ...(afterCreatedAt === undefined || afterSequence === undefined
                             ? {}
-                            : { afterCreatedAt, afterId }),
+                            : { afterCreatedAt, afterSequence }),
                     }),
             );
             for (const call of pending) {
-                assertDurableFunctionCall(call);
+                assertStoredDurableFunctionCall(call);
                 const definition = this.#definitions.get(call.function);
                 if (
                     definition === undefined ||
@@ -246,7 +252,7 @@ export class DurableFunctionsModule implements AgentModule {
             const last = pending.at(-1);
             if (last === undefined || pending.length < MAX_DURABLE_FUNCTION_RECOVERY_BATCH) return;
             afterCreatedAt = last.createdAt;
-            afterId = last.id;
+            afterSequence = last.sequence;
         }
     }
 
@@ -262,8 +268,8 @@ export class DurableFunctionsModule implements AgentModule {
         this.#launchAll(starts);
     }
 
-    async #enqueue(call: DurableFunctionCall): Promise<void> {
-        assertDurableFunctionCall(call);
+    async #enqueue(call: StoredDurableFunctionCall): Promise<void> {
+        assertStoredDurableFunctionCall(call);
         const starts = await this.#dispatchLock.runInLock(
             this.#requireDispatchContext(),
             async () => {
@@ -378,7 +384,7 @@ export class DurableFunctionsModule implements AgentModule {
             await ctx.inTx(async (txCtx) => {
                 const pending = await this.#store.readCall(txCtx, running.call.id);
                 if (pending === undefined) return;
-                assertDurableFunctionCall(pending);
+                assertStoredDurableFunctionCall(pending);
                 if (pending.function !== running.call.function) {
                     throw new Error(
                         "A pending durable call changed function while it was running.",
@@ -457,8 +463,8 @@ export class DurableFunctionsModule implements AgentModule {
     }
 }
 
-function compareCalls(left: DurableFunctionCall, right: DurableFunctionCall): number {
-    return left.createdAt - right.createdAt || left.id.localeCompare(right.id);
+function compareCalls(left: StoredDurableFunctionCall, right: StoredDurableFunctionCall): number {
+    return left.createdAt - right.createdAt || left.sequence - right.sequence;
 }
 
 function intersects(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {

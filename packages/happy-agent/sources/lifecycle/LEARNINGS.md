@@ -1,5 +1,13 @@
 # Daemon lifecycle learnings
 
+## Additive protocols do not require replacing a matching daemon
+
+Local readiness and daemon identity checks used exact equality with the SDK's newest protocol,
+so a protocol 31 daemon was rejected by its own CLI built against a protocol 30 SDK. Both checks
+now accept every protocol from the published minimum, 22, onward. Product-version mismatches
+still request replacement, and protocols below the minimum remain incompatible. Feature callers
+gate capabilities using their required protocol instead of requiring global protocol equality.
+
 ## The daemon starts in the home directory
 
 The detached daemon inherited its launcher's working directory. Happy.app launched from Finder

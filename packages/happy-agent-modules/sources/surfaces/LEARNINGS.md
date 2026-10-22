@@ -1,5 +1,15 @@
 # Surfaces learnings
 
+## Default membership must respect deliberate departures
+
+Team members now join new and existing catalog Surfaces by default through the independent
+`surfaces.autoJoin` preference. Surfaces persists explicit leaves even when membership is absent;
+only a manual join clears them. The creator always joins. Guests and withdrawn types remain
+excluded, and reference membership never affects target permissions. Creation reserves its
+notification before transactional membership callbacks and returns the final stored head, keeping
+creation, derived version events, and the response consistent. Startup reads missing memberships
+in bounded SQL batches rather than decoding historical content.
+
 ## A Surface is an instance, not a singleton feature
 
 The initial design used `todo` as a singleton ID. Each Surface instead has a CUID2 identity and

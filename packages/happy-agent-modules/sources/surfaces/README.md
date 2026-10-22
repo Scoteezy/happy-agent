@@ -5,6 +5,11 @@ references to artifacts, bots, and tasks, with each person's sidebar order on th
 immutable revisions live in module-owned AgentKV storage; document change logs live in their own
 tables beside it.
 
+Team members join catalog Surfaces by default through `SurfaceAutoJoinModule`, unless their
+independent `surfaces.autoJoin` preference is false. Creators always join. Deliberate leaves persist
+until a manual join; opting out preserves existing memberships. Membership controls sidebar
+inclusion only. Guests and withdrawn types are excluded, and reference joins grant no target rights.
+
 ```text
 HTTP / model tools -> SurfacesModule -> one composing database transaction
                                       |- head + immutable revision

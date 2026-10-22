@@ -354,7 +354,7 @@ import {
 } from "./projectCredentialDiagnostics.js";
 import { SubtaskInputError, SubtasksModule } from "../subtasks/index.js";
 
-const API_PROTOCOL_VERSION = 30;
+const API_PROTOCOL_VERSION = 31;
 
 /**
  * How many archived agents the desktop bootstrap carries. Recent history is what the desktop
