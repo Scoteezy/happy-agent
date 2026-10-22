@@ -11,7 +11,10 @@ import { isDaemonProcessRunning } from "../sources/lifecycle/daemonPid.js";
 import { readDaemonSupervisorState } from "../sources/lifecycle/daemonSupervisorState.js";
 import { runAgentDaemonCommand } from "../sources/lifecycle/runAgentDaemonCommand.js";
 import { runAgentDaemonSupervisor } from "../sources/lifecycle/runAgentDaemonSupervisor.js";
-import { AGENT_DAEMON_SUPERVISE_ENVIRONMENT } from "../sources/lifecycle/superviseAgentDaemon.js";
+import {
+    AGENT_DAEMON_SUPERVISE_ENVIRONMENT,
+    type DaemonSupervisorPolicy,
+} from "../sources/lifecycle/superviseAgentDaemon.js";
 
 /**
  * A stand-in daemon: it counts its runs, records its PID where the real daemon does, and then
@@ -81,6 +84,28 @@ function supervise(mode: "clean" | "crash" | "crash-once"): Promise<number> {
     });
 }
 
+async function superviseProcess(mode: "crash" | "crash-once", policy: DaemonSupervisorPolicy) {
+    const supervisorScript = join(happyHome, "supervisor.mts");
+    const source = fileURLToPath(
+        new URL("../sources/lifecycle/runAgentDaemonSupervisor.ts", import.meta.url),
+    );
+    await writeFile(
+        supervisorScript,
+        `import { runAgentDaemonSupervisor } from ${JSON.stringify(source)};
+process.exit(await runAgentDaemonSupervisor({
+    command: { executable: process.execPath, arguments: [${JSON.stringify(script)}] },
+    policy: ${JSON.stringify(policy)},
+}));
+`,
+    );
+    const supervisor = spawn(process.execPath, ["--import", "tsx", supervisorScript], {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+        env: { ...process.env, FAKE_DAEMON_MODE: mode },
+        stdio: "ignore",
+    });
+    return { supervisor, exited: once(supervisor, "exit") };
+}
+
 async function runs(): Promise<number> {
     return Number(await readFile(join(happyHome, "runs"), "utf8").catch(() => "0"));
 }
@@ -91,34 +116,45 @@ function supervisorState() {
 
 describe.skipIf(process.platform === "win32")("runAgentDaemonSupervisor", () => {
     it("restarts a crashed daemon, and happy-agent kill then stops it for good", async () => {
-        const supervised = supervise("crash-once");
+        const { supervisor, exited } = await superviseProcess("crash-once", POLICY);
 
-        await expect.poll(runs, { timeout: 10_000 }).toBe(2);
-        await expect
-            .poll(async () => (await supervisorState())?.phase, { timeout: 10_000 })
-            .toBe("running");
-        const state = await supervisorState();
-        expect(state).toMatchObject({
-            supervisorPid: process.pid,
-            restarts: 1,
-            lastExit: { code: null, signal: "SIGKILL" },
-        });
-        expect((await stat(join(happyHome, "agent", "supervisor.json"))).mode & 0o777).toBe(0o600);
-        // The daemon never sees the variable that made its parent a supervisor.
-        await expect(stat(join(happyHome, "inherited-supervise"))).rejects.toMatchObject({
-            code: "ENOENT",
-        });
+        try {
+            await expect.poll(runs, { timeout: 10_000 }).toBe(2);
+            await expect
+                .poll(async () => (await supervisorState())?.phase, { timeout: 10_000 })
+                .toBe("running");
+            const state = await supervisorState();
+            expect(state).toMatchObject({
+                supervisorPid: supervisor.pid,
+                restarts: 1,
+                lastExit: { code: null, signal: "SIGKILL" },
+            });
+            expect((await stat(join(happyHome, "agent", "supervisor.json"))).mode & 0o777).toBe(
+                0o600,
+            );
+            // The daemon never sees the variable that made its parent a supervisor.
+            await expect(stat(join(happyHome, "inherited-supervise"))).rejects.toMatchObject({
+                code: "ENOENT",
+            });
 
-        const lines: string[] = [];
-        await runAgentDaemonCommand("kill", { log: (line) => lines.push(line) });
+            const lines: string[] = [];
+            await runAgentDaemonCommand("kill", { log: (line) => lines.push(line) });
 
-        expect(lines).toEqual([`Daemon process ${String(state?.daemonPid)} was killed.`]);
-        await expect(supervised).resolves.toBe(0);
-        expect(await runs()).toBe(2);
-        expect(await isDaemonProcessRunning(state!.daemonPid!)).toBe(false);
-        // Supervision ended on purpose, so nothing claims to be watching any more.
-        expect(await supervisorState()).toBeUndefined();
-    });
+            expect(lines).toEqual([`Daemon process ${String(state?.daemonPid)} was killed.`]);
+            await expect(exited).resolves.toEqual([0, null]);
+            expect(await runs()).toBe(2);
+            expect(await isDaemonProcessRunning(state!.daemonPid!)).toBe(false);
+            expect(await isDaemonProcessRunning(supervisor.pid!)).toBe(false);
+            await expect(stat(join(happyHome, "agent", "stop-intent"))).rejects.toMatchObject({
+                code: "ENOENT",
+            });
+            // Supervision ended on purpose, so nothing claims to be watching any more.
+            expect(await supervisorState()).toBeUndefined();
+        } finally {
+            supervisor.kill("SIGKILL");
+            await exited;
+        }
+    }, 30_000);
 
     it("lets a daemon that exits cleanly stay stopped", async () => {
         await expect(supervise("clean")).resolves.toBe(0);
@@ -148,25 +184,12 @@ describe.skipIf(process.platform === "win32")("runAgentDaemonSupervisor", () => 
     });
 
     it("stop stands down a supervisor that is waiting to restart a crashed daemon", async () => {
-        const supervisorScript = join(happyHome, "supervisor.mts");
-        const source = fileURLToPath(
-            new URL("../sources/lifecycle/runAgentDaemonSupervisor.ts", import.meta.url),
-        );
-        await writeFile(
-            supervisorScript,
-            `import { runAgentDaemonSupervisor } from ${JSON.stringify(source)};
-process.exit(await runAgentDaemonSupervisor({
-    command: { executable: process.execPath, arguments: [${JSON.stringify(script)}] },
-    policy: { initialBackoffMs: 60_000, maxBackoffMs: 60_000, stableUptimeMs: 60_000, maxQuickFailures: 5 },
-}));
-`,
-        );
-        const supervisor = spawn(process.execPath, ["--import", "tsx", supervisorScript], {
-            cwd: fileURLToPath(new URL("..", import.meta.url)),
-            env: { ...process.env, FAKE_DAEMON_MODE: "crash" },
-            stdio: "ignore",
+        const { supervisor, exited } = await superviseProcess("crash", {
+            initialBackoffMs: 60_000,
+            maxBackoffMs: 60_000,
+            stableUptimeMs: 60_000,
+            maxQuickFailures: 5,
         });
-        const exited = once(supervisor, "exit");
         try {
             await expect
                 .poll(async () => (await supervisorState())?.phase, { timeout: 20_000 })
@@ -189,6 +212,7 @@ process.exit(await runAgentDaemonSupervisor({
             expect(await supervisorState()).toBeUndefined();
         } finally {
             supervisor.kill("SIGKILL");
+            await exited;
         }
     }, 30_000);
 });

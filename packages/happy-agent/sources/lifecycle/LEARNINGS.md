@@ -1,5 +1,14 @@
 # Daemon lifecycle learnings
 
+## Supervisor integration tests own a separate process
+
+The crash-and-kill integration fixture ran the supervisor inside the test worker. Lifecycle
+commands intentionally ignore a supervisor whose PID is their own, so the fixture skipped the
+real stand-down step. Kill cleanup could then consume the stop record before that supervisor
+read it, making it restart and hanging the test. Integration fixtures now run the supervisor in
+an owned child process, preserving the actual stop-before-kill behavior and verifying both
+processes exit. Their bounded timeout includes startup polling and process shutdown.
+
 ## Additive protocols do not require replacing a matching daemon
 
 Local readiness and daemon identity checks used exact equality with the SDK's newest protocol,
