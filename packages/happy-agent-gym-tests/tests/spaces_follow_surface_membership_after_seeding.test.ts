@@ -69,6 +69,8 @@ it("keeps Surface rows and events private to each seeded member", async () => {
     } = await surfaceTeamClients({ timeoutMs: 15_000 });
     running.add(gym);
     const snapshot = (http: typeof owner) => http.ok<Snapshot>("GET", "/v0/spaces");
+    // Exercise explicit membership without the automatic participation policy.
+    await bob.saveUserSetting("surfaces.autoJoin", { value: false });
     const [a, b] = await Promise.all([snapshot(owner), snapshot(member)]);
     const surface = (await alice.createSurface({ type: "document", name: "Shared notes" })).surface;
     const ownerRow = await gym.waitUntil(
