@@ -1013,6 +1013,71 @@ such as `ansi:202`, or true-color values such as `#D97706`. `/fast` toggles the
 Codex fast service tier when the selected provider supports it; fast inference
 uses twice the plan usage.
 
+## Happy Desktop colors
+
+`[theme]` colors the terminal. Happy Desktop's window has its own palette. Its
+fifth appearance, Custom, is defined by `~/.happy/desktop/theme.json`. When a
+person asks to make the app darker, warmer, or a different accent color, edit this
+file. Happy Desktop watches it and repaints within a second, with no reload or
+restart. The path does not move with `HAPPY_HOME_DIR`.
+
+```json
+{
+    "version": 1,
+    "base": "midnight",
+    "colors": {
+        "groupped-background": "#1d1a17",
+        "surface": "#25211d",
+        "text": "#ebdbb2",
+        "text-secondary": "#a89984",
+        "text-link": "#d79921"
+    }
+}
+```
+
+`base` is `light`, `dark`, or `midnight`. Every role not listed in `colors`
+comes from that base, and so does the window's light or dark color scheme.
+`colors` maps role names to `#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa` values.
+Unknown fields, unknown roles, and non-hex values are refused. Write the whole
+file each time.
+
+The file is only shown while Custom is selected: Settings → General → Theme, the
+theme menu in the status bar, or the command palette. Tell the person to pick
+Custom if they have not already. Do not edit `~/.happy/desktop/config.json` to
+switch themes. The app validates that file as a whole and owns its writes.
+
+A refused file leaves the previous theme on screen, and the reason is written to
+`~/.happy/desktop/theme.error.txt`, for example `"surfce" is not a theme colour
+role.` That file is deleted once a valid theme is accepted. After writing, wait a
+second and check whether it exists.
+
+The roles that shape the overall look:
+
+| Role                                               | Paints                                               |
+| -------------------------------------------------- | ---------------------------------------------------- |
+| `groupped-background`                              | The window floor: sidebar, rail, settings background |
+| `surface`                                          | The main content panel, tabs, and cards              |
+| `surface-high`                                     | Recessed areas such as code blocks                   |
+| `surface-selected`, `surface-pressed`              | Selected and pressed rows                            |
+| `header-background`                                | Panel headers; on Windows, also the title bar        |
+| `divider`                                          | Hairlines between areas                              |
+| `input-background`, `sidebar-search-background`    | The composer, inputs, and the sidebar search         |
+| `user-message-background`                          | The person's own chat bubbles                        |
+| `text`, `agent-message-text`, `user-message-text`  | Main text                                            |
+| `text-secondary`, `groupped-section-title`         | Quieter text and section headings                    |
+| `text-link`                                        | The accent: links and active states                  |
+| `button-primary-background`, `button-primary-tint` | The main action button and its label                 |
+| `composer-send-background`, `composer-send-icon`   | The round send button in the composer and its arrow  |
+| `terminal-background`, `diff-context-bg`           | Terminal and diff backgrounds                        |
+
+Every other color role is accepted as well. The full list is
+`THEME_COLOR_ROLES` in Happy Desktop's
+`packages/happy-desktop-state/src/appearance/customTheme.ts`, and each role is
+the CSS variable of the same name in `packages/happy-desktop-ui/src/theme.css`.
+Keep a visible step between surfaces: on a dark base, `surface` and
+`input-background` should be slightly lighter than `groupped-background`, and
+the primary button must stay readable against the surfaces around it.
+
 ## Heap snapshots
 
 Full heap snapshots near the memory limit are opt-in because they are large and
