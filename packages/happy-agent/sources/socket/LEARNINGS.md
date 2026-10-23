@@ -53,6 +53,11 @@ that never came and took the next request on it, possibly another client's, as t
 next request was answered with an empty `400`. A request whose body Bun discarded is now
 forwarded without a length. Only the pinned-Bun gym exposed it.
 
+A `CONNECT` no tunnel route claimed used to fall through the Bun bridge to native HTTP, which
+cannot carry one: it answered `500` and kept the connection open, so a client waiting for the
+refusal hung, while Node simply dropped the socket. Both runtimes now refuse it as an unknown route,
+`404 not_found` in the JSON error envelope, and close the connection.
+
 Bun 1.4.0's node:http CONNECT event can fire without delivering socket writes to the client.
 Merely removing the old request limit or trusting Node-only tests does not prove tunnel support.
 Keep native-runtime smoke coverage for repeated HTTP requests, rejected requests, SSE cancellation,

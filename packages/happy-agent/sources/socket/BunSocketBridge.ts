@@ -6,6 +6,8 @@ import {
 } from "@slopus/happy-agent-modules";
 import { Duplex } from "node:stream";
 
+import { unknownTunnelRejection } from "./unknownTunnelRejection.js";
+
 const MAX_HEADER_BYTES = 64 * 1024;
 // Ordinary API requests may legally carry a 48 MiB JSON body. The native front door normally
 // connects its internal peer before more than a header is buffered, but the hard bound must still
@@ -243,7 +245,9 @@ function routeInitialRequest(
             .then((prepared) => {
                 if (state.closed) return;
                 if (!prepared.handled) {
-                    connectPeer(bun, socket, options.httpAddress);
+                    // Native HTTP cannot carry a tunnel request: it answered one with a 500 and
+                    // held the connection open, so a client waiting for the refusal hung.
+                    rejectSocket(socket, unknownTunnelRejection);
                     return;
                 }
                 if ("rejection" in prepared) {

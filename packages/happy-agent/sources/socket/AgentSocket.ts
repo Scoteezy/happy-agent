@@ -4,10 +4,13 @@ import { connect, type Socket } from "node:net";
 import { dirname } from "node:path";
 import { isWindowsNamedPipe, readAgentSocketInformation } from "./agentSocketPaths.js";
 
-import type {
-    HappyAgentConfiguration,
-    PreparedHappyAgentRuntime,
+import {
+    socketRejectionBody,
+    type HappyAgentConfiguration,
+    type PreparedHappyAgentRuntime,
 } from "@slopus/happy-agent-modules";
+
+import { unknownTunnelRejection } from "./unknownTunnelRejection.js";
 
 export interface AgentDaemonPaths {
     readonly agentHome: string;
@@ -150,11 +153,23 @@ function createAgentHttpServer(prepared: PreparedHappyAgentRuntime): {
         void prepared.api
             .handleConnect(prepared.context("http-connect"), request, socket as Socket, head)
             .then((handled) => {
-                if (!handled) socket.destroy();
+                if (!handled) endUnknownTunnel(socket);
             })
             .catch(() => socket.destroy());
     });
     return { connections, server };
+}
+
+function endUnknownTunnel(socket: import("node:stream").Duplex): void {
+    const body = JSON.stringify(socketRejectionBody(unknownTunnelRejection));
+    socket.end(
+        "HTTP/1.1 404 Not Found\r\n" +
+            "Content-Type: application/json; charset=utf-8\r\n" +
+            "Cache-Control: no-store\r\n" +
+            `Content-Length: ${String(Buffer.byteLength(body))}\r\n` +
+            "Connection: close\r\n\r\n" +
+            body,
+    );
 }
 
 export async function prepareAgentSocketPath(socketPath: string): Promise<void> {
