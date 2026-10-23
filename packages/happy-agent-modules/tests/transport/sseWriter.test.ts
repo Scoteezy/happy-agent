@@ -5,7 +5,7 @@ import { createSseWriter } from "../../sources/transport/sseWriter.js";
 import { describe, expect, it } from "vitest";
 
 describe("Happy Agent SSE writer", () => {
-    it("waits for drain and preserves whole-frame order", () => {
+    it("resumes once its frames are flushed and preserves whole-frame order", () => {
         const request = new EventEmitter() as IncomingMessage;
         const response = new FakeResponse([false, true, true]);
         const writer = createSseWriter(request, response.asServerResponse());
@@ -15,7 +15,7 @@ describe("Happy Agent SSE writer", () => {
         expect(writer.write("three\n\n")).toBe(true);
         expect(response.writes).toEqual(["one\n\n"]);
 
-        response.emit("drain");
+        response.flush();
         expect(response.writes).toEqual(["one\n\n", "two\n\n", "three\n\n"]);
         writer.close();
     });
@@ -39,7 +39,7 @@ describe("Happy Agent SSE writer", () => {
         writer.close();
     });
 
-    it("disconnects instead of growing its pending queue without drain", async () => {
+    it("disconnects instead of growing its pending queue while blocked", async () => {
         const request = new EventEmitter() as IncomingMessage;
         const response = new FakeResponse([false]);
         const writer = createSseWriter(request, response.asServerResponse(), {
@@ -53,7 +53,7 @@ describe("Happy Agent SSE writer", () => {
         expect(writer.closed).toBe(true);
         expect(response.destroyed).toBe(true);
 
-        response.emit("drain");
+        response.flush();
         expect(response.writes).toEqual(["blocked\n\n"]);
     });
 
@@ -74,7 +74,7 @@ describe("Happy Agent SSE writer", () => {
         expect(writer.closed).toBe(false);
         expect(response.writes).toEqual([image]);
 
-        response.emit("drain");
+        response.flush();
         expect(response.writes).toEqual([image, run, tool]);
         expect(writer.closed).toBe(false);
         writer.close();

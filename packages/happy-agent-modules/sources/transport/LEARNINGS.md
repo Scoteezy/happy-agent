@@ -11,9 +11,11 @@ while the socket, after the kernel takes the first bytes, stays below its own. T
 needs `drain`, so the response never emits it, and every remaining frame stayed queued. A replay
 that follows a manual compaction is large enough to hit this reliably under load.
 
-The writer now also counts each frame's write callback, and resumes once every frame it handed to
-Node has been flushed, whichever of the two signals comes first. The byte bounds and whole-frame
-ordering are unchanged.
+The writer now counts each frame's write callback and resumes only once every frame it handed to
+Node has been flushed. Callbacks are the single resume signal: keeping `drain` as well would let a
+stale `drain` release a later blocked batch early, and measuring 78 MiB of 2 KiB frames in bursts
+showed the same throughput either way (about 45 ms under both Node 26 and Bun 1.4.4). The byte
+bounds and whole-frame ordering are unchanged.
 
 Stored files and workspace proxy bodies had the same dependency through `pipeline()` straight
 into the message. `streamToOutgoing` keeps `pipeline()`, which owns the whole transfer's
