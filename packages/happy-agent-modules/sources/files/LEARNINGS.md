@@ -63,8 +63,18 @@ watch is a kqueue vnode watch there and is not affected, so each rendered file n
 with a fingerprint taken before its bytes to cover the gap before it arms. Modification time and
 size alone miss a same-size write that restores the time, so the fingerprint includes the inode
 and change time. An atomic replace leaves the watch on the old inode after one rename event; the
-new file is watched afresh. Directory watches still carry tree-page structure, and creates or
-deletes there remain best-effort while other watches churn.
+new file is watched afresh.
+
+Directory watches carry tree-page structure, and their creates and deletes were lost the same way:
+a create landing a few milliseconds before or after another folder was opened went unreported
+about one time in ten on Bun and Node alike, which made `files.updated` time out intermittently in
+the files chaos gym. Each directory watch now keeps the folder's entry names and its
+directory fingerprint (device, inode, modification and change times) from when it armed. Right
+after any directory watch is added or closed, every watched folder whose fingerprint moved is
+compared with its entries and the difference reported; a folder is compared again when a client
+reads it again. That is the churn itself and the client's next look, not a timer, so nothing
+polls. A reported change is folded into the entries on the next turn so it is not reported twice.
+A folder of more than 1,000 entries is reported as a whole change rather than compared by name.
 
 Review found three gaps in that first version. On macOS `fs.watch` returns before the kernel
 holds the kqueue watch, which happens at the loop's next poll; a write right after the comparison

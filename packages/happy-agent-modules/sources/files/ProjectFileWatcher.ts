@@ -1,10 +1,13 @@
-import { lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { lstatSync, opendirSync, realpathSync, watch, type Dir, type FSWatcher } from "node:fs";
+import { dirname } from "node:path";
 
 import type { Compute, ComputeWatch } from "@slopus/happy-agent-compute";
 import type { Context } from "@steve.kite/stdlib";
 
 const MAX_CHANGED_PATHS = 256;
 const MAX_PATH_LENGTH = 16_384;
+/** A watched folder with more entries than this is compared as a whole, not entry by entry. */
+const MAX_RECONCILED_ENTRIES = 1_000;
 const MAX_WATCHED_DIRECTORIES = 256;
 const MAX_WATCHED_FILES = 256;
 const MAX_WATCHED_TREES = 8;
@@ -40,6 +43,14 @@ export type ProjectFileChangeObserver = (
 
 interface DirectoryWatch {
     readonly directory: string;
+    /** The folder's entry names as last compared, or undefined past the entry cap. */
+    entries: ReadonlySet<string> | undefined;
+    /** The folder's identity and change times when `entries` was taken; undefined once gone. */
+    fingerprint: string | undefined;
+    /** Whether a reported change has not been folded into `entries` yet. */
+    pending: boolean;
+    readonly relativeDirectory: string;
+    readonly root: ProjectFileWatchRoot;
     readonly watcher: FSWatcher;
 }
 
@@ -96,6 +107,16 @@ export class ProjectFileWatcher {
         this.#onChange = onChange;
     }
 
+    /**
+     * Watches one folder a client just read, by itself.
+     *
+     * On macOS every directory watch in the process shares one FSEvents stream, which the runtime
+     * stops and recreates whenever any directory watch is added or closed; a create or delete
+     * landing a few milliseconds either side of that is not reported. Each watch therefore keeps
+     * the folder's entry names as last compared. Every watched folder is compared with them right
+     * after a directory watch is added or closed here, and a folder again when it is read again,
+     * so a change the stream lost is reported then, without polling.
+     */
     watchDirectory(root: ProjectFileWatchRoot, relativeDirectory: string, directory: string): void {
         if (this.#closed) return;
         const workspaceId = root.workspaceId ?? root.projectId;
@@ -104,26 +125,47 @@ export class ProjectFileWatcher {
         if (existing?.directory === directory) {
             this.#watches.delete(key);
             this.#watches.set(key, existing);
+            this.#reconcile(existing);
             return;
         }
         if (existing !== undefined) this.#removeWatch(key);
 
+        let entry: DirectoryWatch | undefined;
         let watcher: FSWatcher;
         try {
             watcher = watch(directory, { persistent: false }, (event, filename) => {
                 this.#observed(root, changedPath(relativeDirectory, filename), event === "rename");
+                if (event === "rename" && entry !== undefined) this.#settle(key, entry);
             });
         } catch {
+            if (existing !== undefined) this.#reconcileAll();
             return;
         }
-        watcher.on("error", () => this.#removeWatch(key));
+        watcher.on("error", () => {
+            if (entry === undefined || this.#watches.get(key) !== entry) return;
+            this.#removeWatch(key);
+            this.#reconcileAll();
+        });
         watcher.unref?.();
-        this.#watches.set(key, { directory, watcher });
+        // Taken once the watch is armed and before the client lists the folder, so a later change
+        // is in that listing, reported by the watch, or found by the next comparison.
+        const fingerprint = directoryFingerprint(directory);
+        entry = {
+            directory,
+            entries: fingerprint === undefined ? undefined : directoryEntries(directory),
+            fingerprint,
+            pending: false,
+            relativeDirectory,
+            root,
+            watcher,
+        };
+        this.#watches.set(key, entry);
         while (this.#watches.size > MAX_WATCHED_DIRECTORIES) {
             const oldestKey = this.#watches.keys().next().value as string | undefined;
             if (oldestKey === undefined) break;
             this.#removeWatch(oldestKey);
         }
+        this.#reconcileAll(entry);
     }
 
     /**
@@ -229,6 +271,11 @@ export class ProjectFileWatcher {
     changed(root: ProjectFileWatchRoot, path: string): void {
         if (this.#closed) return;
         this.#observed(root, path, false);
+        // Folded into its folder's entries, so a comparison does not report the write again.
+        const parent = dirname(path);
+        const key = `${root.workspaceId ?? root.projectId}\0${parent === "." ? "" : parent}`;
+        const entry = this.#watches.get(key);
+        if (entry !== undefined) this.#settle(key, entry);
     }
 
     async close(): Promise<void> {
@@ -432,6 +479,60 @@ export class ProjectFileWatcher {
         entry.watcher = undefined;
     }
 
+    /** Compares every watched folder with its entries once directory watches churned. */
+    #reconcileAll(except?: DirectoryWatch): void {
+        for (const entry of [...this.#watches.values()]) {
+            if (entry !== except) this.#reconcile(entry);
+        }
+    }
+
+    /**
+     * Folds a reported change into its folder's entries on the next turn, once for a burst, so
+     * the next comparison reports only what no event did.
+     */
+    #settle(key: string, entry: DirectoryWatch): void {
+        if (entry.pending) return;
+        entry.pending = true;
+        setImmediate(() => {
+            if (this.#watches.get(key) === entry) this.#reconcile(entry);
+        });
+    }
+
+    /**
+     * Reports the entries a watched folder gained or lost since they were last taken, then takes
+     * them again. A folder past the entry cap or unreadable is reported as a whole, unless a
+     * change reported but not yet folded in already accounts for it; a folder that went away is
+     * reported by its own path.
+     */
+    #reconcile(entry: DirectoryWatch): void {
+        if (this.#closed) return;
+        const explained = entry.pending;
+        entry.pending = false;
+        const fingerprint = directoryFingerprint(entry.directory);
+        if (fingerprint === entry.fingerprint) return;
+        const previous = entry.entries;
+        entry.fingerprint = fingerprint;
+        entry.entries = fingerprint === undefined ? undefined : directoryEntries(entry.directory);
+        const current = entry.entries;
+        if (fingerprint === undefined) {
+            if (!explained) {
+                const path = entry.relativeDirectory === "" ? null : entry.relativeDirectory;
+                this.#observed(entry.root, path, true);
+            }
+        } else if (previous === undefined || current === undefined) {
+            if (!explained) this.#observed(entry.root, null, true);
+        } else {
+            for (const name of current) {
+                if (previous.has(name)) continue;
+                this.#observed(entry.root, changedPath(entry.relativeDirectory, name), true);
+            }
+            for (const name of previous) {
+                if (current.has(name)) continue;
+                this.#observed(entry.root, changedPath(entry.relativeDirectory, name), true);
+            }
+        }
+    }
+
     #removeWatch(key: string): void {
         const entry = this.#watches.get(key);
         if (entry === undefined) return;
@@ -455,6 +556,42 @@ function changedPath(relativeDirectory: string, filename: string | Buffer | null
     }
     const path = relativeDirectory === "" ? name : `${relativeDirectory}/${name}`;
     return path.length <= MAX_PATH_LENGTH ? path : null;
+}
+
+/**
+ * Identity and change times of a local directory, or undefined once it is gone or is no longer a
+ * directory. They move whenever an entry is created, removed or renamed in it.
+ */
+function directoryFingerprint(path: string): string | undefined {
+    try {
+        const stat = lstatSync(path, { bigint: true });
+        if (!stat.isDirectory()) return undefined;
+        return `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    } catch {
+        return undefined;
+    }
+}
+
+/** A directory's entry names, or undefined past the entry cap or when it cannot be read. */
+function directoryEntries(path: string): ReadonlySet<string> | undefined {
+    let directory: Dir | undefined;
+    try {
+        directory = opendirSync(path);
+        const names = new Set<string>();
+        for (let entry = directory.readSync(); entry !== null; entry = directory.readSync()) {
+            if (names.size === MAX_RECONCILED_ENTRIES) return undefined;
+            names.add(entry.name);
+        }
+        return names;
+    } catch {
+        return undefined;
+    } finally {
+        try {
+            directory?.closeSync();
+        } catch {
+            // The directory handle was already closed.
+        }
+    }
 }
 
 /**
