@@ -28,6 +28,7 @@ import { HistoryModule } from "../history/index.js";
 import type { ConfigModule } from "../config/index.js";
 import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
 import { senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import { mutationIdMetadata, mutationIdOf } from "../impl/mutationEcho.js";
 import {
     collaborationAgentIdSchema,
     collaborationCreateInputSchema,
@@ -339,6 +340,12 @@ export class CollaborationModule implements AgentModule {
     ): Promise<CollaborationCreateResult> {
         const agents = this.#requireAgents();
         const existing = await agents.config(ctx, agentId);
+        // The collaborator and its opening task answer the mutation the creating run answers now;
+        // a retried call keeps the one the collaborator was created with.
+        const mutationId =
+            existing === undefined
+                ? await this.#history.runMutationId(ctx, actingAgentId)
+                : mutationIdOf(existing.metadata);
 
         // A durable tool call may be retried after the collaborator was created but before the
         // result was recorded. An identity this agent already created is that retry, so only the
@@ -350,17 +357,30 @@ export class CollaborationModule implements AgentModule {
             // collaborators from its own background context, which carries no agent configuration —
             // so fall back to what the creator was stored with.
             const parent = agentConfig(ctx) ?? (await agents.config(ctx, actingAgentId));
-            const created = await agents.create(ctx, childConfig(parent, input.title, options), {
-                id: agentId,
-                parent: actingAgentId,
-            });
+            const created = await agents.create(
+                ctx,
+                childConfig(parent, input.title, options, mutationId),
+                {
+                    id: agentId,
+                    parent: actingAgentId,
+                },
+            );
             if (created.id !== agentId) {
                 throw new Error("Agent Base did not preserve the requested collaborator ID.");
             }
         } else if ((await agents.parentOf(ctx, agentId)) !== actingAgentId) {
             throw new Error(`Agent "${agentId}" already exists.`);
         }
-        await this.#deliver(ctx, actingAgentId, agentId, input.text, agentId, "send", selection);
+        await this.#deliver(
+            ctx,
+            actingAgentId,
+            agentId,
+            input.text,
+            agentId,
+            "send",
+            selection,
+            mutationId,
+        );
         return { agentId };
     }
 
@@ -382,6 +402,7 @@ export class CollaborationModule implements AgentModule {
             messageId,
             "steer",
             undefined,
+            await this.#history.runMutationId(ctx, actingAgentId),
         );
     }
 
@@ -673,7 +694,7 @@ export class CollaborationModule implements AgentModule {
                         toAgentId: parent,
                     },
                     ...senderAgentIdMetadata(scope.agent.id),
-                    ...(mutationId === undefined ? {} : { mutationId }),
+                    ...mutationIdMetadata(mutationId),
                 },
             },
         );
@@ -694,6 +715,7 @@ export class CollaborationModule implements AgentModule {
         messageId: string,
         delivery: "send" | "steer",
         selection: (CollaborationAgentSelection & { readonly provider: string }) | undefined,
+        mutationId: string | undefined,
     ): Promise<void> {
         const agents = this.#requireAgents();
         const run = async (work: (workCtx: Context) => Promise<void>): Promise<void> =>
@@ -736,16 +758,13 @@ export class CollaborationModule implements AgentModule {
                           providerId: selection.provider,
                           serviceTier: selection.serviceTier ?? null,
                       };
-            // The run this message starts answers the mutation the sending run answers now, not
-            // whatever the sender is doing by the time the recipient gets to it.
-            const mutationId = await this.#history.runMutationId(txCtx, fromAgentId);
             const options = {
                 id: messageId,
                 metadata: {
                     collaboration: { fromAgentId, toAgentId },
                     ...senderAgentIdMetadata(fromAgentId),
                     ...(mode === undefined ? {} : { mode }),
-                    ...(mutationId === undefined ? {} : { mutationId }),
+                    ...mutationIdMetadata(mutationId),
                 },
                 ...(selection === undefined
                     ? fallback?.options
@@ -1119,12 +1138,14 @@ function childConfig(
     parent: AgentConfig | undefined,
     title: string,
     options: CollaborationCreateOptions,
+    mutationId: string | undefined,
 ): AgentConfig {
     return {
         ...(parent?.environment === undefined ? {} : { environment: parent.environment }),
         ...(parent?.modules === undefined ? {} : { modules: parent.modules }),
         metadata: {
             ...options.metadata,
+            ...mutationIdMetadata(mutationId),
             title,
             ...(options.reportToCreator === false
                 ? { collaboration: { reportToCreator: false } }

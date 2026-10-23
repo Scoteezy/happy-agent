@@ -194,6 +194,7 @@ import {
     type HistoryRunState,
 } from "../history/index.js";
 import { USER_MESSAGE_ORIGIN_METADATA } from "../impl/messageOrigin.js";
+import { mutationIdOf } from "../impl/mutationEcho.js";
 import { decodeRequestProfile, requestProfilesForAgent } from "../impl/requestProfile.js";
 import {
     PermissionsModule,
@@ -328,7 +329,6 @@ import {
     gitWatchBodySchema,
     invokeSlashCommandRequestSchema,
     messageSendBodySchema,
-    mutationIdSchema,
     profilePatchBodySchema,
     projectCloneBodySchema,
     projectRegisterBodySchema,
@@ -688,7 +688,8 @@ export class ApiModule implements AgentModule {
     readonly #apiPendingMessageIds = new Set<string>();
     readonly #announcedExecutionConfigurations = new Map<string, string>();
     readonly #announcedAgentCreations = new Set<string>();
-    readonly #pendingAgentCreations = new Set<string>();
+    /** Created agents awaiting their announcement, each with the mutation its creator answered. */
+    readonly #pendingAgentCreations = new Map<string, string | undefined>();
     readonly #announcedTerminalRuns = new Set<string>();
     readonly #acceptedMessageBatches = new Map<string, AcceptedMessageBatch>();
     readonly #pendingMessageAnnouncements = new Map<
@@ -834,16 +835,10 @@ export class ApiModule implements AgentModule {
                     accepted,
                 );
                 if (runId !== accepted.id) return;
-                const mutationId = accepted.metadata?.["mutationId"];
                 boundedSet(
                     this.#runMutations,
                     scope.agent.id,
-                    {
-                        runId,
-                        mutationId: Value.Check(mutationIdSchema, mutationId)
-                            ? (mutationId as string)
-                            : undefined,
-                    },
+                    { runId, mutationId: mutationIdOf(accepted.metadata) },
                     MAX_RUN_MUTATIONS,
                 );
             },
@@ -3414,8 +3409,10 @@ export class ApiModule implements AgentModule {
             // Initial discovery is part of the created agent's settled public snapshot. Announce
             // creation only after publishing that computed catalog so the creation cursor closes
             // the snapshot and no immediately-created state trails it.
-            if (this.#pendingAgentCreations.delete(agentId)) {
-                await this.#announceCreatedAgent(ctx, agentId);
+            if (this.#pendingAgentCreations.has(agentId)) {
+                const mutationId = this.#pendingAgentCreations.get(agentId);
+                this.#pendingAgentCreations.delete(agentId);
+                await this.#announceCreatedAgent(ctx, agentId, mutationId);
             } else {
                 // Restore-time discovery is a new durable agent event, so its resource version
                 // must remain replayable through the ordinary agent update chain.
@@ -3424,7 +3421,13 @@ export class ApiModule implements AgentModule {
             return;
         }
         if (event.type === "agent.created") {
-            boundedAdd(this.#pendingAgentCreations, agentId, MAX_ANNOUNCED_AGENT_CREATIONS);
+            // An agent another agent created carries the mutation its creator answered.
+            boundedSet(
+                this.#pendingAgentCreations,
+                agentId,
+                mutationIdOf(recordValue(payload?.["metadata"])),
+                MAX_ANNOUNCED_AGENT_CREATIONS,
+            );
             // Creation hooks discover slash commands after the durable lifecycle event. A forced
             // refresh also guarantees the corresponding event exists when conversion reaches an
             // agent created outside the HTTP route, such as a collaborator.
@@ -4213,7 +4216,11 @@ export class ApiModule implements AgentModule {
         pending.resolve();
     }
 
-    async #announceCreatedAgent(ctx: Context, agentId: string): Promise<void> {
+    async #announceCreatedAgent(
+        ctx: Context,
+        agentId: string,
+        mutationId: string | undefined,
+    ): Promise<void> {
         if (this.#announcedAgentCreations.has(agentId)) return;
         const workspaceId = await this.#workspaceIdForAgent(ctx, agentId);
         if (workspaceId === undefined) return;
@@ -4225,7 +4232,9 @@ export class ApiModule implements AgentModule {
         );
         if (agent === undefined || this.#announcedAgentCreations.has(agentId)) return;
         boundedAdd(this.#announcedAgentCreations, agentId, MAX_ANNOUNCED_AGENT_CREATIONS);
-        this.#journal.append("agent.created", { agent });
+        this.#mutationIds.run({ mutationId, inLoop: false }, () => {
+            this.#journal.append("agent.created", { agent });
+        });
     }
 
     /** Announce a Surface chat's new agent once, echoing the winning ensure request. */

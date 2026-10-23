@@ -272,3 +272,74 @@ describe("a message one agent sends another", () => {
         expect(gym.inference.unscripted).toEqual([]);
     }, 60_000);
 });
+
+describe("an agent another agent creates", () => {
+    it("is announced with the run that created it", async () => {
+        let parentAgentId = "";
+        let parentCalls = 0;
+        const gym = await createAgentGym({
+            files: { ".agents/skills/review/SKILL.md": SKILL },
+            inference: (request: GymInferenceRequest): GymTurn => {
+                if (request.sessionId.startsWith("naming:")) {
+                    return { content: [{ text: "<title>Helper</title>", type: "text" }] };
+                }
+                if (request.sessionId !== parentAgentId) {
+                    return { content: [{ text: "helper finished", type: "text" }] };
+                }
+                parentCalls += 1;
+                if (parentCalls > 1) return { content: [{ text: "parent done", type: "text" }] };
+                return {
+                    content: [
+                        {
+                            arguments: {
+                                effort: "medium",
+                                model: "gym/model",
+                                provider: "gym",
+                                text: "Finish at once.",
+                                title: "Helper",
+                            },
+                            callId: "taggedruncreateshelper",
+                            name: "create_agent",
+                            type: "tool_call",
+                        },
+                    ],
+                };
+            },
+        });
+        running.add(gym);
+        parentAgentId = gym.defaultSessionId;
+
+        const runId = await invokeReview(gym, parentAgentId, "a-echo");
+        await gym.waitForRun(runId);
+        const created = await gym.waitUntil(async () => {
+            const events = await gym.events();
+            const start = events.findIndex(
+                (event) => event.type === "run.started" && event.payload.run.id === runId,
+            );
+            return events.slice(start).find((event) => event.type === "agent.created");
+        }, "the helper to be announced");
+        if (created.type !== "agent.created") throw new Error("No helper was announced.");
+        const helperId = created.payload.agent.id;
+        await gym.waitUntil(
+            async () =>
+                (await gym.events()).find(
+                    (event) =>
+                        event.type === "run.finished" &&
+                        (event.payload as { readonly agentId?: unknown }).agentId === helperId,
+                ),
+            "the helper to finish",
+        );
+
+        // Not only the events that name a run: the announcement names none.
+        expect(echoOf(created)).toBe("a-echo");
+        const helperRun = (await gym.events()).filter(
+            (event) =>
+                runIdOf(event) !== undefined &&
+                (event.payload as { readonly agentId?: unknown }).agentId === helperId,
+        );
+        expect(helperRun.map((event) => event.type)).toContain("run.finished");
+        expect(helperRun.filter((event) => echoOf(event) !== "a-echo")).toEqual([]);
+        expect(gym.errors).toEqual([]);
+        expect(gym.inference.unscripted).toEqual([]);
+    }, 60_000);
+});

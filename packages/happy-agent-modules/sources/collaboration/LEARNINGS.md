@@ -118,3 +118,8 @@ Delivery and the settlement report now stamp `mutationId` from History's `runMut
 sending agent when the message is sent, inside the same transaction; the report reads it before
 its settlement ends the run. The run the message starts echoes that mutation, whatever the sender
 does meanwhile.
+
+A created collaborator's `agent.created` echoed nothing, because it is announced before the
+collaborator has a run. Creation now records the same mutation in the collaborator's own
+metadata under `mutationId` (the shared key in `impl/mutationEcho.ts`), and the API announces
+the agent with it. A retried creation keeps the mutation the collaborator was created with.
