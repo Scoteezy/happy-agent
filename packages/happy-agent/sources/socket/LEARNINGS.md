@@ -47,6 +47,12 @@ streaming. A bounded reusable internal HTTP pool adapts native Request/Response 
 handler without duplicating its Node request/response implementation. Cancelling an HTTP client
 closes its upstream work; responses and uploads are not buffered in full or replayed.
 
+Bun's native server hands a GET or HEAD over with no body but keeps its `Content-Length`. The
+forwarder once passed that length on, so the API waited on the pooled internal connection for bytes
+that never came and took the next request on it, possibly another client's, as that body; the
+next request was answered with an empty `400`. A request whose body Bun discarded is now
+forwarded without a length. Only the pinned-Bun gym exposed it.
+
 Bun 1.4.0's node:http CONNECT event can fire without delivering socket writes to the client.
 Merely removing the old request limit or trusting Node-only tests does not prove tunnel support.
 Keep native-runtime smoke coverage for repeated HTTP requests, rejected requests, SSE cancellation,

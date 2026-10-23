@@ -33,6 +33,10 @@ export function createBunHttpForwarder(
             request.signal.throwIfAborted();
             const url = new URL(request.url);
             const headers = endToEndHeaders(Object.fromEntries(request.headers));
+            // Bun discards a GET or HEAD body but keeps its Content-Length. Forwarded as is, the
+            // API would wait on the pooled connection for bytes that never come and swallow the
+            // next request sent over it, which may be another client's, as that body.
+            if (request.body === null) headers.delete("content-length");
             return await new Promise<Response>((resolve, reject) => {
                 const upstream = httpRequest({
                     agent,

@@ -100,6 +100,24 @@ describe("native Bun HTTP forwarding", () => {
         expect((await reader.read()).done).toBe(true);
     });
 
+    it("drops the length of a body Bun discarded so the next request keeps its own bytes", async () => {
+        const seen: string[] = [];
+        const f = await fixture((request, response) => {
+            seen.push(`${request.url} ${String(request.headers["content-length"])}`);
+            response.end("ok");
+        });
+        // Bun hands a GET over without its body but with its Content-Length.
+        const first = await f.forward(
+            new Request("http://happy/first", { headers: { "content-length": "4096" } }),
+        );
+        expect(await first.text()).toBe("ok");
+        const second = await f.forward(new Request("http://happy/second"));
+        expect(second.status).toBe(200);
+        expect(await second.text()).toBe("ok");
+        expect(seen).toEqual(["/first undefined", "/second undefined"]);
+        expect(f.connections()).toBe(1);
+    });
+
     it.each([204, 304])(
         "preserves a bodyless %i without constructing an invalid Response",
         async (status) => {
