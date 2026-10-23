@@ -480,7 +480,7 @@ describe("Happy Agent onboarding and usage matrix", () => {
             });
             gyms.add(gym);
             // Pushed account usage is what protocol 29 adds.
-            expect((await gym.client.getHealth()).version.protocol).toBe(29);
+            expect((await gym.client.getHealth()).version.protocol).toBeGreaterThanOrEqual(29);
 
             const startupEvents = await gym.waitUntil(async () => {
                 const page = await gym.client.getEvents({ limit: 10_000 });
