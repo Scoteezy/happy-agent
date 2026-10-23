@@ -157,6 +157,22 @@ describe("superviseAgentDaemon", () => {
         expect(fixture.released).toBe(0);
     });
 
+    it("never restarts a daemon that refused data a newer release wrote", async () => {
+        const fixture = arrange([
+            { code: 65, signal: null, afterMs: 1_500 },
+            { code: 65, signal: null, afterMs: 1_500 },
+        ]);
+
+        const outcome = await superviseAgentDaemon(fixture.dependencies, POLICY);
+
+        expect(outcome).toMatchObject({ kind: "refused", lastExit: { code: 65, signal: null } });
+        expect(fixture.spawned).toHaveLength(1);
+        expect(fixture.sleeps).toEqual([]);
+        expect(fixture.published.map((snapshot) => snapshot.phase)).toEqual(["running", "refused"]);
+        // The record stays for status and the desktop app to read.
+        expect(fixture.released).toBe(0);
+    });
+
     it("treats a crash after a long healthy run as a fresh failure, not part of a loop", async () => {
         const fixture = arrange([
             { code: 1, signal: null, afterMs: 2_000 },

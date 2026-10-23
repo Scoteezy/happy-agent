@@ -30,12 +30,14 @@ const daemonSupervisorStateSchema = Type.Object(
         /**
          * `running`: a daemon process is up. `restarting`: the daemon exited unexpectedly and a
          * replacement starts at `nextRestartAt`. `gave-up`: the daemon kept exiting unexpectedly
-         * soon after starting, so the supervisor stopped restarting it and exited.
+         * soon after starting, so the supervisor stopped restarting it and exited. `refused`: the
+         * daemon refused data a newer release wrote, so the supervisor exited without restarting it.
          */
         phase: Type.Union([
             Type.Literal("running"),
             Type.Literal("restarting"),
             Type.Literal("gave-up"),
+            Type.Literal("refused"),
         ]),
         daemonPid: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_147_483_647 })),
         /** Every unexpected exit this supervisor restarted after. */
@@ -44,6 +46,10 @@ const daemonSupervisorStateSchema = Type.Object(
         quickFailures: Type.Integer({ minimum: 0 }),
         lastExit: Type.Optional(daemonExitSchema),
         nextRestartAt: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+        /** With `refused`: the release that last wrote the data, from `data-version.json`. */
+        writtenBy: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+        /** With `refused`: the oldest release that may open the data. */
+        minimumVersion: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
         updatedAt: Type.String({ minLength: 1, maxLength: 64 }),
     },
     { additionalProperties: false },

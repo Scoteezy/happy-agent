@@ -24,6 +24,11 @@
             "import": "./dist/transport/index.js",
             "default": "./dist/transport/index.js"
         },
+        "./data-version": {
+            "types": "./dist/runtime/HappyAgentDataVersion.d.ts",
+            "import": "./dist/runtime/HappyAgentDataVersion.js",
+            "default": "./dist/runtime/HappyAgentDataVersion.js"
+        },
         "./tailcat": {
             "types": "./dist/tailcat/remote.d.ts",
             "import": "./dist/tailcat/remote.js",
@@ -86,7 +91,7 @@
         "yjs": "13.6.31"
     },
     "devDependencies": {
-        "@slopus/happy-agent-base": "npm:@slopus/happy-agent-base@0.0.64",
+        "@slopus/happy-agent-base": "npm:@slopus/happy-agent-base@0.0.65",
         "@types/markdown-it": "14.1.2",
         "@types/node": "^24.0.10",
         "@types/turndown": "^5.0.5",
@@ -95,7 +100,7 @@
         "vitest": "^3.2.4"
     },
     "peerDependencies": {
-        "@slopus/happy-agent-base": "0.0.64"
+        "@slopus/happy-agent-base": "0.0.65"
     },
     "engines": {
         "node": ">=22.19.0"

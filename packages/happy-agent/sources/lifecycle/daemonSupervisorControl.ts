@@ -1,3 +1,5 @@
+import { describeHappyAgentNewerData } from "@slopus/happy-agent-modules/data-version";
+
 import { isDaemonProcessRunning, waitForDaemonProcessExit } from "./daemonPid.js";
 import { daemonProcessIdentity } from "./daemonProcessIdentity.js";
 import {
@@ -11,7 +13,12 @@ const SUPERVISOR_EXIT_TIMEOUT_MS = 5_000;
 
 /** Whether the process that published this state is still that supervisor. */
 export async function isDaemonSupervisorRunning(state: DaemonSupervisorState): Promise<boolean> {
-    if (state.phase === "gave-up" || state.supervisorPid === process.pid) return false;
+    if (
+        state.phase === "gave-up" ||
+        state.phase === "refused" ||
+        state.supervisorPid === process.pid
+    )
+        return false;
     if (!(await isDaemonProcessRunning(state.supervisorPid))) return false;
     if (state.supervisorIdentity === undefined) return true;
     const identity = await daemonProcessIdentity(state.supervisorPid).catch(() => undefined);
@@ -46,6 +53,22 @@ export async function describeDaemonSupervisor(
         () => undefined,
     );
     if (state === undefined) return [];
+    if (state.phase === "refused") {
+        if (daemonResponding) return [];
+        return [
+            describeHappyAgentNewerData(
+                state.writtenBy === undefined || state.minimumVersion === undefined
+                    ? undefined
+                    : {
+                          version: 1,
+                          writtenBy: state.writtenBy,
+                          minimumVersion: state.minimumVersion,
+                          updatedAt: state.updatedAt,
+                      },
+            ),
+            "The daemon was not restarted, because this release cannot open that data.",
+        ];
+    }
     if (state.phase === "gave-up") {
         // A daemon started some other way since then makes this record history, not status.
         if (daemonResponding || state.lastExit === undefined) return [];

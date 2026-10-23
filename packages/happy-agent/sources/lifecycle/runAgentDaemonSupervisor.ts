@@ -4,6 +4,12 @@ import { appendFile, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 
+import {
+    HAPPY_AGENT_NEWER_DATA_EXIT_CODE,
+    happyAgentDataVersionPath,
+    readHappyAgentDataVersion,
+} from "@slopus/happy-agent-modules/data-version";
+
 import { isDaemonProcessRunning, readDaemonPid } from "./daemonPid.js";
 import { daemonProcessIdentity } from "./daemonProcessIdentity.js";
 import { consumeDaemonStopIntent } from "./daemonStopIntent.js";
@@ -90,6 +96,12 @@ export async function runAgentDaemonSupervisor(
                     );
                 },
                 publish: async (snapshot) => {
+                    const stamp =
+                        snapshot.phase === "refused"
+                            ? await readHappyAgentDataVersion(
+                                  happyAgentDataVersionPath(paths.directory),
+                              )
+                            : undefined;
                     await writeDaemonSupervisorState(statePath, {
                         version: 1,
                         instance,
@@ -103,6 +115,9 @@ export async function runAgentDaemonSupervisor(
                         ...(snapshot.phase === "restarting"
                             ? { nextRestartAt: new Date(snapshot.nextRestartAt).toISOString() }
                             : {}),
+                        ...(stamp === undefined
+                            ? {}
+                            : { writtenBy: stamp.writtenBy, minimumVersion: stamp.minimumVersion }),
                         updatedAt: new Date().toISOString(),
                     }).catch((error: unknown) => {
                         log(
@@ -131,6 +146,7 @@ export async function runAgentDaemonSupervisor(
             options.stopSignal.removeEventListener("abort", onSignal);
         }
     }
+    if (outcome.kind === "refused") return HAPPY_AGENT_NEWER_DATA_EXIT_CODE;
     return outcome.kind === "gave-up" ? 1 : 0;
 }
 

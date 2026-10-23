@@ -2333,9 +2333,8 @@ export class HistoryModule implements AgentModule {
             scope: AgentModuleScope,
             event: AgentBasePersistedEvent,
         ): Promise<void> => {
-            const sessionEvent = event as SessionEvent;
-            if (sessionEvent.type === "toolcall_result_end") {
-                await this.#recordProviderToolResult(ctx, scope, sessionEvent);
+            if (event.type === "toolcall_result_end") {
+                await this.#recordProviderToolResult(ctx, scope, event);
                 return;
             }
             const pendingInferenceId = await scope.runKV.read(ctx, PENDING_INFERENCE_ID_KEY);
@@ -3351,8 +3350,11 @@ function statsEqual(left: HistoryStats, right: HistoryStats): boolean {
     );
 }
 
-/** The block a persisted event carries. */
-function toHistoryBlock(event: AgentBasePersistedEvent, requested = false): HistoryBlock {
+/** The block a persisted event carries. A provider's own tool result is recorded separately. */
+function toHistoryBlock(
+    event: Exclude<AgentBasePersistedEvent, { readonly type: "toolcall_result_end" }>,
+    requested = false,
+): HistoryBlock {
     if (event.type === "text_end") return { type: "text", text: event.block.text };
     if (event.type === "reasoning_end") {
         // A provider that signs or encrypts its reasoning exposes none of it. That the model

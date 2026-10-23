@@ -117,3 +117,22 @@ standing the supervisor down; the supervisor consumes the record and lets that e
 that times out signals the detached process group, so a stalled daemon never outlives the
 supervisor that was told to stop. Windows has no process group to do that with and stays
 unsupervised until it gets its own mechanism.
+
+## Data a newer release migrated is refused once, never restarted
+
+The desktop app can put an older daemon on data a newer one migrated, through a switch from
+preview to stable, a pulled release, or a manual pick. Its migration check threw, `run` exited 1,
+and the crash supervisor restarted it with backoff until it gave up. Each `start` then began the
+same loop again. The daemon now refuses with `HappyAgentNewerDataError` and exits 65
+(`EX_DATAERR`) with "This data was written by a newer Happy Agent (version X); update to
+continue." The supervisor treats 65 as final, even after a stop intent: it publishes `refused`
+with the stamp's versions and exits 65. `start` and `reload` fail at once with the same message
+and status, which is what the desktop's `execFile(start)` sees.
+
+Releases that already shipped cannot refuse cleanly, so `agent/data-version.json` lets the
+installer avoid them. `minimumVersion` is raised before the first migration runs, so a crash in
+the middle of a migration still leaves older releases blocked. It starts at the first stamping
+release's own version, even when that blocks a downgrade that would have worked: keeping a newer
+daemon is safe, and handing data to an older one is not. The stamp is advisory only; the
+migration ledger inside each database decides. The supervisor and the CLI read the stamp through
+`@slopus/happy-agent-modules/data-version`, so neither loads the runtime.

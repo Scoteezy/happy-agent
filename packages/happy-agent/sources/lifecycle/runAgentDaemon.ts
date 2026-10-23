@@ -1,4 +1,7 @@
+import { HappyAgentNewerDataError } from "@slopus/happy-agent-modules";
+
 import { startHappyAgentDaemon, type HappyAgentDaemon } from "../main.js";
+import { AgentDaemonError } from "./AgentDaemonError.js";
 import { syncHappyAgentDocs } from "../documentation/syncHappyAgentDocs.js";
 import { removeDaemonPidSync } from "./daemonPid.js";
 import { createGymInferenceFromEnvironment } from "./gymInference.js";
@@ -30,12 +33,22 @@ export async function runAgentDaemon(
     if (persistPid) {
         process.once("exit", () => removeDaemonPidSync(paths.pidPath, process.pid));
     }
-    const daemon = await startHappyAgentDaemon({
-        happyHome: paths.happyHome,
-        persistPid,
-        version: identity.version,
-        ...(gymInference === undefined ? {} : { inference: gymInference }),
-    });
+    let daemon: HappyAgentDaemon;
+    try {
+        daemon = await startHappyAgentDaemon({
+            happyHome: paths.happyHome,
+            persistPid,
+            version: identity.version,
+            ...(gymInference === undefined ? {} : { inference: gymInference }),
+        });
+    } catch (error) {
+        // Data a newer release migrated is refused with its own exit status, so neither the
+        // crash supervisor nor `start` tries again; restarting this build cannot help.
+        if (error instanceof HappyAgentNewerDataError) {
+            throw new AgentDaemonError(error.message, { cause: error, exitCode: error.exitCode });
+        }
+        throw error;
+    }
     const stop = (signal: "SIGINT" | "SIGTERM") => {
         const reason = signal === "SIGINT" ? "sigint" : "sigterm";
         void daemon.close(reason).catch((error: unknown) => {

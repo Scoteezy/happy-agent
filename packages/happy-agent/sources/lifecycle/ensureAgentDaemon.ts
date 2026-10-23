@@ -9,6 +9,12 @@ import {
     type HealthResponse,
 } from "@slopus/happy-agent-client";
 import { loadHappyAgentConfiguration } from "@slopus/happy-agent-modules";
+import {
+    describeHappyAgentNewerData,
+    HAPPY_AGENT_NEWER_DATA_EXIT_CODE,
+    happyAgentDataVersionPath,
+    readHappyAgentDataVersion,
+} from "@slopus/happy-agent-modules/data-version";
 
 import { AgentDaemonError } from "./AgentDaemonError.js";
 import { createUnixSocketFetch } from "./createUnixSocketFetch.js";
@@ -169,7 +175,12 @@ async function startAgentDaemonProcess(
         if (child === undefined) {
             await readiness;
         } else {
-            await superviseSpawnedDaemon(child, readiness, DAEMON_CHILD_STARTUP_TIMEOUT_MS);
+            await superviseSpawnedDaemon(child, readiness, DAEMON_CHILD_STARTUP_TIMEOUT_MS, {
+                describeRefusal: async () =>
+                    describeHappyAgentNewerData(
+                        await readHappyAgentDataVersion(happyAgentDataVersionPath(paths.directory)),
+                    ),
+            });
         }
     } finally {
         // A start that failed early must not keep polling, and keep this process alive, until
@@ -266,6 +277,10 @@ export async function superviseSpawnedDaemon<Result>(
     child: SpawnedAgentDaemonProcess,
     readiness: Promise<Result>,
     timeoutMs: number,
+    options: {
+        /** What to tell a person when the daemon refused data a newer release wrote. */
+        readonly describeRefusal?: () => Promise<string>;
+    } = {},
 ): Promise<Result> {
     let timer: NodeJS.Timeout | undefined;
     let onExit: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
@@ -284,6 +299,20 @@ export async function superviseSpawnedDaemon<Result>(
         const failed = new Promise<never>((_, reject) => {
             onExit = (code, signal) => {
                 if (code === 0 && signal === null) return;
+                if (code === HAPPY_AGENT_NEWER_DATA_EXIT_CODE && signal === null) {
+                    // Starting again cannot help; the caller exits with the same status.
+                    const fallback = describeHappyAgentNewerData(undefined);
+                    void (options.describeRefusal?.() ?? Promise.resolve(fallback))
+                        .catch(() => fallback)
+                        .then((message) => {
+                            reject(
+                                new AgentDaemonError(message, {
+                                    exitCode: HAPPY_AGENT_NEWER_DATA_EXIT_CODE,
+                                }),
+                            );
+                        });
+                    return;
+                }
                 reject(
                     new AgentDaemonError(
                         `The local daemon failed to start (${signal === null ? `exit code ${String(code)}` : `signal ${signal}`}).`,

@@ -50,3 +50,11 @@ of Staff discovers and publishes its catalog independently. Its initial publicat
 after the retained snapshot and look like a reader mutation. Setup now waits for that bot's exact
 public catalog and creation events before capturing cursors. The original mutation whitelist,
 privacy checks, canonical-record checks, and cursor assertions remain intact.
+
+## Incompatible data changes need a migration in their own module
+
+The startup refusal and `data-version.json` are triggered only by a migration key an older build
+does not know, in a module that build has. A change to stored data that an older release would
+misread, such as a new document format, must add a migration to the module that owns that data,
+even an empty marker. Otherwise the older release opens the data and fails later, while it is
+running. Fields that older code ignores need no migration, and neither does a new module.

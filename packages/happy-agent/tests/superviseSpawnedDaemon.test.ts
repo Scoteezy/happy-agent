@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, expect, it } from "vitest";
 
+import { AgentDaemonError } from "../sources/lifecycle/AgentDaemonError.js";
 import { isDaemonProcessRunning } from "../sources/lifecycle/daemonPid.js";
 import { superviseSpawnedDaemon } from "../sources/lifecycle/ensureAgentDaemon.js";
 
@@ -65,5 +66,24 @@ it.skipIf(process.platform === "win32")(
         const readiness = new Promise<string>((resolve) => setTimeout(() => resolve("ready"), 300));
 
         await expect(superviseSpawnedDaemon(supervisor, readiness, 30_000)).resolves.toBe("ready");
+    },
+);
+
+it.skipIf(process.platform === "win32")(
+    "a start ends at once with the refusal when the daemon refuses newer data",
+    async () => {
+        const supervisor = spawn("/bin/sh", ["-c", "exit 65"], { detached: true, stdio: "ignore" });
+        const message =
+            "This data was written by a newer Happy Agent (version 0.4.200); update to continue.";
+
+        const refusal = await superviseSpawnedDaemon(
+            supervisor,
+            new Promise<never>(() => undefined),
+            30_000,
+            { describeRefusal: async () => message },
+        ).catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(AgentDaemonError);
+        expect(refusal).toMatchObject({ message, exitCode: 65 });
     },
 );

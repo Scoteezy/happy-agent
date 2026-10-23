@@ -55,8 +55,18 @@ fight a respawn. `kill` and `stop` also stand down a supervisor that is waiting 
 daemon. Restarts back off from one second to thirty; after five consecutive exits that each came
 within a minute of starting, the supervisor stops and leaves the daemon down. It publishes what it
 is doing in the owner-only `agent/supervisor.json` (`running`, `restarting` with `nextRestartAt`,
-or `gave-up`, with the last exit's status, signal, and uptime), and `status` reports it. The next
-`start` begins a fresh supervisor. Windows runs the daemon unsupervised. The Node-compatible package runs `node <cli> run`; a standalone
+`gave-up`, or `refused`, with the last exit's status, signal, and uptime), and `status` reports it. The next
+`start` begins a fresh supervisor.
+
+A daemon whose databases hold migrations this release does not know, which happens when a newer
+release migrated the data, refuses to start and exits with status 65. The message is
+`This data was written by a newer Happy Agent (version X); update to continue.` The supervisor never restarts it. It publishes
+`refused` with the stamp's `writtenBy` and `minimumVersion` and exits 65, and `start` and `reload`
+exit 65 with the same message. Migrations of a module this release does not have are additive and
+never refused. `agent/data-version.json` (`version`, `writtenBy`, `minimumVersion`, `updatedAt`)
+says which releases can open the data without opening it. Every release records itself there,
+and before it applies any migration it raises `minimumVersion` to its own version. An installer
+must never select a release older than `minimumVersion`. Windows runs the daemon unsupervised. The Node-compatible package runs `node <cli> run`; a standalone
 binary relaunches itself. A running daemon whose reported version does not match the CLI is
 replaced. `stop` waits for both the socket and the exact daemon PID to disappear. All state lives
 under the Happy home (`~/.happy` or `HAPPY_HOME_DIR`), in its `agent/` directory: `server.sock`,

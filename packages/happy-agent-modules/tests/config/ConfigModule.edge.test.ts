@@ -162,6 +162,7 @@ describe("ConfigModule edge coverage", () => {
                     process.platform === "darwin" ? "Happy/Config" : "happy/config",
                 ),
                 databasePath: join(root, ".happy", "agent", "agent.sqlite"),
+                dataVersionPath: join(root, ".happy", "agent", "data-version.json"),
                 docsHome: join(root, ".happy", "docs"),
                 generatedPath: join(
                     root,

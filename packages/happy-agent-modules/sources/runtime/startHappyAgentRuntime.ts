@@ -6,6 +6,7 @@ import { RunnersModule } from "../runners/index.js";
 
 import {
     AgentStorage,
+    AgentStorageNewerDataError,
     AgentSystemLocal,
     withAgentDatabase,
     type AgentModel,
@@ -97,6 +98,11 @@ import { WorkspacesModule } from "../workspaces/index.js";
 import { checkModuleToolParameters } from "./checkModuleToolParameters.js";
 import { openHappyAgentDatabase } from "./HappyAgentDatabase.js";
 import { acquireHappyAgentStorageLock } from "./HappyAgentStorageLock.js";
+import {
+    HappyAgentNewerDataError,
+    readHappyAgentDataVersion,
+    stampHappyAgentDataVersion,
+} from "./HappyAgentDataVersion.js";
 import { InstallationModule } from "./InstallationModule.js";
 import { instrumentModuleLogging } from "./instrumentModuleLogging.js";
 
@@ -392,6 +398,14 @@ export async function startHappyAgentRuntime(
         });
         await chmod(paths.autoDatabasePath, 0o600);
 
+        // Before either store applies a migration, every older release is told it can no longer
+        // open the data. Stamping first means a crash mid-migration still leaves it refused.
+        const raiseDataVersion = async (): Promise<void> => {
+            await stampHappyAgentDataVersion(paths.dataVersionPath, configuration.version, {
+                raiseMinimum: true,
+            });
+        };
+
         const runtimeLifetime = ctx.lifetime;
         if (runtimeLifetime === undefined) {
             throw new Error("The Happy Agent runtime has no graceful-shutdown lifetime.");
@@ -470,6 +484,7 @@ export async function startHappyAgentRuntime(
                         );
                     }
                 },
+                beforeMigrate: raiseDataVersion,
                 database: review.database,
             }),
         );
@@ -890,19 +905,38 @@ export async function startHappyAgentRuntime(
 
         const storage = new AgentStorage({
             acquireLock: async () => await acquireHappyAgentStorageLock(paths.agentLockPath),
+            beforeMigrate: raiseDataVersion,
             database: main.database,
         });
-        const agentSystem = await AgentSystemLocal.create(ctx.named("agent-system"), storage, {
-            models,
-            modules: ordered,
-            provider,
-            providers,
-            retryForever: configuration.values.settings.ethan.enabled,
-            sendMode: "all",
-            shutdownName: "agent-system",
-            steeringMode: "all",
-        });
+        let agentSystem: AgentSystemLocal<LibSQLDatabase>;
+        try {
+            agentSystem = await AgentSystemLocal.create(ctx.named("agent-system"), storage, {
+                models,
+                modules: ordered,
+                provider,
+                providers,
+                retryForever: configuration.values.settings.ethan.enabled,
+                sendMode: "all",
+                shutdownName: "agent-system",
+                steeringMode: "all",
+            });
+        } catch (error: unknown) {
+            // The main store, or the reviewer's store its auto module opens while starting,
+            // was migrated by a newer release. Nothing was migrated, and retrying cannot help.
+            if (!causedBy(error, AgentStorageNewerDataError)) throw error;
+            throw new HappyAgentNewerDataError(
+                await readHappyAgentDataVersion(paths.dataVersionPath),
+                { cause: error },
+            );
+        }
         system = agentSystem;
+        // Every store opened, so this release can read the data. A failure to say so is only a
+        // stale stamp: the ledger inside the databases stays the authority.
+        await stampHappyAgentDataVersion(paths.dataVersionPath, configuration.version, {
+            raiseMinimum: false,
+        }).catch((error: unknown) => {
+            ctx.log.warn("Could not record which release last opened the data.", {}, error);
+        });
         let mainDraining: Promise<void> | undefined;
         const drainMain = (): Promise<void> => {
             if (mainDraining === undefined) {
@@ -995,6 +1029,28 @@ export async function startHappyAgentRuntime(
         await close().catch(() => undefined);
         throw error;
     }
+}
+
+/** Whether the error or anything in its cause chain is an instance of the given type. */
+function causedBy<Failure extends Error>(
+    error: unknown,
+    type: abstract new (...args: never[]) => Failure,
+): boolean {
+    const seen = new Set<Error>();
+    let current: unknown = error;
+    while (current instanceof Error && !seen.has(current)) {
+        const failure: Error = current;
+        if (failure instanceof type) return true;
+        seen.add(failure);
+        if (
+            failure instanceof AggregateError &&
+            failure.errors.some((inner: unknown) => causedBy(inner, type))
+        ) {
+            return true;
+        }
+        current = failure.cause;
+    }
+    return false;
 }
 
 function registerRuntimeShutdownTask(

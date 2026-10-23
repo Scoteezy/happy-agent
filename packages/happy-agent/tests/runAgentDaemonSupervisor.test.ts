@@ -19,7 +19,8 @@ import {
 /**
  * A stand-in daemon: it counts its runs, records its PID where the real daemon does, and then
  * behaves as the run's mode says: `crash-once` kills itself with SIGKILL on the first run and
- * stays up afterwards, `crash` always exits with status 3, and `clean` exits with status 0.
+ * stays up afterwards, `crash` always exits with status 3, `clean` exits with status 0, and
+ * `refuse` exits with 65, as a daemon does on data a newer release wrote.
  */
 const FAKE_DAEMON = `
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -35,6 +36,7 @@ if (process.env.${AGENT_DAEMON_SUPERVISE_ENVIRONMENT} !== undefined) {
 const mode = process.env.FAKE_DAEMON_MODE;
 if (mode === "clean") process.exit(0);
 if (mode === "crash") process.exit(3);
+if (mode === "refuse") process.exit(65);
 if (run === 1) process.kill(process.pid, "SIGKILL");
 setInterval(() => undefined, 1_000);
 `;
@@ -73,7 +75,7 @@ afterEach(async () => {
     await rm(happyHome, { force: true, recursive: true });
 });
 
-function supervise(mode: "clean" | "crash" | "crash-once"): Promise<number> {
+function supervise(mode: "clean" | "crash" | "crash-once" | "refuse"): Promise<number> {
     vi.stubEnv("FAKE_DAEMON_MODE", mode);
     const stop = new AbortController();
     stops.push(stop);
@@ -181,6 +183,34 @@ describe.skipIf(process.platform === "win32")("runAgentDaemonSupervisor", () => 
             "The daemon stopped unexpectedly 3 times in a row soon after starting, so it was not restarted again.",
         );
         expect(lines).toContain("Run 'happy-agent start' to start it again.");
+    });
+
+    it("exits with the refusal, never restarting a daemon that refused newer data", async () => {
+        await writeFile(
+            join(happyHome, "agent", "data-version.json"),
+            JSON.stringify({
+                version: 1,
+                writtenBy: "0.4.200",
+                minimumVersion: "0.4.190",
+                updatedAt: "2026-10-23T00:00:00.000Z",
+            }),
+            { mode: 0o600 },
+        );
+
+        await expect(supervise("refuse")).resolves.toBe(65);
+
+        expect(await runs()).toBe(1);
+        expect(await supervisorState()).toMatchObject({
+            phase: "refused",
+            writtenBy: "0.4.200",
+            minimumVersion: "0.4.190",
+            lastExit: { code: 65, signal: null },
+        });
+        const lines: string[] = [];
+        await runAgentDaemonCommand("status", { log: (line) => lines.push(line) });
+        expect(lines).toContain(
+            "This data was written by a newer Happy Agent (version 0.4.200); update to version 0.4.190 or newer to continue.",
+        );
     });
 
     it("stop stands down a supervisor that is waiting to restart a crashed daemon", async () => {

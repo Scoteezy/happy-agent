@@ -104,7 +104,14 @@ async function main(): Promise<void> {
         // The runtime import is deferred so lifecycle commands never load the whole agent.
         const { runAgentDaemon } = await import("./lifecycle/runAgentDaemon.js");
         // The daemon keeps this process alive through its socket server until it closes.
-        await runAgentDaemon();
+        try {
+            await runAgentDaemon();
+        } catch (error) {
+            // Work a failed start left behind must not hold the process open or change the
+            // exit status a supervisor reads, such as the newer-data refusal's.
+            reportFailure(error);
+            process.exit(process.exitCode);
+        }
         return;
     }
     // Deferred like the runtime, so a crash supervisor never loads daemon lifecycle management.

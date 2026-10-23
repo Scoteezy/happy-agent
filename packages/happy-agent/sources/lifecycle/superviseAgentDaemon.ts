@@ -1,3 +1,5 @@
+import { HAPPY_AGENT_NEWER_DATA_EXIT_CODE } from "@slopus/happy-agent-modules/data-version";
+
 import { describeDaemonExit, type DaemonExit } from "./daemonSupervisorState.js";
 
 /**
@@ -52,6 +54,13 @@ export type DaemonSupervisorSnapshot =
           readonly restarts: number;
           readonly quickFailures: number;
           readonly lastExit: DaemonExit;
+      }
+    | {
+          /** The daemon refused data a newer release wrote; restarting cannot help. */
+          readonly phase: "refused";
+          readonly restarts: number;
+          readonly quickFailures: number;
+          readonly lastExit: DaemonExit;
       };
 
 export interface DaemonSupervisorDependencies {
@@ -76,13 +85,14 @@ export type DaemonSupervisorOutcome =
           readonly kind: "stopped";
           readonly reason: "clean-exit" | "stop-intent" | "supervisor-stopped" | "replaced";
       }
-    | { readonly kind: "gave-up"; readonly lastExit: DaemonExit };
+    | { readonly kind: "gave-up"; readonly lastExit: DaemonExit }
+    | { readonly kind: "refused"; readonly lastExit: DaemonExit };
 
 /**
  * Keeps one daemon process alive across unexpected exits.
  *
  * Only an abnormal exit restarts the daemon. A clean exit, or any exit after a recorded
- * intentional stop, ends supervision, so `stop`, `kill`, `reload`, the shutdown API, and an
+ * intentional stop, ends supervision, and so does a daemon refusing data a newer release wrote, so `stop`, `kill`, `reload`, the shutdown API, and an
  * uninstall never fight a respawn. Restarts back off exponentially; after
  * `maxQuickFailures` consecutive exits that each came within `stableUptimeMs` of their start,
  * the supervisor publishes `gave-up` and exits instead of looping forever.
@@ -125,8 +135,17 @@ export async function superviseAgentDaemon(
         if (status.code === 0 && status.signal === null) {
             return await stopped(dependencies, "clean-exit");
         }
-        if (intended) return await stopped(dependencies, "stop-intent");
         lastExit = { at: new Date(dependencies.now()).toISOString(), ...status, uptimeMs };
+        // A refusal stays on record even when the daemon was also being stopped, so the desktop
+        // app and `status` can still explain why it will not start.
+        if (status.code === HAPPY_AGENT_NEWER_DATA_EXIT_CODE && status.signal === null) {
+            dependencies.log(
+                "supervisor: the daemon refused data written by a newer Happy Agent; it will not be restarted until Happy Agent is updated.",
+            );
+            await dependencies.publish({ phase: "refused", restarts, quickFailures, lastExit });
+            return { kind: "refused", lastExit };
+        }
+        if (intended) return await stopped(dependencies, "stop-intent");
         quickFailures = uptimeMs >= policy.stableUptimeMs ? 1 : quickFailures + 1;
         const exitText = `${describeDaemonExit(status)} after ${formatUptime(uptimeMs)}`;
         if (quickFailures >= policy.maxQuickFailures) {
