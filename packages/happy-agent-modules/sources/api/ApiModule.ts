@@ -9596,7 +9596,9 @@ export class ApiModule implements AgentModule {
                       ? 400
                       : error.code === "conflict"
                         ? 409
-                        : 503;
+                        : error.code === "unsupported"
+                          ? 501
+                          : 503;
             sendJson(response, status, {
                 error: error.message,
                 code:
@@ -9604,7 +9606,9 @@ export class ApiModule implements AgentModule {
                         ? "not_found"
                         : error.code === "invalid"
                           ? "invalid_request"
-                          : "conflict",
+                          : error.code === "unsupported"
+                            ? "unsupported"
+                            : "conflict",
             });
             return;
         }

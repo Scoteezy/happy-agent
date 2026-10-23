@@ -145,7 +145,12 @@ export type TerminalEventListener = Static<typeof terminalEventListenerSchema>;
 export type TerminalUnsubscribe = () => void;
 
 /** Why a terminal request could not be served, in terms a caller can turn into a status code. */
-export type TerminalErrorCode = "conflict" | "invalid" | "not_found" | "unavailable";
+export type TerminalErrorCode =
+    | "conflict"
+    | "invalid"
+    | "not_found"
+    | "unavailable"
+    | "unsupported";
 
 export class TerminalError extends Error {
     readonly code: TerminalErrorCode;

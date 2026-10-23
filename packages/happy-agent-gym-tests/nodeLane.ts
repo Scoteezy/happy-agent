@@ -22,7 +22,9 @@ export const nodeLaneScenarios: readonly string[] = [
 ];
 
 /** Gym scenarios that prove Node-only behavior, so they run in the Node lane alone. */
-export const nodeOnlyScenarios: readonly string[] = [];
+export const nodeOnlyScenarios: readonly string[] = [
+    "terminals_are_unsupported_without_bun.test.ts",
+];
 
 /** Unit test paths, relative to `packages/happy-agent-modules`, that also run under Node. */
 export const nodeLaneModuleTests: readonly string[] = [

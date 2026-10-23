@@ -1,6 +1,7 @@
 import type { Compute } from "@slopus/happy-agent-compute";
 import type { Context } from "@steve.kite/stdlib";
 
+import { TerminalError } from "../Terminal.js";
 import type { TerminalProcess, TerminalProcessFactory } from "../TerminalProcess.js";
 
 /**
@@ -17,15 +18,29 @@ export function createMachineTerminalProcessFactory(options: {
         async start(start) {
             const machine = await options.machine();
             if (machine.processes === undefined) {
-                throw new Error("This folder's machine cannot open terminals.");
+                throw new TerminalError(
+                    "unsupported",
+                    "This folder's machine cannot open terminals.",
+                );
             }
             const launch = shellLaunch(options.platform(), start.shell, start.command);
-            const child = await machine.processes.start(options.ctx, {
-                ...launch,
-                cwd: start.cwd,
-                environment: terminalEnvironment(start.cwd),
-                terminal: { cols: start.cols, rows: start.rows, name: "xterm-256color" },
-            });
+            let child: Awaited<ReturnType<typeof machine.processes.start>>;
+            try {
+                child = await machine.processes.start(options.ctx, {
+                    ...launch,
+                    cwd: start.cwd,
+                    environment: terminalEnvironment(start.cwd),
+                    terminal: { cols: start.cols, rows: start.rows, name: "xterm-256color" },
+                });
+            } catch (error) {
+                // A compute that cannot host a pseudo-terminal says so with ENOTSUP: this machine
+                // when the daemon runs outside Bun, or a runner without terminals. Its message is
+                // written for people, so it reaches them instead of an opaque internal failure.
+                if (error instanceof Error && "code" in error && error.code === "ENOTSUP") {
+                    throw new TerminalError("unsupported", error.message);
+                }
+                throw error;
+            }
             let exited = false;
             const exit = child.exited.then(({ exitCode }) => {
                 exited = true;

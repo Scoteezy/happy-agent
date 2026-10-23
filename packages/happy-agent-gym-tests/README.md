@@ -67,7 +67,8 @@ differently from Bun's; Node may flush a blocked write without emitting `drain`,
 [`nodeLane.ts`](nodeLane.ts) names the scenarios that must also pass under Node — transport and
 streaming, the event stream, the run lifecycle, and a representative core sample — together with
 the `@slopus/happy-agent-modules` transport unit tests. Terminals open only under Bun, so no
-scenario in the lane opens one.
+scenario in the lane opens one; `terminals_are_unsupported_without_bun.test.ts` instead proves
+that Node answers `501 unsupported`, and runs only in the Node lane.
 
 Run one file under Node by declaring the runtime, so the worker check holds it to Node:
 

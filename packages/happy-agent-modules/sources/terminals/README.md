@@ -113,7 +113,8 @@ work.
 `TerminalError` carries a `code` a caller turns into a status: `not_found` for a project,
 workspace, or terminal nobody has; `conflict` for an archived project, a workspace that is not ready,
 a stale scrollback basis, or a folder already at its limit; `invalid` for settings that are not
-terminal settings; `unavailable` once the module has closed.
+terminal settings; `unavailable` once the module has closed; `unsupported` when the folder's machine
+cannot host a pseudo-terminal, such as this machine when the daemon runs under Node instead of Bun.
 
 ## Storage
 

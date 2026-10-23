@@ -42,6 +42,12 @@ The compute starts terminals only under Bun, the runtime the Happy Agent binary 
 for the gym's own harness, not the product. Without a named shell, a POSIX machine runs its own
 `$SHELL`, which only that machine knows, so the terminal starts `/bin/sh` and execs it there.
 
+A daemon run from sources under Node used to answer an opaque `500 internal` when a terminal was
+opened, because the compute's ENOTSUP refusal fell through as an unknown error. A compute that
+cannot host a pseudo-terminal — this machine outside Bun, or a runner without terminals — now
+becomes `TerminalError("unsupported")`, answered as `501 unsupported` with the compute's readable
+reason. The gym's Node lane proves it.
+
 ## Ctrl+C reaches a Windows terminal's programs
 
 On Windows, Ctrl+C in a terminal did nothing: `ping -t` kept running in PowerShell and in cmd. The
