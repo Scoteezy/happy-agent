@@ -58,6 +58,15 @@ describe("workspace creation through the agent tool", () => {
         );
         expect(project).toBeDefined();
         if (project === undefined) throw new Error("The gym did not register its root project.");
+        // Registration answers before setup settles, and a workspace is created only below a
+        // ready project root; the scripted model would otherwise race that setup.
+        await gym.waitUntil(async () => {
+            const current = (await gym.client.getProject(project.id)).project;
+            if (current.initialization.status === "failed") {
+                throw new Error(current.initialization.error ?? "Project setup failed.");
+            }
+            return current.initialization.status === "ready" ? current : undefined;
+        }, "the root project to become ready");
 
         await gym.send("Create a child workspace with the child-workspace tool.");
         expect(gym.inference.lastTools()).toContain("create_child_workspace");
