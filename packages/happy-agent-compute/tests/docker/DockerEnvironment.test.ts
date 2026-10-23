@@ -91,6 +91,40 @@ describe("DockerEnvironment", () => {
         expect(created.remove).toHaveBeenCalledWith({ force: true });
     });
 
+    it("releases cleanly while a managed container's creation is failing", async () => {
+        let failCreation: (error: Error) => void = () => undefined;
+        const createContainer = vi.fn(
+            () =>
+                new Promise<never>((_resolve, reject) => {
+                    failCreation = reject;
+                }),
+        );
+        const managedDocker = {
+            createContainer,
+            getContainer: vi.fn(() => ({
+                inspect: vi.fn().mockRejectedValue({ statusCode: 404 }),
+            })),
+        } as unknown as Dockerode;
+        const environment = new DockerEnvironment(
+            {
+                image: "missing-image:latest",
+                name: "managed-failed-creation-test",
+                architecture: "arm64",
+                workingDirectory: "/workspace",
+            },
+            "session-failed-creation",
+            managedDocker,
+        );
+
+        const pending = environment.container();
+        await vi.waitFor(() => expect(createContainer).toHaveBeenCalledOnce());
+        const released = environment.release();
+        failCreation(new Error("No such image: missing-image:latest"));
+
+        await expect(pending).rejects.toThrow("No such image");
+        await expect(released).resolves.toBeUndefined();
+    });
+
     it("never removes a container the caller attached to", async () => {
         const attached = {
             inspect: vi.fn().mockResolvedValue({ State: { Running: true } }),

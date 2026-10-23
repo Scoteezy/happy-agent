@@ -131,9 +131,14 @@ export class DockerEnvironment {
         ownership.owners -= 1;
         if (ownership.owners > 0) return;
 
-        const removal = ownership.container.then(async (container) => {
-            await container.remove({ force: true });
-        });
+        // A container whose creation failed never existed, so there is nothing to remove; that
+        // failure was already reported to the call that needed it, and must not fail release.
+        const removal = ownership.container.then(
+            async (container) => {
+                await container.remove({ force: true });
+            },
+            () => undefined,
+        );
         ownership.removal = removal;
         try {
             await removal;
