@@ -13,14 +13,21 @@ export const gitWorkingTreeFilesSchema = Type.Object(
 );
 export type GitWorkingTreeFiles = Static<typeof gitWorkingTreeFilesSchema>;
 
+/**
+ * `match` narrows the listing to paths holding its letters in order, whatever their case and
+ * wherever they fall, as a typed file search does; whitespace in it is ignored. It lets a search
+ * reach files a whole listing would leave past its cap.
+ */
 export async function listGitWorkingTreeFiles(options: {
+    match?: string;
     path: string;
     runGit?: ScanGitRunner;
     signal?: AbortSignal;
 }): Promise<GitWorkingTreeFiles> {
+    const pathspec = options.match === undefined ? [] : ["--", subsequencePathspec(options.match)];
     const run = async (args: readonly string[]) =>
         await (options.runGit ?? runScanGit)({
-            args: ["ls-files", "-z", ...args],
+            args: ["ls-files", "-z", ...args, ...pathspec],
             cwd: options.path,
             ...(options.signal === undefined ? {} : { signal: options.signal }),
         });
@@ -44,6 +51,14 @@ export async function listGitWorkingTreeFiles(options: {
         paths: paths.slice(0, WORKING_TREE_FILE_LIMIT),
         truncated: result.truncated || paths.length > WORKING_TREE_FILE_LIMIT,
     };
+}
+
+/** A case-insensitive pathspec matching every path that holds `match`'s letters in order. */
+function subsequencePathspec(match: string): string {
+    const letters = [...match.replaceAll(/\s+/gu, "")].map((letter) =>
+        "*?[]\\".includes(letter) ? `\\${letter}` : letter,
+    );
+    return `:(icase)*${letters.map((letter) => `${letter}*`).join("")}`;
 }
 
 /** The complete NUL-separated paths of one listing, without a cut-off last one. */

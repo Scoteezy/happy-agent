@@ -14,10 +14,16 @@ const MAX_STATS_PER_CALL = 4_096;
 const RELIST_AFTER_MS = 2_000;
 const SKIPPED_DIRECTORIES = new Set([".git", ".hg", ".svn", "node_modules"]);
 
+interface Listed {
+    readonly paths: readonly string[];
+    /** Whether Git's listing stopped at its cap, so files past it are missing from `paths`. */
+    readonly truncated: boolean;
+}
+
 interface Listing {
+    listed: Listed;
     listedAt: number;
-    paths: readonly string[];
-    pending: Promise<readonly string[]> | undefined;
+    pending: Promise<Listed> | undefined;
     /** Whether the folder's watch reported a change since the listing started. */
     stale: boolean;
 }
@@ -30,7 +36,8 @@ interface Listing {
  * ignored files out, or a bounded walk outside a repository — and the list is ranked here. One
  * listing is kept for each of the few most recently searched folders and listed again once it is
  * stale: after the folder's watch reports a change, or after a couple of seconds when nothing is
- * watching it.
+ * watching it. A folder too large for Git's bounded listing is searched by asking Git for just the
+ * paths that hold the query's letters, so files past the cap are still found.
  */
 export class MachineFileIndex {
     readonly #git: GitModule;
@@ -57,22 +64,35 @@ export class MachineFileIndex {
         limit: number,
         watching: boolean,
     ): Promise<{ readonly fileName: string; readonly path: string }[]> {
-        const paths = await this.#paths(machine, folder, watching);
-        return rankFilePaths(paths, query, limit);
+        const listed = await this.#listed(machine, folder, watching);
+        if (!listed.truncated || query.trim().length === 0) {
+            return rankFilePaths(listed.paths, query, limit);
+        }
+        const matching = await this.#git.listWorkingTreeFiles({
+            match: query,
+            path: folder.root,
+            ...(folder.runnerId === undefined ? {} : { runnerId: folder.runnerId }),
+        });
+        return rankFilePaths(matching.paths, query, limit);
     }
 
-    async #paths(
+    async #listed(
         machine: Compute,
         folder: { readonly root: string; readonly runnerId: string | undefined },
         watching: boolean,
-    ): Promise<readonly string[]> {
+    ): Promise<Listed> {
         const key = listingKey(folder.runnerId, folder.root);
         let listing = this.#listings.get(key);
         if (listing !== undefined) {
             this.#listings.delete(key);
             this.#listings.set(key, listing);
         } else {
-            listing = { listedAt: 0, paths: [], pending: undefined, stale: true };
+            listing = {
+                listed: { paths: [], truncated: false },
+                listedAt: 0,
+                pending: undefined,
+                stale: true,
+            };
             this.#listings.set(key, listing);
             while (this.#listings.size > MAX_LISTINGS) {
                 const oldest = this.#listings.keys().next().value as string | undefined;
@@ -81,16 +101,16 @@ export class MachineFileIndex {
             }
         }
         const outdated = watching ? listing.stale : Date.now() - listing.listedAt > RELIST_AFTER_MS;
-        if (!outdated) return listing.paths;
+        if (!outdated) return listing.listed;
         if (listing.pending !== undefined) return await listing.pending;
         const current = listing;
         // Cleared before listing, so a change reported while it runs leaves the listing stale.
         current.stale = false;
         current.pending = this.#list(machine, folder)
-            .then((paths) => {
-                current.paths = paths;
+            .then((listed) => {
+                current.listed = listed;
                 current.listedAt = Date.now();
-                return paths;
+                return listed;
             })
             .catch((error: unknown) => {
                 current.stale = true;
@@ -105,15 +125,15 @@ export class MachineFileIndex {
     async #list(
         machine: Compute,
         folder: { readonly root: string; readonly runnerId: string | undefined },
-    ): Promise<readonly string[]> {
+    ): Promise<Listed> {
         const listed = await this.#git
             .listWorkingTreeFiles({
                 path: folder.root,
                 ...(folder.runnerId === undefined ? {} : { runnerId: folder.runnerId }),
             })
             .catch(() => undefined);
-        if (listed !== undefined && listed.paths.length > 0) return listed.paths;
-        return await walk(machine, folder.root);
+        if (listed !== undefined && listed.paths.length > 0) return listed;
+        return { paths: await walk(machine, folder.root), truncated: false };
     }
 }
 

@@ -393,14 +393,19 @@ export class GitModule implements AgentModule {
         });
     }
 
-    /** Every tracked and untracked file a working tree holds, bounded and ignore-aware. */
+    /**
+     * Every tracked and untracked file a working tree holds, bounded and ignore-aware; with
+     * `match`, only the paths holding its letters in order.
+     */
     async listWorkingTreeFiles(
         options: GitPlacement & {
+            readonly match?: string;
             readonly path: string;
             readonly signal?: AbortSignal;
         },
     ): Promise<GitWorkingTreeFiles> {
         return await listGitWorkingTreeFiles({
+            ...(options.match === undefined ? {} : { match: options.match }),
             path: options.path,
             runGit: this.#machine(options.runnerId).scan,
             ...(options.signal === undefined ? {} : { signal: options.signal }),

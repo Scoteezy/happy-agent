@@ -144,6 +144,11 @@ get the machine's default mode, instead of both inheriting the temporary file's 
 non-recursive native watches read this machine's disk: runner folders are listed and watched by the
 runner itself.
 
+A runner folder's Git listing stops at 20,000 paths, and ranking that cut-off list silently lost
+every later file. When the listing is truncated, a search with a query now asks Git for only the
+paths holding the query's letters in order (a case-insensitive `ls-files` pathspec, with glob
+characters escaped) and ranks those, so a file past the cap is found without listing everything.
+
 ## The native index and watches are only for the daemon's own user
 
 The FFF index and the native watcher read folders in the daemon's process, as the daemon's user.

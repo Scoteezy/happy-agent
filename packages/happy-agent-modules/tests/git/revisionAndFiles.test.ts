@@ -33,6 +33,20 @@ describe("Git file reads", () => {
         });
     });
 
+    it("narrows a listing to paths holding a query's letters in order", async () => {
+        const repository = await createRepository();
+        await mkdir(join(repository, "src", "Deep"), { recursive: true });
+        await commitFile(repository, "other.ts", "other\n");
+        await writeFile(join(repository, "src", "Deep", "ZZ-Target.ts"), "target\n");
+        await writeFile(join(repository, "we[ird]*.ts"), "weird\n");
+        await expect(
+            listGitWorkingTreeFiles({ match: "zz tar", path: repository }),
+        ).resolves.toEqual({ paths: ["src/Deep/ZZ-Target.ts"], truncated: false });
+        await expect(
+            listGitWorkingTreeFiles({ match: "[ird]*", path: repository }),
+        ).resolves.toEqual({ paths: ["we[ird]*.ts"], truncated: false });
+    });
+
     it("reads exact bytes at a revision and distinguishes an absent path", async () => {
         const repository = await createRepository();
         const head = await commitFile(repository, "binary.bin", Buffer.from([0, 1, 2, 3]));
