@@ -252,12 +252,25 @@ describe("artifact file bundles over the API", () => {
         });
         const prefix = `/v0/artifacts/${artifact.id}/versions/1/files`;
         expect((await send(gym, `${prefix}/css/site.css`)).status).toBe(200);
+        const entry = await send(gym, `${prefix}/index.html`);
+        expect(entry.status).toBe(200);
+        // Clients should not send dot segments. Any that arrive are resolved before routing, and
+        // the result is served only when it is exactly a manifest path of this version.
         for (const target of [
             `${prefix}/css/../index.html`,
             `${prefix}/css/%2e%2e/index.html`,
+            `${prefix}/./index.html`,
+        ]) {
+            const response = await send(gym, target);
+            expect({ target, status: response.status }).toEqual({ target, status: 200 });
+            expect(response.bytes.equals(entry.bytes)).toBe(true);
+        }
+        for (const target of [
+            `${prefix}/css/../missing.html`,
+            `${prefix}/css/../css`,
+            `${prefix}/css/../../2/files/index.html`,
             `${prefix}/css%2Fsite.css`,
             `${prefix}/css//site.css`,
-            `${prefix}/./index.html`,
             `${prefix}/css`,
             `${prefix}/css/`,
             `${prefix}/missing.html`,

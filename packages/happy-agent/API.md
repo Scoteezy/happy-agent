@@ -10379,8 +10379,10 @@ The bytes of one file of one version. `number` is a version number or `latest`, 
 `/v0/artifacts/r7k2…/versions/2/files/images/chart.png`. Because every file of a version lives
 under the same prefix, a relative reference in an entry resolves to its file. The daemon decodes
 each segment and serves a file only when the decoded path is exactly a `path` in that version's
-manifest. Nothing outside the manifest is ever reached, so a path with an empty, `.`, or `..`
-segment, an encoded `/`, or any other name the version does not hold is `404`, as is a folder.
+manifest. Request each file by its exact manifest path; clients and artifacts should not send `.`
+or `..` segments. Any that are sent are resolved before routing, and the resolved path must still be
+exactly a manifest `path`. Nothing outside the manifest is ever reached: an empty segment, an
+encoded `/`, or any other name the version does not hold is `404`, as is a folder.
 
 The response is the file itself, not JSON: `Content-Type` is the file's `mimeType`, with
 `; charset=utf-8` added for `text/*` types, and `Content-Length` its size. `ETag` is the quoted

@@ -339,14 +339,16 @@ admission and the Node front door destroyed the socket instead of answering. Lik
 proxy, it now matches any single segment, authenticates, and only then answers a malformed ID
 `404`, so a stranger still gets `401` and learns nothing from the ID's shape.
 
-## Artifact files are matched on the request target as sent
+## Artifact files are matched on the resolved path
 
-`new URL` resolves `..` and `%2e%2e` segments before routing, so matching artifact file paths on
-the parsed pathname would answer `files/css/../index.html` with `index.html` instead of the
-specified `404`. The file route recognizes itself on the parsed pathname but takes the artifact,
-version, and path from the raw target, decoding each segment separately. Sandbox, caching, and
-range headers are written only with a served file, so `404`, `416`, and every other error keep the
-ordinary `no-store` JSON response.
+The file route once read the raw request target so that `files/css/../index.html` answered `404`.
+Production never sees that target: under Bun, `Bun.serve` resolves `.`, `..`, and `%2e%2e`
+segments before any handler runs, so the rule held only in Node gyms. The contract now tells
+clients and artifacts to request exact manifest paths, and resolves any dot segments before
+routing; the route reads the parsed pathname on both runtimes, and the resolved path must still be
+exactly a manifest path. Each segment is decoded separately, so an encoded `/` or an empty segment
+is still `404`. Sandbox, caching, and range headers are written only with a served file, so
+`404`, `416`, and every other error keep the ordinary `no-store` JSON response.
 
 ## Tool-call media is served by call and position, never from history bytes
 

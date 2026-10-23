@@ -5,10 +5,11 @@
 
 /** Gym scenarios that run under Node as well as Bun. */
 export const nodeLaneScenarios: readonly string[] = [
-    // Transport and streaming: SSE frames, file bodies, and proxied bodies.
+    // Transport and streaming: SSE frames, file bodies, proxied bodies, and request paths.
     "happy_api_events_transport_matrix.test.ts",
     "happy_api_proxy_matrix.test.ts",
     "happy_api_files_git.test.ts",
+    "happy_api_artifacts_serve_file_bundles.test.ts",
     // The event stream, bootstrap, and replica reconciliation.
     "happy_api_sync_concurrency.test.ts",
     "sync_replica_preserves_newer_nested_agents.test.ts",

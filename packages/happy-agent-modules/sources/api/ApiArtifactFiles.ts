@@ -20,10 +20,10 @@ export interface ArtifactFileRequest {
 }
 
 /**
- * The artifact, version, and file path one file request names, read from the request target as
- * sent rather than from a parsed URL, which would already have resolved `.` and `..` segments.
- * Each segment is decoded on its own, so an encoded `/` cannot join two segments, and a segment
- * that is empty, `.`, or `..` names no file. `undefined` means no file of any version.
+ * The artifact, version, and file path one file request names, read from its parsed pathname, in
+ * which `.` and `..` segments are already resolved, as Bun resolves them before any handler sees
+ * the request. Each segment is decoded on its own, so an encoded `/` cannot join two segments, and
+ * a segment that is empty, `.`, or `..` names no file. `undefined` means no file of any version.
  */
 export function artifactFileRequest(target: string | undefined): ArtifactFileRequest | undefined {
     const pathname = (target ?? "").split(/[?#]/, 1)[0] ?? "";

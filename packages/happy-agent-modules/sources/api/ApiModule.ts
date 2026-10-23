@@ -7201,7 +7201,7 @@ export class ApiModule implements AgentModule {
             }
             if (ARTIFACT_FILE_ROUTE.test(url.pathname)) {
                 if (request.method !== "GET") return false;
-                const target = artifactFileRequest(request.url);
+                const target = artifactFileRequest(url.pathname);
                 if (target === undefined) throw notFound("The artifact version has no such file.");
                 const stored = await artifacts.storedFile(
                     ctx,
