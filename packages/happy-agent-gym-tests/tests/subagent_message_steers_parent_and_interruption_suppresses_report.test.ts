@@ -103,6 +103,7 @@ describe("subagent replies and interruption", () => {
                         {
                             arguments: {
                                 toAgentId: parentAgentId,
+                                explanation: "Progress update",
                                 text: "CHILD_EXPLICIT_PROGRESS",
                             },
                             callId: "childprogress",

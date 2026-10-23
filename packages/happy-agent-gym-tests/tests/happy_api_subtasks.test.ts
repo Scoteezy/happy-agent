@@ -50,6 +50,7 @@ async function harness() {
         } else {
             await call(fromAgentId, "send_agent_message", {
                 toAgentId: agentId,
+                explanation: `Asking to run ${name}`,
                 text: `Please execute ${name}, request ${callId}.`,
             });
         }
@@ -613,6 +614,7 @@ describe("user-interactive subtasks", () => {
             (
                 await call(bot.agent.id, "send_agent_message", {
                     toAgentId: task.id,
+                    explanation: "Follow-up",
                     text: "Not through the parent either",
                 })
             ).text,

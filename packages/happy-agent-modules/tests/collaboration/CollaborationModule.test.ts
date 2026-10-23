@@ -303,10 +303,17 @@ describe("collaboration", () => {
         const tool = sendMessageTool(module, "parent", true);
         expect(tool.transactional).toBe(true);
         expect(
-            await tool.shouldReviewInAutoMode({ toAgentId: "child", text: "Follow up" }, ctx),
+            await tool.shouldReviewInAutoMode(
+                { toAgentId: "child", explanation: "Follow-up", text: "Follow up" },
+                ctx,
+            ),
         ).toBe(false);
         await expect(
-            tool.execute(ctx, { toAgentId: "child", text: "Follow up" }, toolCall("message")),
+            tool.execute(
+                ctx,
+                { toAgentId: "child", explanation: "Follow-up", text: "Follow up" },
+                toolCall("message"),
+            ),
         ).rejects.toThrow("archived");
         expect(collection.steered).toEqual([]);
     });
@@ -1436,6 +1443,7 @@ describe("collaboration", () => {
                 toAgentId: "parent",
             },
             senderAgentId: "child",
+            senderAgentExplanation: "Finished: final answer",
         });
     });
 
@@ -1713,7 +1721,12 @@ describe("collaboration", () => {
         const interrupt = interruptAgentTool(module, "parent");
 
         expect(create.shouldReviewInAutoMode(TASK, ctx)).toBe(false);
-        expect(send.shouldReviewInAutoMode({ toAgentId: "child", text: "Hi." }, ctx)).toBe(false);
+        expect(
+            send.shouldReviewInAutoMode(
+                { toAgentId: "child", explanation: "Greeting", text: "Hi." },
+                ctx,
+            ),
+        ).toBe(false);
         expect(interrupt.shouldReviewInAutoMode({ targetAgentId: "child" }, ctx)).toBe(true);
         expect(interrupt.shouldRunInFullAccessInAutoMode).toBeUndefined();
         expect(interrupt.describeAutoPermissionAction!({ targetAgentId: "child" }, ctx)).toContain(
@@ -1739,7 +1752,11 @@ describe("collaboration", () => {
             agentId: "created",
         });
         await expect(
-            send.execute(ctx, { toAgentId: "created", text: "Follow up." }, toolCall("message")),
+            send.execute(
+                ctx,
+                { toAgentId: "created", explanation: "Follow-up", text: "Follow up." },
+                toolCall("message"),
+            ),
         ).resolves.toBeUndefined();
         await expect(
             interrupt.execute(ctx, { targetAgentId: "created" }, toolCall("interrupt")),

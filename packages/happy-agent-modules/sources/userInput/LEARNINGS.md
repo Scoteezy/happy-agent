@@ -56,3 +56,11 @@ A user-facing question advances a session's meaningful activity at the request's
 sort conversations must see the same timestamp while the question is pending, after it is
 answered, and after a daemon restart. User input exposes the newest question timestamp directly so
 callers do not page through model-bounded list output or duplicate knowledge of its storage.
+
+## An answered question stays in the conversation
+
+The API names only an agent's pending question, so a client lost an answered question entirely:
+it was no longer pending, and the call's raw result was model-facing text. `request_user_input`
+now returns a `user_input` presentation with the questions as shown and the person's values when
+the request is answered, and History records it with the call. Cancelled, away, and timed-out
+requests carry none.

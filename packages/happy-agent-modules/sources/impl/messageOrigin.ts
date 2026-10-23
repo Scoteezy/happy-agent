@@ -106,3 +106,43 @@ export function senderAgentIdOf(metadata: AgentMessageMetadata | undefined): str
     const value = ownMetadataValue(metadata, SENDER_AGENT_ID_METADATA_KEY);
     return Value.Check(senderAgentIdSchema, value) ? value : undefined;
 }
+
+/**
+ * The metadata key carrying the sending agent's one-line account of why it sent a message, so a
+ * person reading the recipient's conversation sees what the message is before opening it. Like
+ * the sender ID it is attribution only and authorizes nothing.
+ */
+export const SENDER_AGENT_EXPLANATION_METADATA_KEY = "senderAgentExplanation";
+
+/** The longest explanation an agent may give for one message. */
+export const MAX_SENDER_AGENT_EXPLANATION_LENGTH = 120;
+
+/** One line, short enough to sit beside the sender's name. */
+export function senderAgentExplanationSchemaOf(description?: string) {
+    return Type.String({
+        minLength: 1,
+        maxLength: MAX_SENDER_AGENT_EXPLANATION_LENGTH,
+        pattern: "^[^\\u0000\\r\\n]+$",
+        ...(description === undefined ? {} : { description }),
+    });
+}
+
+const senderAgentExplanationSchema = senderAgentExplanationSchemaOf();
+
+/** Stamp the sending agent's explanation on a system-generated message's metadata. */
+export function senderAgentExplanationMetadata(explanation: string): {
+    readonly [SENDER_AGENT_EXPLANATION_METADATA_KEY]: string;
+} {
+    if (!Value.Check(senderAgentExplanationSchema, explanation)) {
+        throw new Error("The sender agent explanation is not a valid metadata value.");
+    }
+    return Object.freeze({ [SENDER_AGENT_EXPLANATION_METADATA_KEY]: explanation });
+}
+
+/** The explanation this message's metadata carries, or undefined when it carries none. */
+export function senderAgentExplanationOf(
+    metadata: AgentMessageMetadata | undefined,
+): string | undefined {
+    const value = ownMetadataValue(metadata, SENDER_AGENT_EXPLANATION_METADATA_KEY);
+    return Value.Check(senderAgentExplanationSchema, value) ? value : undefined;
+}

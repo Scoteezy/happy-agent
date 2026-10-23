@@ -43,6 +43,11 @@ Review the parser change.
 That name is the address. Answering is not a separate operation: the recipient calls
 `send_agent_message` back to the agent the message came from.
 
+People see the message too, in the recipient's conversation, before they open it. The tool
+therefore requires a one-line `explanation` of what the message is, and delivery stamps it on the
+message's metadata as `senderAgentExplanation` beside `senderAgentId`. The automatic settlement
+report carries a fixed one saying whether the collaborator finished with an answer or stopped.
+
 Every agent's own address is stated in the module's instructions. Its creator and collaborator
 addresses are rebuilt every turn from `parentOf` and `childOf`:
 

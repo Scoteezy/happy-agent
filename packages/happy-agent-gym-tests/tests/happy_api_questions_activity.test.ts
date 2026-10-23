@@ -166,6 +166,42 @@ describe("public questions and activity API", () => {
             true,
         );
         stream.close();
+
+        const history = await gym.client.getMessages(agentId, { omitToolData: true });
+        const call = history.runs
+            .flatMap((run) => run.messages)
+            .flatMap((message) => message.content)
+            .find((block) => block.type === "tool_call" && block.name === "request_user_input");
+        expect(call).toMatchObject({
+            type: "tool_call",
+            status: "completed",
+            arguments: { context: "The migration has two safe choices." },
+            result: { output: expect.any(String) },
+            presentation: {
+                type: "user_input",
+                questions: pending.questions,
+                answers: answered.answers,
+            },
+        });
+        const live = (await gym.client.getEvents({ limit: 10_000 })).events
+            .filter((event) => event.type === "message.updated")
+            .flatMap((event) => event.payload.message.content)
+            .find(
+                (block) =>
+                    block.type === "tool_call" &&
+                    block.name === "request_user_input" &&
+                    block.status === "completed",
+            );
+        expect(live).toMatchObject({
+            presentation: call?.type === "tool_call" ? call.presentation : undefined,
+        });
+
+        await gym.restart();
+        expect((await gym.client.getMessages(agentId, { omitToolData: true })).runs).toEqual(
+            history.runs,
+        );
+        expect(gym.errors).toEqual([]);
+        expect(gym.inference.unscripted).toEqual([]);
     }, 30_000);
 
     it("cancels an open question when its run is aborted and rejects a late answer", async () => {

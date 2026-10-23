@@ -134,6 +134,7 @@ async function messageAcceptedAfterTheSendingRunSettled(senderMovesOn: boolean):
                     content: [
                         {
                             arguments: {
+                                explanation: "Update from the first run",
                                 text: "Sent from the first run.",
                                 toAgentId: targetAgentId,
                             },

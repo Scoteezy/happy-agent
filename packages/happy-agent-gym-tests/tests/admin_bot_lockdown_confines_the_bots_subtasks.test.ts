@@ -159,11 +159,13 @@ describe("an admin bot locks down another bot", () => {
         // Outside the bot's tree, messages do not go; inside it, they do.
         const outside = await call(subtaskId, "send_agent_message", {
             toAgentId: gym.defaultSessionId,
+            explanation: "Leak attempt",
             text: "LOCKED_SUBTASK_LEAK",
         });
         expect(outside.text).toContain("message only the bot's own agents");
         const inside = await call(subtaskId, "send_agent_message", {
             toAgentId: worker.agent.id,
+            explanation: "Report",
             text: "LOCKED_SUBTASK_REPORT",
         });
         expect(inside.text).not.toContain("only the bot's own agents");

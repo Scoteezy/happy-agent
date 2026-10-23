@@ -308,6 +308,55 @@ export const userInputRequestSchema = Type.Union([
     userInputTimedOutRequestSchema,
 ]);
 
+/**
+ * The card a conversation keeps for an answered request: each question as the person was shown it
+ * and the values they gave, in the API's question shape. A value matching an option label is a
+ * selection; any other value is free text.
+ */
+export const userInputPresentationSchema = Type.Object(
+    {
+        type: Type.Literal("user_input"),
+        questions: Type.Array(
+            Type.Object(
+                {
+                    id: userInputQuestionIdSchema,
+                    header: userInputHeaderSchema,
+                    question: userInputQuestionSchema,
+                    multiSelect: Type.Boolean(),
+                    options: Type.Array(userInputChoiceSchema, {
+                        maxItems: MAX_USER_INPUT_OPTION_COUNT,
+                    }),
+                },
+                { additionalProperties: false },
+            ),
+            { minItems: 1, maxItems: MAX_USER_INPUT_BATCH_QUESTION_COUNT },
+        ),
+        answers: Type.Record(
+            userInputQuestionIdSchema,
+            Type.Array(userInputAnswerTextSchema, { maxItems: MAX_USER_INPUT_OPTION_COUNT + 1 }),
+        ),
+    },
+    { additionalProperties: false },
+);
+
+/**
+ * What `request_user_input` returns: the settled request, and with an answer the card History
+ * records beside the call.
+ */
+export const userInputToolResultSchema = Type.Union([
+    userInputPendingRequestSchema,
+    Type.Object(
+        {
+            ...userInputAnsweredRequestSchema.properties,
+            presentation: userInputPresentationSchema,
+        },
+        { additionalProperties: false },
+    ),
+    userInputCancelledRequestSchema,
+    userInputAwayRequestSchema,
+    userInputTimedOutRequestSchema,
+]);
+
 /** A durable wait resolves only after the request has reached a terminal outcome. */
 export const userInputTerminalRequestSchema = Type.Union([
     userInputAnsweredRequestSchema,

@@ -123,3 +123,12 @@ A created collaborator's `agent.created` echoed nothing, because it is announced
 collaborator has a run. Creation now records the same mutation in the collaborator's own
 metadata under `mutationId` (the shared key in `impl/mutationEcho.ts`), and the API announces
 the agent with it. A retried creation keeps the mutation the collaborator was created with.
+
+## Messages say what they are before they are opened
+
+A person reading a conversation saw every collaborator message as the same row, "Message from
+<name>", repeated with nothing to tell one from another until each was opened. `send_agent_message`
+now requires a one-line `explanation`, recorded as `senderAgentExplanation` metadata beside
+`senderAgentId` and carried to clients, so the row can say what the message is. The settlement
+report, which this module writes rather than the model, carries a fixed explanation for finishing
+or stopping. Direct module callers may still send without one.

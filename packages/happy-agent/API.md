@@ -5607,6 +5607,11 @@ history, send acceptances, pending state, and events all speak it.
 - `providerId` — the provider that produced the message, when it came from inference.
 - `modelId` — the model that produced the message, when it came from inference.
 - `senderAgentId` — the agent that sent a system-generated message, when one identified itself.
+- `senderAgentExplanation` — that agent's one-line account of what the message is, at most 120
+  characters, for a client to show beside the sender until the message is opened. Present only
+  with `senderAgentId`, and only when the sender gave one: `send_agent_message` always does, and
+  a collaborator's automatic settlement report says whether it finished with an answer or stopped.
+  The field is additive and does not increment the protocol version.
 - `userId` — the installation-local Happy CUID2 of the person who wrote a user message: the
   authenticated member who submitted it in team mode, or, in either mode, the guest who wrote it
   to an exported bot. The daemon derives it from authentication or from the export; clients
@@ -6153,6 +6158,7 @@ expected arguments are present:
 | `agent_spawn`  | `create_agent`                                                                                                           |
 | `media`        | `codex_imagegen`, `gemini_imagegen`, `present_files`, and completed image reads by `Read`, `view_image`, `ReadMediaFile` |
 | `artifact`     | `create_artifact`, `update_artifact`                                                                                     |
+| `user_input`   | `request_user_input`                                                                                                     |
 
 **`exploration`** — one normalized directory listing, file read, or code search. The daemon
 currently emits one operation per mapped tool call. A read that shows an image to the person is
@@ -6499,6 +6505,36 @@ Older daemons omit them and answer the media route with `404`. As with `agent_sp
 retain their raw `arguments` and `result` even when `omitToolData=true`, so older clients keep
 rendering these calls through their unknown-presentation fallback. Clients never need to parse
 the raw fields to render a recognized media, artifact, or page presentation.
+
+**`user_input`** — the questions an answered `request_user_input` call asked and the answers the
+person gave, so the conversation keeps both where the question was asked. This presentation is
+outcome-derived: it appears only when the call completes with an answer, and a cancelled, away, or
+timed-out request carries none.
+
+```json
+{
+    "type": "user_input",
+    "questions": [
+        {
+            "id": "escaped-quotes",
+            "header": "Escaped quotes",
+            "question": "How should the fix handle \"\" inside a quoted field?",
+            "multiSelect": false,
+            "options": [
+                { "label": "RFC 4180", "description": "Turn \"\" into one quote." },
+                { "label": "Leave literal", "description": "Keep both quote characters." }
+            ]
+        }
+    ],
+    "answers": { "escaped-quotes": ["RFC 4180"] }
+}
+```
+
+`questions` and `answers` take the shapes of the question object's `questions` and `answers`: a
+question without options was answered in free text, and a value matching an option label is a
+selection while any other value is free text. The presentation is additive and does not increment
+the protocol version; like `artifact`, its block keeps its raw `arguments` and `result` even when
+`omitToolData=true`.
 
 Other calls, including background-terminal-input calls, currently carry no presentation and keep
 their raw data. The presentation set may grow; a client that meets an unknown presentation type
@@ -6952,8 +6988,9 @@ Query parameters:
   `presentation` come back without `arguments` and `result` — the client renders the
   presentation, and the page stays small even when runs carried large tool output. Blocks
   without a `presentation` keep their raw data regardless, since there would be nothing else to
-  render. `agent_spawn`, `media`, and `artifact` presentations also keep their raw data so older
-  clients can render these additive variants through their unknown-presentation fallback.
+  render. `agent_spawn`, `media`, `artifact`, and `user_input` presentations also keep their raw
+  data so older clients can render these additive variants through their unknown-presentation
+  fallback.
 
 With no cursor, the newest runs are returned.
 

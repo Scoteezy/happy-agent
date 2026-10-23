@@ -21,6 +21,7 @@ provenance metadata the automatic permission reviewer trusts) is recorded as `ro
 every other user-role message, including an unstamped one, is recorded as `role: "agent"`, with
 `senderAgentId` naming the specific sending agent when its metadata named one — the collaboration
 module names the sending collaborator, and a goal continuation names the agent driving itself.
+When the sender also gave a one-line `senderAgentExplanation`, it is recorded beside the ID.
 This fails closed: a forgetful path under-attributes rather than a synthetic message being
 recorded as the person.
 

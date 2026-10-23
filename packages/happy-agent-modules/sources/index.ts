@@ -5,10 +5,13 @@ export {
     AGENT_MESSAGE_ORIGIN_METADATA,
     GUEST_MESSAGE_ORIGIN_METADATA,
     MESSAGE_ORIGIN_METADATA_KEY,
+    SENDER_AGENT_EXPLANATION_METADATA_KEY,
     SENDER_AGENT_ID_METADATA_KEY,
     USER_MESSAGE_ORIGIN_METADATA,
     isGuestOriginMetadata,
     isUserOriginMetadata,
+    senderAgentExplanationMetadata,
+    senderAgentExplanationOf,
     senderAgentIdMetadata,
     senderAgentIdOf,
 } from "./impl/messageOrigin.js";
