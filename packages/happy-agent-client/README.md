@@ -388,6 +388,9 @@ to follow `space.*` events from. `createStemCell()` starts new work, `updateSpac
 nobody wrote in. Prioritizing, a subtask of Happy, organises the rest; its changes apply in
 batches. `reportSpaceAttention()` holds them back while the person is `interacting` and lets one
 apply when `calm`, and `tidySpaces()` posts "Tidy the sidebar now" into its conversation. `listSpaceBatches()` reads the applied batches with their notes.
+`getSpaceSidebar()` reads the sidebar document with the session icons Prioritizing chose
+(`agentIcons`, empty when an older daemon omits it) and `seed: true` while it still mirrors the
+classic sidebar.
 
 Artifacts are additive without a protocol bump. Detect support through `listArtifacts()`: `404`
 means the daemon has no artifacts. The catalog is global and pages newest-created first; filter it by

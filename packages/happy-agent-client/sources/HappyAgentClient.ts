@@ -89,7 +89,6 @@ import type {
     SpaceResponse,
     SpaceSectionResponse,
     SpaceSidebarResponse,
-    SpaceSidebarObservationsRequest,
     UpdateSpaceSidebarRequest,
     UpdateSpaceRequest,
     UpdateSpaceSectionRequest,
@@ -1641,18 +1640,6 @@ export class HappyAgentClient {
         return await this.#json({
             method: "PUT",
             path: "v0/spaces/sidebar",
-            json: request,
-            signal: options.signal,
-        });
-    }
-
-    async reportSpaceSidebarObservations(
-        request: SpaceSidebarObservationsRequest,
-        options: RequestOptions = {},
-    ): Promise<void> {
-        await this.#send({
-            method: "POST",
-            path: "v0/spaces/sidebar/observations",
             json: request,
             signal: options.signal,
         });

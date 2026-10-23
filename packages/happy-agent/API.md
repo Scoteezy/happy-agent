@@ -9591,7 +9591,7 @@ Its placement, visibility, and section changes are not applied one by one: they 
 together as one **batch** at a calm moment — when the client reports `calm`, or after two minutes
 without a report or a message from the person — and never while the client reports
 `interacting`. Each batch adds one short line to Happy's conversation, such as "Moved Preview
-viewer release to Older.", and is recorded with its diff. Icons apply at once, because they move
+viewer release to Releases.", and is recorded with its diff. Icons apply at once, because they move
 nothing. A person's own changes through `PATCH` apply immediately and are never queued. Other
 agents may ask Prioritizing to move a row through their `request_space_placement` tool; only
 Prioritizing changes organisation.
@@ -9688,7 +9688,7 @@ A section with no rows stays until Prioritizing removes it.
 ```json
 {
     "id": "b7x2c4v6b8n0m1q3w5e7r9t1",
-    "note": "Moved Preview viewer release to Older.",
+    "note": "Tucked away Preview viewer release.",
     "noteMessageId": "m1q3w5e7r9t1y3u5i7o9p1a3",
     "changes": [
         {
@@ -9738,55 +9738,117 @@ Response — `200`:
 ### Sidebar artifact
 
 The experimental sidebar is one immutable-versioned `sidebar` artifact per person, owned by
-Prioritizing and listed under Happy. It is created lazily together with Prioritizing (including
-on the first sidebar-document read). Seed it from the current layout: Happy, the unsectioned
-rows, each existing section in order with its rows, and a collapsed Older section. Legacy
-sections, order keys, placement and visibility keep their existing contract independently;
-document edits do not synchronize them.
+Prioritizing and listed under Happy. The document is the sidebar's state: what it contains, in its
+order, is exactly what the sidebar shows. It is created lazily together with Prioritizing
+(including on the first sidebar-document read). Legacy sections, order keys, placement and
+visibility keep their existing contract independently; document edits do not synchronize them.
 
-The entry is a single UTF-8 `index.html`, at most 128 KiB, 1,000 elements and depth 16.
-It has one `<nav>` root. Allowed elements are `nav`, `happy-space`, `happy-section`, `div`,
-`ul`, `li`, `p`, `span`, `strong`, `em`, `hr`. Plain elements accept only `class` from
-`note`, `muted`, `divider`. `happy-space` requires `ref`, optionally boolean `tree` and
-`collapsed`; `happy-section` requires unique `id` (1–128 characters) and `label`, optionally
-boolean `collapsed`. A space cannot contain another space. Unknown/duplicate space references,
-unknown tags/attributes, scripts, event handlers, URLs, forms, embeds, SVG, MathML, and style
-elements/attributes are rejected. Validation runs on every artifact write, including ordinary
-artifact tools. Rejection preserves the last valid version and returns diagnostics
-`[{message, offset}]` (zero-based character offset). Renderers validate again and use trusted
-components; authored JavaScript never executes. `tree` children come from live app state.
+**Grammar.** The entry is a single UTF-8 `index.html`, at most 128 KiB, 1,000 elements and a
+depth of 16. It is one `<nav>` element holding a flat, ordered list of items. Every item may be
+moved by the person anywhere in that list:
 
-`GET /v0/spaces/sidebar` returns `200 {artifactId, version, html, spaces}`, where `version`
-is the immutable artifact version number and `spaces` contains the person's ordinary space
-objects. `PUT /v0/spaces/sidebar` takes `{html, baseVersion, mutationId}` and returns the same
-shape. All three fields are required on this new route. A retry with the same mutation ID returns
-its committed version without writing again; reusing an ID for different content is `409`.
-A stale base is `409 conflict` with `currentVersion`; invalid HTML is `400 invalid_request`
-with `diagnostics`. These details are additional fields on the ordinary error envelope.
-Every sidebar update emits the existing `artifact.updated` event for its artifact ID after
-commit, echoing the mutation ID when supplied. Clients reload on conflict and report through
-their existing error path; no automatic merge.
+- `<happy-search/>` and `<happy-create/>` — the search and new-work controls. Each appears exactly
+  once, at any position.
+- `<happy-section id="…" label="…" collapsed="true"/>` — a titled heading over the items after it,
+  up to the next `happy-section` or `happy-separator`. The heading and those items form the
+  section's block, which moves as one unit. `label` is required, 1–256 characters, and not only
+  whitespace. `collapsed="true"` folds those items. A section has no children.
+- `<happy-separator id="…"/>` — a plain visual rule with no title. It cannot fold and accepts no
+  attribute other than `id`; it ends the run of the section above it.
+- Section and separator IDs are required, unique in the document, and 1–128 characters without
+  whitespace or control characters. Both are direct children of `nav` only.
+- `<happy-space id="…" expanded="true" fold-ribbon="hover|always">` — a row. A `happy-space` that
+  is a direct child of `nav` names one of the person's spaces by space ID. A `happy-space` may
+  contain only `happy-space` elements; a nested one names a session by agent ID, and that agent's
+  parent must be the conversation of the enclosing node (the row's `target.agentId`, or the
+  enclosing session). `expanded="true"` shows the nested sessions; otherwise they are folded.
+- `nav` and `happy-space` accept optional `fold-ribbon`: `"hover"` (default) shows a foldable row's
+  fold ribbon only while pointed at; `"always"` shows it at the far right with the row's change
+  count to its left. A row's own value overrides the `nav` value. Rows reserve no empty trailing
+  slot; the change count sits flush right.
 
-Ordinary artifact updates/tools accept optional `baseVersion`; it is required when the target
-is a sidebar. Prioritizing may read and update its artifact using ordinary artifact tools.
-Its convenience `edit_sidebar {baseVersion, edits:[{oldText,newText}]}` applies sequential
-exact-text replacements (each old text must occur exactly once), making one version per call.
-Its edits wait for the existing calm batch; stale or invalid proposals never overwrite a newer
-document. `get_sidebar_styles` returns the allowed elements, attributes, classes and light/dark
-theme tokens. These replace Prioritizing's legacy section/place/visibility tools.
+Boolean switches are written `"true"` or `"false"`; an absent switch is false. Attribute values are
+always quoted; empty elements may be self-closing. Text, comments, other elements, other
+attributes, duplicate IDs, unknown space IDs, and nested IDs that are not sessions of their parent
+are rejected, so HTML and XML parsers read the same tree. Spaces and sessions absent from the
+document are not shown. Clients draw every element with trusted components; worktrees are drawn
+under the node whose agent works in them, and hidden while that node is folded.
 
-`POST /v0/spaces/sidebar/observations` takes `{visibleSpaceIds, collapsed?}`, with `collapsed`
-an optional array of authored section IDs or space IDs currently folded. It returns `204`.
-Snapshots are bounded to 1,000 IDs and folded into the next calm brief; visibility is ephemeral,
-never permission to move work. Apps send at most once per second. Committed manual document
-changes also enter that brief and preserve the person's authority over the moved nodes.
+Validation runs on every artifact write, including ordinary artifact tools. Rejection preserves the
+last valid version and returns diagnostics `[{message, offset}]` (zero-based character offset).
 
-New spaces missing from the document are inserted directly after Happy. Archived/left spaces'
-nodes are removed and authored children promoted in place. Lifecycle changes publish ordinary
-artifact events. Prioritizing never moves Happy, never undoes manual moves, and leaves work
-active in the last two hours in place (a new pending space may receive its first placement).
-Each applied manager batch adds exactly one factual diff-derived note to Happy's conversation
-and publishes the ordinary live message event so open conversations update immediately.
+**First document.** The first document mirrors the person's classic sidebar: Search, Create,
+Happy's row, the joined Surfaces in member order, `<happy-separator id="divider"/>`, then the
+default sections `<happy-section id="bots" label="Bots"/>` with every other active bot in catalog
+order and `<happy-section id="tasks" label="Tasks"/>` with the person's active tasks in membership
+order. Each bot and task row, and Happy's, nests its active subtasks recursively in sibling order
+and is `expanded="true"` when it has any. The default sections are present even without rows.
+Until the person's first write or Prioritizing's next notice, sidebar responses include
+`seed: true` and Prioritizing's writes are refused; a client may use one write to apply state only
+it knows, such as the person's folds. A document stored in the earlier grammar (nested
+`happy-section` with children, `ref`, `tree`, plain HTML) is rewritten once, as its own version, on
+the next read: sections become flat `happy-section` headings keeping their IDs, labels, and
+collapsed state, the former Older section (`id="older"`) becomes `<happy-separator id="older"/>`,
+order is preserved, and plain HTML is dropped.
+
+`GET /v0/spaces/sidebar` returns `200 {artifactId, version, html, spaces, agentIcons, seed?}`, where
+`version` is the immutable artifact version number, `spaces` contains the person's ordinary space
+objects, and `agentIcons` maps session agent IDs to `{ "type": "library", "slug": "..." }` icons
+Prioritizing chose (sessions get icons whether or not they are shown). Daemons that predate
+`agentIcons` and `seed` omit them; clients treat a missing `agentIcons` as empty and a missing
+`seed` as false. `PUT /v0/spaces/sidebar`
+takes `{html, baseVersion, mutationId}` and returns the same shape. All three fields are required
+on this route. A retry with the same mutation ID returns its committed version without writing
+again; reusing an ID for different content is `409`. A stale base is `409 conflict` with
+`currentVersion`; invalid content is `400 invalid_request` with `diagnostics`. These details are
+additional fields on the ordinary error envelope. Every sidebar update emits the existing
+`artifact.updated` event for its artifact ID after commit, echoing the mutation ID when supplied.
+Clients reload on conflict and report through their existing error path; no automatic merge.
+
+Ordinary artifact updates/tools accept optional `baseVersion`; it is required when the target is a
+sidebar. Prioritizing may read and update its artifact using ordinary artifact tools. Its
+convenience `edit_sidebar {baseVersion, edits:[{oldText,newText}]}` applies sequential exact-text
+replacements (each old text must occur exactly once), making one version per call. Its edits wait
+for the existing calm batch; stale or invalid proposals never overwrite a newer document.
+`get_sidebar_styles` returns the elements, their attributes and children, and the rules above.
+`list_sidebar` returns the document, facts about each row, every session under the person's rows
+with its parent, whether or not it is shown, and `visibleRows: {shown, budget}`. `shown` counts the
+top-level rows outside collapsed sections plus the sessions drawn under expanded rows, excluding
+Happy and new work before its first message; `budget` is 10, a target Prioritizing aims to stay
+within rather than a limit the daemon enforces. `read_row_conversation {id, limit?}` takes a space
+ID or a session's agent ID and returns the person's messages, messages from other agents (such as a
+subtask's task or report), and the agent's text replies, newest first, without tool calls or
+reasoning, bounded to 40 messages (default 12) and about 16,000 characters. `set_space_icon` takes
+a space ID or a session's agent ID. Prioritizing runs on the person's default model from Settings
+at that model's default effort. It gives every session an icon but leaves sessions out of the
+document unless there is a strong reason to show one, such as a session waiting on the person.
+
+Fold state lives in the document; clients report nothing else about what the person sees.
+Committed manual document changes enter the next calm brief and preserve the person's authority
+over the moved or folded items.
+
+New spaces are inserted immediately after Happy's top-level `happy-space` element, below everything
+nested in it, or immediately after the section or separator named at creation. When Happy's row is
+absent, nested, or inside a collapsed section, they are inserted immediately after
+`<happy-create/>` instead. Archived or left spaces, and archived sessions, are removed together
+with everything nested under them. Lifecycle changes publish ordinary artifact events.
+
+Prioritizing never moves or hides Happy,
+never moves Search or Create, never undoes the person's moves or folds, never touches new work
+before its first message, and leaves work active in the last two hours where it is and shown (new
+pending work may receive its first placement); an item that comes to sit under a different
+section or separator counts as moved. Moves are attributed at block level: when a section's block
+changes position, its heading counts as moved and its rows as carried, so a person's section drag
+protects the section, not each row. Prioritizing may not move a block that carries Happy, untouched
+new work, or work active in the last two hours, and may not remove or relabel the default `bots`
+and `tasks` sections. Prioritizing's new or renamed section labels may not name age
+or whether work is finished (such as Older, Done, Archive, or Stale) and may not repeat another
+section's label ignoring case and spacing; the person may label sections freely.
+
+Each applied manager batch adds exactly one factual diff-derived note to Happy's conversation and
+publishes the ordinary live message event so open conversations update immediately. Notes name
+sections by label, such as "Put Windows installer signing in Releases.", "Added Releases.", or
+"Moved Releases." for a moved section; a move under a separator names only the row.
 
 ### `GET /v0/spaces/batches`
 
@@ -9797,10 +9859,13 @@ Response — `200`: `{ "batches": [ /* batch objects */ ] }`.
 
 ### `POST /v0/spaces/stem-cells`
 
-For the artifact sidebar, `sectionId` may also name an authored `<happy-section id>` (1–128
-characters). The new node is inserted at the start of that section; without it, immediately after
-Happy. Existing section IDs retain their existing behavior. Unknown authored sections return
-`404` before creating work. Creation and document insertion commit together.
+For the sidebar document, `sectionId` may also name a `<happy-section id>` or
+`<happy-separator id>` (1–128 characters). The new `<happy-space>` is inserted immediately after
+that section or separator; without it, where new spaces go (see "Sidebar artifact"): right below
+Happy. Existing section IDs retain their existing behavior. Unknown IDs return `404` before
+creating work. Creation and document insertion commit together. New work is not shown to
+Prioritizing, and Prioritizing may not change its icon, position, or disclosure, until its
+conversation's first user message.
 
 Starts new work: a fresh conversation with no project or bot — an unnamed task with its own
 folder, as `POST /v0/tasks` creates — and a row for it with the stem-cell icon.

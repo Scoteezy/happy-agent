@@ -156,6 +156,21 @@ export const spaceSidebarResponseSchema = Type.Object({
     version: Type.Integer({ minimum: 1 }),
     html: Type.String(),
     spaces: Type.Array(spaceSchema),
+    /**
+     * Prioritizing's icon for each session by agent ID, whether or not the session is shown.
+     * Older daemons omit it; treat a missing map as empty.
+     */
+    agentIcons: Type.Optional(
+        Type.Record(
+            Type.String(),
+            Type.Object({ slug: Type.String(), type: Type.Literal("library") }),
+        ),
+    ),
+    /**
+     * Present while the document still mirrors the classic sidebar, until the person's first
+     * write or Prioritizing's next notice. Older daemons omit it; treat a missing flag as false.
+     */
+    seed: Type.Optional(Type.Literal(true)),
 });
 export type SpaceSidebarResponse = Static<typeof spaceSidebarResponseSchema>;
 
@@ -165,17 +180,6 @@ export const updateSpaceSidebarRequestSchema = Type.Object({
     mutationId: mutationIdSchema,
 });
 export type UpdateSpaceSidebarRequest = Static<typeof updateSpaceSidebarRequestSchema>;
-
-export const spaceSidebarObservationsRequestSchema = Type.Object({
-    visibleSpaceIds: Type.Array(cuid2Schema, { maxItems: 1000, uniqueItems: true }),
-    collapsed: Type.Optional(
-        Type.Array(Type.String({ minLength: 1, maxLength: 128 }), {
-            maxItems: 1000,
-            uniqueItems: true,
-        }),
-    ),
-});
-export type SpaceSidebarObservationsRequest = Static<typeof spaceSidebarObservationsRequestSchema>;
 
 export const sidebarDiagnosticSchema = Type.Object({
     message: Type.String(),
