@@ -30,7 +30,7 @@ available. Every target requires its patched libSQL binding built on the matchin
 host with `pnpm --filter @slopus/happy-agent build:native:libsql`; see
 [`../native/libsql/README.md`](../native/libsql/README.md). Other Windows native
 assets must also be built on Windows first, as described below.
-Bun 1.4.3 is pinned by `mise.toml` and invoked at that exact version through
+Bun 1.4.4 is pinned by `mise.toml` and invoked at that exact version through
 `pnpm dlx`. Output names are `dist/bin/happy-agent-<platform>-<arch>`; Windows adds
 `.exe`. Windows helpers are embedded only in the Windows executable.
 

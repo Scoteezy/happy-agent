@@ -5,7 +5,7 @@
     "scripts": {
         "check": "tsc --noEmit",
         "test:gym": "node runGym.ts",
-        "test:gym:api": "pnpm dlx bun@1.4.3 scripts/runHappyApiSuite.ts"
+        "test:gym:api": "pnpm dlx bun@1.4.4 scripts/runHappyApiSuite.ts"
     },
     "devDependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
