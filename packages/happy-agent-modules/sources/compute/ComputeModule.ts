@@ -1,5 +1,6 @@
 import {
     agentDatabase,
+    agentMetadata,
     agentModuleConfig,
     cuid2Schema,
     type AgentKV,
@@ -7,6 +8,7 @@ import {
     type AgentModuleHooks,
     type AgentModuleScope,
     type AgentModuleSystemScope,
+    type AgentSystemRef,
     type AgentConfig,
     type AnyAgentTool,
     withAgentDatabase,
@@ -291,6 +293,8 @@ export class ComputeModule implements AgentModule {
     readonly #runnerMachines = new WeakSet<Compute>();
     /** Compute's one durable store shared by every agent in this collection. */
     #sharedKV: AgentKV | undefined;
+    /** Read when a machine is about to be built, to refuse one for an archived agent. */
+    #agents: AgentSystemRef | undefined;
     #closed = false;
     #disposePromise: Promise<void> | undefined;
 
@@ -354,7 +358,10 @@ export class ComputeModule implements AgentModule {
         return Value.Check(agentComputeConfigSchema, raw) ? raw.runnerId : undefined;
     }
 
-    /** Resolve the exact compute cached for this agent, or no compute when none was configured. */
+    /**
+     * Resolve the exact compute cached for this agent, or no compute when none was configured or
+     * the agent is archived.
+     */
     async resolve(ctx: Context, agentId: string): Promise<HostCompute | undefined> {
         if (agentId.length === 0) throw new Error("Compute agent ID is invalid.");
         const raw = agentModuleConfig(ctx, this.name);
@@ -382,6 +389,15 @@ export class ComputeModule implements AgentModule {
                     }
                     return existing.compute;
                 }
+                // Archival ended this agent's machine. Reading the archived agent, such as its
+                // slash commands, must not build another one and serve its network again. The
+                // stored metadata decides, because a caller that waited here while archival held
+                // the lock carries the configuration from before it.
+                const metadata =
+                    this.#agents === undefined
+                        ? agentMetadata(lockCtx)
+                        : (await this.#agents.config(lockCtx, agentId))?.metadata;
+                if (typeof metadata?.["archivedAt"] === "number") return undefined;
 
                 // A bot's compute setting is read only while the machine is built: a running
                 // machine is never moved, so a change reaches it the next time it starts.
@@ -947,7 +963,10 @@ export class ComputeModule implements AgentModule {
         },
     };
 
-    readonly beforeStart = (): AgentModuleHooks => this.#hooks;
+    readonly beforeStart = (_ctx: Context, agents: AgentSystemRef): AgentModuleHooks => {
+        this.#agents = agents;
+        return this.#hooks;
+    };
 
     async #track<Result>(operation: Promise<Result>): Promise<Result> {
         this.#activeOperations.add(operation);

@@ -73,6 +73,15 @@ same tracked connector as `network`, so archival ends its connections. An unknow
 `undefined`, never another network; after a restart a container's name is unserved until its
 machine is resolved again.
 
+## An archived agent gets no new machine
+
+Archival ended an agent's container, but the archive route's own reply then read the agent's
+slash commands, whose skill discovery resolved its compute and built the container again — so
+the archived agent's `c-` network was served again instead of answering `404`. The caller's
+context still carried the configuration from before archival, so `resolve` now reads the stored
+metadata before building a machine and builds none for an archived agent. An existing cached
+machine is unaffected; only construction is refused.
+
 ## File mutations can explicitly request reviewed elevation
 
 Patch, write, and edit tools previously inferred elevation only from their target paths, so a model
