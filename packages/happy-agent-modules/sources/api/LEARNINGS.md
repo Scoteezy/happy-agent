@@ -437,6 +437,14 @@ the owner of a run still going. `RunMutationOwners` now keeps an owner exactly a
 with no cap, and keeps only runs that answer a mutation; the bound is the number of runs in
 progress.
 
+Two creation paths still announce agents with no echo, found in the last review and not yet
+fixed. A subtask created from a tagged run gets no owner at all: Subtasks creates the agent
+without a `mutationId` before Collaboration delivers its opening task, and Collaboration's retry
+branch keeps that absence, so the subtask's `agent.created`, its run and its report echo nothing.
+A task or bot an agent creates with `create_task` or `create_bot` announces `agent.created` with
+no echo, although a task's opening run echoes correctly. Both need the creating run's mutation
+written into the new agent's metadata at creation, through `impl/mutationEcho.ts`.
+
 ## A failure retry's run echoes the retry's mutation
 
 Retry and switch accepted `mutationId` but started their run with a hidden notice that carried
