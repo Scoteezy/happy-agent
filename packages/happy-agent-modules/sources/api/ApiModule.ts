@@ -193,7 +193,7 @@ import {
     type HistoryPendingMessage,
     type HistoryRunState,
 } from "../history/index.js";
-import { USER_MESSAGE_ORIGIN_METADATA } from "../impl/messageOrigin.js";
+import { senderAgentIdOf, USER_MESSAGE_ORIGIN_METADATA } from "../impl/messageOrigin.js";
 import { decodeRequestProfile, requestProfilesForAgent } from "../impl/requestProfile.js";
 import {
     PermissionsModule,
@@ -328,6 +328,7 @@ import {
     gitWatchBodySchema,
     invokeSlashCommandRequestSchema,
     messageSendBodySchema,
+    mutationIdSchema,
     profilePatchBodySchema,
     projectCloneBodySchema,
     projectRegisterBodySchema,
@@ -413,6 +414,7 @@ const MAX_TERMINAL_WIRE_MESSAGE_BYTES = 4 * 1024 * 1024 + 20;
 const MAX_ANNOUNCED_PENDING_MESSAGES = 10_000;
 const MAX_ANNOUNCED_AGENT_CREATIONS = 10_000;
 const MAX_ANNOUNCED_TERMINAL_RUNS = 10_000;
+const MAX_RUN_MUTATIONS = 10_000;
 const MAX_ANNOUNCED_EXECUTION_CONFIGURATIONS = 512 * 64;
 const DRAIN_MUTATION_LOG_INTERVAL_MS = 5_000;
 /** How often a drain looks at what still holds it open; it logs only on change or every 5s. */
@@ -616,7 +618,16 @@ export class ApiModule implements AgentModule {
     readonly #secrets: SecretsModule;
     readonly #daemonId = createId();
     readonly #daemonStartedAt = Date.now();
-    readonly #mutationIds = new AsyncLocalStorage<string>();
+    readonly #mutationIds = new AsyncLocalStorage<MutationScope>();
+    /**
+     * Each agent's current run and the mutation that started it, written when the run starts and
+     * removed when it settles. Agent events echo this rather than the async chain they run in,
+     * because an agent loop keeps the chain of whatever request woke it for its whole life.
+     */
+    readonly #runMutations = new Map<
+        string,
+        { readonly runId: string; readonly mutationId: string | undefined }
+    >();
     readonly #backgroundScope = new AsyncResource("happy-agent-api");
     /** Agents whose usage-driven metadata refresh is already scheduled. */
     readonly #pendingUsageMetadataAgents = new Set<string>();
@@ -810,6 +821,34 @@ export class ApiModule implements AgentModule {
                 }
                 return undefined;
             },
+            messageAcceptedTransact: async (hookCtx, scope, accepted) => {
+                // From here on this async chain runs an agent loop, whose events name their agent.
+                const chain = this.#mutationIds.getStore();
+                if (chain !== undefined) chain.inLoop = true;
+                // A message that starts the agent's next run, as Events decides the boundary,
+                // owns it: its own mutation, else the run of the agent that sent it, else none.
+                const runId = await this.#events.runIdForAccepted(
+                    hookCtx,
+                    scope.agent.id,
+                    accepted,
+                );
+                if (runId !== accepted.id) return;
+                const own = accepted.metadata?.["mutationId"];
+                const sender = senderAgentIdOf(accepted.metadata);
+                boundedSet(
+                    this.#runMutations,
+                    scope.agent.id,
+                    {
+                        runId,
+                        mutationId: Value.Check(mutationIdSchema, own)
+                            ? (own as string)
+                            : sender === undefined
+                              ? undefined
+                              : this.#runMutations.get(sender)?.mutationId,
+                    },
+                    MAX_RUN_MUTATIONS,
+                );
+            },
             metadataChangedTransact: async (hookCtx, scope, change) => {
                 const archivedAt = change.update["archivedAt"];
                 if (
@@ -931,6 +970,19 @@ export class ApiModule implements AgentModule {
     }
 
     async handleRequest(
+        ctx: Context,
+        request: IncomingMessage,
+        response: ServerResponse,
+    ): Promise<void> {
+        // Every request has a scope, even without a mutation, so only work outside any request
+        // reads an agent's current run.
+        await this.#withMutationId(
+            undefined,
+            async () => await this.#handleRequest(ctx, request, response),
+        );
+    }
+
+    async #handleRequest(
         ctx: Context,
         request: IncomingMessage,
         response: ServerResponse,
@@ -2710,7 +2762,7 @@ export class ApiModule implements AgentModule {
             }),
             this.#history.onToolSpawn((_ctx, agentId, message) => {
                 if (messageHiddenFromUser(message)) return;
-                this.#journal.append("message.updated", {
+                this.#appendForAgent(agentId, "message.updated", {
                     agentId,
                     runId: message.runId ?? null,
                     message: messageResource(message),
@@ -2734,7 +2786,7 @@ export class ApiModule implements AgentModule {
                 const queued = this.#queueAgentWork(
                     ctx,
                     agentId,
-                    this.#mutationIds.getStore(),
+                    this.#agentMutationId(agentId),
                     async () => {
                         for (const message of eligible) {
                             // Service notes have a durable maintenance run but no provider event.
@@ -2780,7 +2832,8 @@ export class ApiModule implements AgentModule {
             }),
             this.#usage.onEvent((_eventCtx, event) => {
                 if (event.type === "usage_context_changed") {
-                    this.#journal.append(
+                    this.#appendForAgent(
+                        event.agentId,
                         "agent.context.updated",
                         {
                             agentId: event.agentId,
@@ -2792,7 +2845,8 @@ export class ApiModule implements AgentModule {
                 }
                 if (event.type === "usage_reset") {
                     if (event.agentId !== null) {
-                        this.#journal.append(
+                        this.#appendForAgent(
+                            event.agentId,
                             "agent.context.updated",
                             { agentId: event.agentId, context: null },
                             event.at,
@@ -3228,13 +3282,19 @@ export class ApiModule implements AgentModule {
             await this.#activeRunId(ctx, event.request.askingAgentId),
         );
         if (event.type === "user_input_requested") {
-            this.#journal.append("question.created", { question }, event.at);
+            this.#appendForAgent(
+                event.request.askingAgentId,
+                "question.created",
+                { question },
+                event.at,
+            );
             await this.#updateAgentMetadata(ctx, event.request.askingAgentId, {
                 pendingQuestionId: event.request.id,
             });
             return;
         }
-        this.#journal.append(
+        this.#appendForAgent(
+            event.request.askingAgentId,
             "question.updated",
             {
                 questionId: event.request.id,
@@ -3257,7 +3317,7 @@ export class ApiModule implements AgentModule {
 
     #enqueueAgentEvent(ctx: Context, event: AgentEvent): void {
         const key = event.agentId ?? "\u0000daemon";
-        const mutationId = this.#mutationIds.getStore();
+        const mutationId = this.#agentMutationId(event.agentId);
         let configurations: readonly HistoryMessage[] = [];
         const payload = recordValue(event.payload);
         const rigEvent = recordValue(payload?.["rigEvent"]);
@@ -3311,7 +3371,7 @@ export class ApiModule implements AgentModule {
                     if (mutationId === undefined) {
                         await work();
                     } else {
-                        await this.#mutationIds.run(mutationId, work);
+                        await this.#mutationIds.run({ mutationId, inLoop: false }, work);
                     }
                 }),
         );
@@ -3430,6 +3490,10 @@ export class ApiModule implements AgentModule {
             return;
         }
         if (event.type === "loop.settled") {
+            const settledRunId = stringValue(payload?.["runId"]);
+            if (this.#runMutations.get(agentId)?.runId === settledRunId) {
+                this.#runMutations.delete(agentId);
+            }
             // A settled run retries nothing; announce the clear before the settlement's own updates.
             const cleared = await this.#retryingChange(ctx, agentId, event.type, payload);
             if (cleared.retrying !== undefined)
@@ -3855,7 +3919,7 @@ export class ApiModule implements AgentModule {
         }
         const runId = message.runId;
         afterCommit(ctx, () => {
-            this.#journal.append("message.updated", {
+            this.#appendForAgent(event.agentId, "message.updated", {
                 agentId: event.agentId,
                 runId,
                 message: messageResource(message),
@@ -4004,6 +4068,8 @@ export class ApiModule implements AgentModule {
         ) {
             await this.#flushAcceptedMessages(ctx, agentId);
         }
+        // The batch announces later, outside this chain, so it keeps the owner known now.
+        const mutationId = message.mutationId ?? this.#agentMutationId(agentId);
         const batch: AcceptedMessageBatch = this.#acceptedMessageBatches.get(agentId) ?? {
             kind: acceptedKind,
             runId,
@@ -4016,7 +4082,7 @@ export class ApiModule implements AgentModule {
             occurredAt: event.occurredAt,
             previousVersion,
             version: event.id,
-            ...(message.mutationId === undefined ? {} : { mutationId: message.mutationId }),
+            ...(mutationId === undefined ? {} : { mutationId }),
         });
         this.#acceptedMessageBatches.set(agentId, batch);
         this.#scheduleAcceptedMessageFlush(ctx, agentId, batch);
@@ -4064,7 +4130,7 @@ export class ApiModule implements AgentModule {
             if (mutationId === undefined) {
                 this.#journal.append(type, payload, at);
             } else {
-                this.#mutationIds.run(mutationId, () => {
+                this.#mutationIds.run({ mutationId, inLoop: false }, () => {
                     this.#journal.append(type, payload, at);
                 });
             }
@@ -8362,9 +8428,25 @@ export class ApiModule implements AgentModule {
         mutationId: string | undefined,
         operation: () => Promise<Value>,
     ): Promise<Value> {
-        return mutationId === undefined
-            ? await operation()
-            : await this.#mutationIds.run(mutationId, operation);
+        return await this.#mutationIds.run({ mutationId, inLoop: false }, operation);
+    }
+
+    /**
+     * The mutation an event about one agent echoes. A request's own change echoes the request;
+     * anywhere else, including a chain running an agent loop, the change belongs to the agent's
+     * current run.
+     */
+    #agentMutationId(agentId: string | undefined): string | undefined {
+        const chain = this.#mutationIds.getStore();
+        if (chain !== undefined && !chain.inLoop) return chain.mutationId;
+        return agentId === undefined ? undefined : this.#runMutations.get(agentId)?.mutationId;
+    }
+
+    #appendForAgent(agentId: string, type: string, payload: unknown, occurredAt?: number): void {
+        const mutationId = this.#agentMutationId(agentId);
+        this.#mutationIds.run({ mutationId, inLoop: false }, () => {
+            this.#journal.append(type, payload, occurredAt);
+        });
     }
 
     async #cloudOperation<Value>(operation: () => Promise<Value>): Promise<Value> {
@@ -10040,11 +10122,21 @@ function mergeUsageBreakdown(
     }
 }
 
+/**
+ * @internal The mutation one async chain carries. An agent loop started in a request's chain keeps
+ * it for its whole life, so once the chain runs a loop it echoes nothing on its own; the loop's
+ * producers name the agent and echo that agent's run instead.
+ */
+export interface MutationScope {
+    readonly mutationId: string | undefined;
+    inLoop: boolean;
+}
+
 /** @internal API event journal that inherits only the current async mutation scope. */
 export class MutationAwareApiEventJournal extends ApiEventJournal {
-    readonly #mutationIds: AsyncLocalStorage<string>;
+    readonly #mutationIds: AsyncLocalStorage<MutationScope>;
 
-    constructor(mutationIds: AsyncLocalStorage<string>) {
+    constructor(mutationIds: AsyncLocalStorage<MutationScope>) {
         super();
         this.#mutationIds = mutationIds;
     }
@@ -10055,7 +10147,8 @@ export class MutationAwareApiEventJournal extends ApiEventJournal {
         occurredAt?: number,
         ownerId?: string,
     ): ApiEvent {
-        const mutationId = this.#mutationIds.getStore();
+        const scope = this.#mutationIds.getStore();
+        const mutationId = scope?.inLoop === true ? undefined : scope?.mutationId;
         if (
             mutationId === undefined ||
             payload === null ||

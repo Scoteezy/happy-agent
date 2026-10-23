@@ -396,3 +396,23 @@ The focused agent reply loads the agent's slash commands after the route's mutat
 committed. A catalog that could not load turned a successful reorder, rename or creation into a
 `500`, though the change had landed. The reply now carries an empty catalog when it cannot load
 one and logs why; the catalog's own update event brings it once it does.
+
+## Each agent's run owns its mutation echo
+
+A manual compaction wakes the agent loop inside its own mutation scope, and the loop keeps that
+async scope for its whole life, as does every helper agent the loop starts. A message queued
+during the compaction therefore ran its turn, its context updates, the helper it spawned, and that
+helper's own events all echoing the compaction's `mutationId`. Inferring an owner from the scope
+kept leaking: per-scope agent maps, a daemon-wide root scope, and a "first agent in the scope"
+fallback each retagged some other run's events.
+
+Ownership is now explicit. Every request runs in a scope of its own, and the moment that scope's
+chain accepts a message into an agent loop it is marked as running a loop and echoes nothing on
+its own again. An agent event then echoes only through the agent its producer names: the agent's
+current run records the mutation that started it, written in `messageAcceptedTransact` when a
+message starts the agent's next run as Events decides the boundary, and deleted when that run
+settles. The owner is the message's own `mutationId`, else the current run of the agent that sent
+it, so a helper keeps its parent's retry, else none. A message joining the run already going
+changes nothing, and a steer that opens a successor run counts as a new run. Questions name their
+asking agent. An event that names no agent gets no inherited echo. Accepted-message batches
+announce later, so each message keeps the owner it had when it was accepted.
