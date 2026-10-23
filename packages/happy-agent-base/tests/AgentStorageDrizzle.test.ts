@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
     AgentStorage,
+    AgentStorageNewerDataError,
     AgentSystemLocal,
     agentDatabase,
     agentDatabaseRows,
@@ -18,6 +19,7 @@ import {
     withAgentDatabase,
     type AgentDatabase,
     type AgentModule,
+    type AgentModuleMigration,
     type AgentStorageLock,
     type AnyAgentTool,
 } from "../sources/index.js";
@@ -214,6 +216,142 @@ describe.each(databaseBackends)("AgentStorage Drizzle persistence ($label)", ({ 
             sql`SELECT migration_key FROM happy_agent_migrations WHERE module_key = 'failing'`,
         );
         expect(markers).toEqual([]);
+        await close();
+    });
+
+    it("refuses a store a newer build migrated past this build, before applying anything", async () => {
+        const { close, database } = await open();
+        const created = (name: string): AgentModuleMigration => [
+            `001-${name}`,
+            async (_migrationCtx, migrationDatabase) => {
+                await agentDatabaseRun(
+                    migrationDatabase,
+                    sql.raw(`CREATE TABLE ${name} (value TEXT NOT NULL)`),
+                );
+            },
+        ];
+        const newer = new AgentStorage({ acquireLock: lock(), database });
+        await newer.migrate(ctx, [
+            { name: "sample", migrations: [created("sample_one"), created("sample_two")] },
+        ]);
+
+        const pending: unknown[] = [];
+        let beforeStart = 0;
+        const older = new AgentStorage({
+            acquireLock: lock(),
+            database,
+            beforeMigrate: async (_migrateCtx, keys) => {
+                pending.push(keys);
+            },
+        });
+        const refusal = await AgentSystemLocal.create(ctx, older, {
+            modules: [
+                { name: "sample", migrations: [created("sample_one")] },
+                // Listed after the refusing module, so a store migrated module by module would
+                // already have created this table before noticing the newer data.
+                {
+                    name: "later",
+                    migrations: [created("later_table")],
+                    beforeStart: () => {
+                        beforeStart += 1;
+                    },
+                },
+            ],
+            providers: providersOf(new ScriptedProvider([])),
+            provider: "scripted",
+            models: [],
+        }).catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(AgentStorageNewerDataError);
+        expect((refusal as AgentStorageNewerDataError).unknownMigrations).toEqual([
+            { module: "sample", key: "001-sample_two" },
+        ]);
+        expect(pending).toEqual([]);
+        expect(beforeStart).toBe(0);
+        const markers = await agentDatabaseRows<{ module_key: string }>(
+            database,
+            sql`SELECT module_key FROM happy_agent_migrations WHERE module_key = 'later'`,
+        );
+        expect(markers).toEqual([]);
+        await close();
+    });
+
+    it("ignores migrations of modules this build does not have", async () => {
+        const { close, database } = await open();
+        const noop = (key: string): AgentModuleMigration => [key, () => undefined];
+        await new AgentStorage({ acquireLock: lock(), database }).migrate(ctx, [
+            { name: "sample", migrations: [noop("001")] },
+            { name: "newer-only", migrations: [noop("001"), noop("002")] },
+        ]);
+
+        await expect(
+            new AgentStorage({ acquireLock: lock(), database }).migrate(ctx, [
+                { name: "sample", migrations: [noop("001"), noop("002")] },
+            ]),
+        ).resolves.toBeUndefined();
+        const markers = await agentDatabaseRows<{ migration_key: string }>(
+            database,
+            sql`SELECT migration_key FROM happy_agent_migrations
+                WHERE module_key = 'sample' ORDER BY position`,
+        );
+        expect(markers.map(({ migration_key }) => migration_key)).toEqual(["001", "002"]);
+        await close();
+    });
+
+    it("still rejects reordered history as a corrupt ledger, not as newer data", async () => {
+        const { close, database } = await open();
+        const noop = (key: string): AgentModuleMigration => [key, () => undefined];
+        await new AgentStorage({ acquireLock: lock(), database }).migrate(ctx, [
+            { name: "sample", migrations: [noop("001"), noop("002"), noop("003")] },
+        ]);
+
+        const refusal = await new AgentStorage({ acquireLock: lock(), database })
+            .migrate(ctx, [{ name: "sample", migrations: [noop("002"), noop("001")] }])
+            .catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(Error);
+        expect(refusal).not.toBeInstanceOf(AgentStorageNewerDataError);
+        expect((refusal as Error).message).toContain("are not a prefix");
+        await close();
+    });
+
+    it("announces every pending migration once before the first one runs", async () => {
+        const { close, database } = await open();
+        const events: string[] = [];
+        const step = (key: string): AgentModuleMigration => [
+            key,
+            () => {
+                events.push(`run:${key}`);
+            },
+        ];
+        const storage = (fail = false) =>
+            new AgentStorage({
+                acquireLock: lock(),
+                database,
+                beforeMigrate: async (_migrateCtx, pending) => {
+                    events.push(
+                        `before:${pending.map(({ module, key }) => `${module}/${key}`).join(",")}`,
+                    );
+                    if (fail) throw new Error("could not record the data version");
+                },
+            });
+
+        await storage().migrate(ctx, [{ name: "sample", migrations: [step("001")] }]);
+        await storage().migrate(ctx, [{ name: "sample", migrations: [step("001")] }]);
+        await expect(
+            storage(true).migrate(ctx, [
+                { name: "sample", migrations: [step("001"), step("002")] },
+            ]),
+        ).rejects.toThrow("could not record the data version");
+        await storage().migrate(ctx, [{ name: "sample", migrations: [step("001"), step("002")] }]);
+
+        expect(events).toEqual([
+            "before:@happy-agent-base/001-core-storage,sample/001",
+            "run:001",
+            "before:sample/002",
+            "before:sample/002",
+            "run:002",
+        ]);
         await close();
     });
 

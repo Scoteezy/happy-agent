@@ -173,6 +173,21 @@ swallow write failures, and
 be written. Making these fatal needs a way to tell database failures from hook and provider
 failures and a termination path owned by the agent system; that design has not been decided.
 
+## A store written by a newer build is refused before anything migrates
+
+The desktop app can put an older daemon on data a newer one wrote, for example after a switch
+from the preview channel to stable or after a release is pulled. The old prefix check treated
+the newer migrations as a corrupt ledger and threw a generic error. The daemon exited 1 and its
+supervisor restarted it forever. It also checked one module at a time, so modules listed earlier
+had already been migrated before a later module's newer data was found. `migrate` now reads every
+ledger first. Applied keys past the end of a known module's list throw
+`AgentStorageNewerDataError` before anything is applied, and the host turns that into a clean
+refusal. A module this build does not have never triggers it, because its tables are additive
+data this build never reads. An incompatible change therefore needs a migration in the module
+that owns the data, even an empty one. `beforeMigrate` runs after the checks and before the
+first pending migration, so a host can record the oldest build able to read the store before
+that stops being true.
+
 ## Verification
 
 `verification/lean/` (Lean 4) and `verification/tla/` (TLA+) model this state machine. Keep

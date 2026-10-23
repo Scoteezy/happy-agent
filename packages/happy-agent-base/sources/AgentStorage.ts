@@ -14,6 +14,10 @@ import { AgentKV } from "./AgentKV.js";
 import type { AgentPersistence } from "./AgentPersistence.js";
 import type { AnyAgentTool } from "./AgentTool.js";
 import { AgentPersistenceDrizzle } from "./AgentPersistenceDrizzle.js";
+import {
+    AgentStorageNewerDataError,
+    type AgentStorageMigrationKey,
+} from "./AgentStorageNewerDataError.js";
 
 /**
  * The exclusive ownership of one durable agent store. A host sharing its database between
@@ -25,6 +29,17 @@ export interface AgentStorageLock {
 }
 
 interface AgentStorageCommonOptions {
+    /**
+     * Called once, after every module's ledger has been checked and before the first pending
+     * migration runs, with every migration about to be applied. A host records here what an older
+     * build must know before it opens the store, such as the oldest build that can still read it.
+     * A failure aborts the migration before anything is applied. Not called when nothing is
+     * pending.
+     */
+    readonly beforeMigrate?: (
+        ctx: Context,
+        pending: readonly AgentStorageMigrationKey[],
+    ) => Promise<void>;
     /**
      * Acquire exclusive ownership of the whole store. This must fail while any other process or
      * AgentSystem owns the same durable store.
@@ -51,11 +66,14 @@ export class AgentStorage<Database extends AgentDatabase = AgentDatabase> {
     readonly #persistence: (agentId: string) => AgentPersistence;
     /** Root persistence used for storage-wide transactions and key-value state. */
     readonly #drizzle: AgentPersistenceDrizzle<Database>;
+    /** The host's record of a migration about to begin. */
+    readonly #beforeMigrate: AgentStorageCommonOptions["beforeMigrate"];
     /** Prevents two systems from sharing even one AgentStorage instance. */
     #owned = false;
 
     constructor(options: AgentStorageOptions<Database>) {
         this.#acquireLock = options.acquireLock;
+        this.#beforeMigrate = options.beforeMigrate;
         this.database = options.database;
         ensureAgentDatabaseConnection(options.database);
         const integration = {
@@ -136,6 +154,11 @@ export class AgentStorage<Database extends AgentDatabase = AgentDatabase> {
      * Install the base schema and every module's ordered keyed migrations. Each migration and
      * its success marker commit atomically. Applied keys must remain an exact prefix, so inserting
      * or reordering historical migrations fails instead of silently changing their meaning.
+     *
+     * Every ledger is checked before anything is applied. A known module with applied migrations
+     * past the end of this build's list means a newer build wrote the store, and the whole
+     * migration is refused with {@link AgentStorageNewerDataError}. Migrations of a module this
+     * build does not have are ignored: that data is additive for this build.
      */
     async migrate(
         ctx: Context,
@@ -157,41 +180,56 @@ export class AgentStorage<Database extends AgentDatabase = AgentDatabase> {
                 )`,
             );
         });
-        await this.#migrateModule(ctx, "@happy-agent-base", [
-            [
-                "001-core-storage",
-                async (_migrationCtx, database) => {
+        const owners: [string, readonly AgentModuleMigration<Database>[]][] = [
+            ["@happy-agent-base", CORE_MIGRATIONS as readonly AgentModuleMigration<Database>[]],
+            ...modules.map((module): [string, readonly AgentModuleMigration<Database>[]] => [
+                module.name,
+                module.migrations ?? [],
+            ]),
+        ];
+        const plans: {
+            module: string;
+            migrations: readonly AgentModuleMigration<Database>[];
+            next: number;
+        }[] = [];
+        const unknown: AgentStorageMigrationKey[] = [];
+        for (const [module, migrations] of owners) {
+            const applied = await this.#appliedMigrations(ctx, module, migrations);
+            for (const key of applied.slice(migrations.length)) unknown.push({ module, key });
+            plans.push({ module, migrations, next: applied.length });
+        }
+        if (unknown.length > 0) throw new AgentStorageNewerDataError(unknown);
+        const pending = plans.flatMap(({ module, migrations, next }) =>
+            migrations.slice(next).map(([key]) => ({ module, key })),
+        );
+        if (pending.length > 0) await this.#beforeMigrate?.(ctx, pending);
+        for (const { module, migrations, next } of plans) {
+            for (let index = next; index < migrations.length; index += 1) {
+                const migration = migrations[index];
+                if (migration === undefined) continue;
+                const [key, run] = migration;
+                await this.#drizzle.transaction(ctx, async (txCtx) => {
+                    await run(txCtx, txCtx.db as AgentDatabaseFacade<Database>);
                     await agentDatabaseRun(
-                        database,
-                        sql`CREATE TABLE happy_agent_records (
-                            owner_id TEXT NOT NULL,
-                            position BIGINT NOT NULL,
-                            record_json TEXT NOT NULL,
-                            PRIMARY KEY (owner_id, position)
-                        )`,
+                        txCtx.db,
+                        sql`INSERT INTO happy_agent_migrations
+                            (module_key, migration_key, position)
+                            VALUES (${module}, ${key}, ${index})`,
                     );
-                    await agentDatabaseRun(
-                        database,
-                        sql`CREATE TABLE happy_agent_values (
-                            owner_id TEXT NOT NULL,
-                            key TEXT NOT NULL,
-                            value_json TEXT NOT NULL,
-                            PRIMARY KEY (owner_id, key)
-                        )`,
-                    );
-                },
-            ],
-        ]);
-        for (const module of modules) {
-            await this.#migrateModule(ctx, module.name, module.migrations ?? []);
+                });
+            }
         }
     }
 
-    async #migrateModule(
+    /**
+     * The module's applied migration keys in order. Those this build knows must match its list
+     * exactly; any past the end of its list were applied by a newer build.
+     */
+    async #appliedMigrations(
         ctx: Context,
         module: string,
         migrations: readonly AgentModuleMigration<Database>[],
-    ): Promise<void> {
+    ): Promise<readonly string[]> {
         const keys = migrations.map(([key]) => key);
         if (keys.some((key) => key.length === 0) || new Set(keys).size !== keys.length) {
             throw new Error(`Module "${module}" has an empty or duplicate migration key.`);
@@ -210,27 +248,41 @@ export class AgentStorage<Database extends AgentDatabase = AgentDatabase> {
         );
         for (let index = 0; index < applied.length; index += 1) {
             if (
-                applied[index]?.migration_key !== keys[index] ||
-                Number(applied[index]?.position) !== index
+                Number(applied[index]?.position) !== index ||
+                (index < keys.length && applied[index]?.migration_key !== keys[index])
             ) {
                 throw new Error(
                     `The applied migrations for module "${module}" are not a prefix of its current migrations.`,
                 );
             }
         }
-        for (let index = applied.length; index < migrations.length; index += 1) {
-            const migration = migrations[index];
-            if (migration === undefined) continue;
-            const [key, run] = migration;
-            await this.#drizzle.transaction(ctx, async (txCtx) => {
-                await run(txCtx, txCtx.db as AgentDatabaseFacade<Database>);
-                await agentDatabaseRun(
-                    txCtx.db,
-                    sql`INSERT INTO happy_agent_migrations
-                        (module_key, migration_key, position)
-                        VALUES (${module}, ${key}, ${index})`,
-                );
-            });
-        }
+        return applied.map(({ migration_key }) => migration_key);
     }
 }
+
+/** The base schema every store carries, owned by `@happy-agent-base`. */
+const CORE_MIGRATIONS: readonly AgentModuleMigration[] = [
+    [
+        "001-core-storage",
+        async (_migrationCtx, database) => {
+            await agentDatabaseRun(
+                database,
+                sql`CREATE TABLE happy_agent_records (
+                    owner_id TEXT NOT NULL,
+                    position BIGINT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, position)
+                )`,
+            );
+            await agentDatabaseRun(
+                database,
+                sql`CREATE TABLE happy_agent_values (
+                    owner_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value_json TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, key)
+                )`,
+            );
+        },
+    ],
+];

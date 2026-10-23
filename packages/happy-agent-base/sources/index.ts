@@ -55,6 +55,10 @@ export {
 } from "./AgentRequestProfile.js";
 export { AgentStorage, type AgentStorageLock, type AgentStorageOptions } from "./AgentStorage.js";
 export {
+    AgentStorageNewerDataError,
+    type AgentStorageMigrationKey,
+} from "./AgentStorageNewerDataError.js";
+export {
     agentDatabaseRows,
     agentDatabaseRun,
     isAgentSQLiteDatabase,
