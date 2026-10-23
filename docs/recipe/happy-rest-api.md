@@ -39,8 +39,9 @@ token file. Its bearer token is a short-lived WorkOS access token for the team's
 (or, with `authentication = "jwt"`, the organization's own access token). The unauthenticated
 `GET /v0/authentication` lists the sign-in methods. From a script, the simpler route is the
 standalone daemon's connection proxy below: it mints, caches, and refreshes the organization
-token itself, so the script never handles WorkOS credentials. A team member who has not
-completed profile onboarding is refused on most routes.
+token itself, so the script never handles WorkOS credentials. `POST /v0/cloud/access-token` is
+no substitute: its token carries no organization, so a team daemon rejects it. A team member
+who has not completed profile onboarding is refused on most routes.
 
 **Remote daemons.** `GET /v0/connections` lists the remotes configured on the local daemon. The
 prefix `/v0/connections/:id/api/*` exposes a remote's complete API: authenticate to the local
@@ -100,10 +101,10 @@ through their bot or task.
 `"queue"`, the default, waits for the current run, while `"steer"` is taken at the next inference
 boundary. On an idle agent the two are the same. `id` is optional too, but supply one: it becomes
 the message ID, and sending the same `id` again creates nothing and returns the existing message,
-so a send whose response was lost is safe to retry. IDs are lowercase letters and digits starting
-with a letter, in the CUID2 style.
+so a send whose response was lost is safe to retry. An `id` is 2–96 lowercase letters and digits
+starting with a letter, such as a CUID2; a UUID is rejected.
 
-`mode` has exactly five fields: `providerId`, `modelId`, `effort`, `serviceTier` (`null` for the
+`mode` has five required fields: `providerId`, `modelId`, `effort`, `serviceTier` (`null` for the
 default), and `permissionMode` (`read_only`, `workspace_write`, `auto`, or `full_access`). Reuse
 the agent's last mode, or fall back to the daemon's defaults:
 
@@ -179,7 +180,8 @@ curl -sSN --unix-socket "$HAPPY_SOCKET" -H @"$HAPPY_AUTH" \
   `providers.<id>.models[].enabled`) rather than guessing. `permissionMode` decides what the run
   may do; choose it deliberately.
 - **Retry a send with the same `id`.** A retry returns the stored message, including its original
-  text and mode, without sending again. A new `id` sends a second message. Other mutations take an
+  text and mode, without sending again, even if that model has since been disabled; it still
+  fails once the agent is archived. A new `id` sends a second message. Other mutations take an
   optional `mutationId`, which only echoes into events and does not deduplicate retries.
 - **Not every agent accepts messages.** Check `canSendMessages` first. Hidden subagents and
   archived agents answer `409 conflict` on `send`; subtasks accept messages while active.
@@ -194,9 +196,9 @@ curl -sSN --unix-socket "$HAPPY_SOCKET" -H @"$HAPPY_AUTH" \
   `409 cursor_unavailable` on `/v0/events`, or `"gap": true` in the stream's `hello`. Re-read the
   snapshots you rely on, then continue from the cursor the daemon returned.
 - **Some mutations need `If-Match`.** Changes to projects, workspaces, bots, tasks, artifacts,
-  secrets, todos, and the profile need `If-Match: <version>` from your latest copy. A missing
-  header is `400`; a stale one is `409 conflict` with `currentVersion` and the current resource.
-  Agent routes, `send` included, take no `If-Match`.
+  secrets, todos, calendar events, and the profile need `If-Match: <version>` from your latest
+  copy; `API.md` lists the rest. A missing header is `400`; a stale one is `409 conflict` with
+  `currentVersion` and the current resource. Agent routes, `send` included, take no `If-Match`.
 - **Branch on `code`, not `error`.** Errors are `{ "error": "...", "code": "..." }`. `error` is
   display text and may change; `code` is stable. A draining daemon answers mutations with
   `503 draining`.

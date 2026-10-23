@@ -520,21 +520,32 @@ exception described in the secrets chapter. In particular, CUID2s do not sort by
 Clients compare IDs for equality and nothing else; when an ID is used as a paging cursor, the
 daemon resolves its position — the client never needs to order IDs itself.
 
+A client-supplied ID in a request body — a project's `projectId`, an agent's or message's `id`,
+and the agent, workspace, and run IDs that requests name — must be a lowercase ASCII letter
+followed by lowercase ASCII letters and digits, 2–96 characters in all (`^[a-z][a-z0-9]+$`). A
+new workspace's own `id` is limited to 32 characters. Anything else, including a UUID, uppercase
+letters, hyphens, or underscores, is `400 invalid_request`. A freshly generated CUID2 always
+qualifies.
+
 The two version-like identifier kinds are both **UUIDv7** — time-ordered, so greater means newer:
 event cursors (defined in the events chapter) and resource versions (next section).
 
 ### Resource versions and `If-Match`
 
 Every resource that appears in version-chained `*.updated` events — projects, workspaces,
-terminals, services, agents, bots, artifacts, secrets, surfaces, todos, questions, processes, and the profile — carries a `version`
+terminals, services, agents, bots, tasks, artifacts, secrets, surfaces, todos, questions, processes, and the profile — carries a `version`
 field: a **UUIDv7** minted at the moment of the change. Because versions are time-ordered, a
 client holding two copies of the same resource compares their versions and keeps the greater
 one; this is how a REST snapshot and the event stream reconcile without bookkeeping. Versions
 also chain updates together: every `*.updated` event names the version it replaced, so a client
 can tell whether its cached copy is current or dirty (see the events chapter).
 
-Mutations of projects, workspaces, bots, artifacts, secrets, todos, and the profile additionally require an
-`If-Match` header carrying the version the client last saw (creation excepted):
+Mutations of projects, workspaces, bots, tasks, artifacts, secrets, todos, calendar events, chat
+Surface messages, and the profile additionally require an `If-Match` header carrying the version
+the client last saw. Creation is excepted, and so are per-person memberships and their order, such
+as joining, leaving, and reordering a task. Two mutations of things that are not event-chained
+resources also require it, each with the version its own section names: enabling or disabling a
+global skill, and reordering remote connections. The header carries the version alone:
 
 ```
 If-Match: 01991f3a-5c1e-7000-8000-2f9a1b3c4d5e
@@ -2444,6 +2455,12 @@ server failure, `/v0/hello` rejection, or user-ID mismatch returns `503` with co
 Cloud's rejection alone is not treated as proof of revocation because its token-verification
 dependencies may themselves be temporarily unavailable. No access token is returned unless the
 verification succeeds.
+
+The minted token is not scoped to an organization: the daemon refreshes the session without one.
+It is therefore not a bearer token for a WorkOS team daemon, which requires an `org_id` claim equal
+to its organization. To reach a team remote, send requests through
+`/v0/connections/:id/api/*`, which mints and caches the organization-scoped token internally
+and never returns it.
 
 ### Cloud organizations
 
@@ -5480,8 +5497,9 @@ Request:
 - `arguments` — optional opaque text. Supplying it to a command whose `hasArguments` is `false`
   is `400`; an argument-capable command decides whether an omitted or empty value is meaningful.
 - `mode` — the complete composer selection, required for every invocation so commands that start
-  a turn do so under exactly what the person selected. Commands such as compaction that do not run
-  inference ignore it.
+  a turn do so under exactly what the person selected. It has the same fields and is checked
+  against the model catalog exactly as in `send`, with the same `400 invalid_request`, even for
+  commands such as compaction that do not run inference and otherwise ignore it.
 - `mutationId` — optional mutation echo. Every event caused by the invocation carries it.
 
 Response — `202` after the owning module has durably accepted the invocation:
@@ -6722,7 +6740,9 @@ Request:
 }
 ```
 
-- `id` — optional client-chosen message ID, a CUID2. The daemon creates the message under
+- `id` — optional client-chosen message ID, a CUID2 or any other string matching
+  `^[a-z][a-z0-9]+$` of 2–96 characters, as described under Identifiers; a UUID is
+  `400 invalid_request`. The daemon creates the message under
   exactly this identity, so the optimistic copy the client rendered at send and the durable
   message are **the same message** — in this response, in every event, and in every history
   load. No reconciliation or echo-matching is needed, and no path can strand a stale
@@ -6730,7 +6750,7 @@ Request:
   client already keys by. Omitted, the daemon generates one. Sending again with an `id` the
   agent already has creates nothing and returns the message as it now stands, which makes
   retrying a send whose response was lost safe.
-- `text` — the message text. Required.
+- `text` — the message text. Required, 1–1,000,000 characters.
 - `clientMetadata` — optional freeform JSON object owned by the sending client. It is persisted
   and echoed unchanged on every complete representation of this message, but is not interpreted
   by the daemon or sent to the model.
@@ -6762,14 +6782,28 @@ Request:
     and profile change perform one reset. The profile is control data and is never sent to the
     provider or model.
 
-- `mode` — required: the model selection and permission mode this message runs with, validated
-  against the config catalog. An unknown or disabled model is `400`.
+- `mode` — required: the model selection and permission mode this message runs with. It has
+  five required fields: `providerId` (1–128 characters), `modelId` (1–512), `effort` (1–64),
+  `serviceTier` (`null` or 1–64 characters), and `permissionMode` (`"read_only"`,
+  `"workspace_write"`, `"auto"`, or `"full_access"`). The output-only `account` and
+  `providerType` of an echoed execution snapshot are accepted and discarded; any other field is
+  `400 invalid_request`. The selection is then checked against the live model catalog: the
+  provider must offer the model as enabled, `effort` must be one of the model's `efforts`, and a
+  non-null `serviceTier` must be one of its `serviceTiers`. Any failure is `400 invalid_request`.
+
+The request body accepts only the fields above; an unknown field is `400 invalid_request`.
 
 There is no `mutationId` here: the message `id` is the client's, so the client recognizes its
 own message in every event and history load by the identity it already holds.
 
 Profile selection is idempotent with the message. Re-sending an existing message ID returns the
 originally stored message and never replaces its decoded profile with the retry's value.
+
+A send is checked in this order: an unknown agent is `404 not_found`; an agent that does not
+accept messages (see `canSendMessages`) is `409 conflict`; a malformed body is
+`400 invalid_request`; an `id` the agent already has returns that message with `202`; only then
+is `mode` checked against the catalog. A retry therefore succeeds even when the model it named
+has since become unavailable, but not once the agent is archived.
 
 A sent message is **pending** first: the daemon holds it durably, but it is not yet part of the
 real history — it has no run. It stays pending until inference **accepts** it — a queued
@@ -7324,7 +7358,9 @@ Request:
 }
 ```
 
-- `draft` — the composer state, or `null` to clear it.
+- `draft` — the composer state, or `null` to clear it. Its mode fields have the same shape as a
+  send's `mode` but are not checked against the model catalog; the catalog check happens when
+  the message is sent.
 - `updatedAt` — optional; when the client last touched this draft. Drafts are last-write-wins
   across the owner's devices: a write carrying an older `updatedAt` than the stored draft is
   ignored, so a stale device cannot clobber what was typed elsewhere. Omitted, the write always applies.
