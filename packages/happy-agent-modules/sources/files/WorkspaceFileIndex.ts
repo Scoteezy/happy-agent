@@ -9,6 +9,21 @@ import { rankFilePaths } from "./impl/rankFilePaths.js";
 const DEFAULT_MAX_INDEXES = 8;
 const RESCAN_AFTER_MS = 2_000;
 const SEARCH_READY_BUDGET_MS = 100;
+/** How many result pages a search reads past dependency trees before settling for fewer. */
+const MAX_FILTERED_PAGES = 20;
+/** Dependency and repository directories fff leaves out of a folder in no repository. */
+const UNINDEXED_DIRECTORIES = new Set([
+    ".cache",
+    ".git",
+    ".hg",
+    ".next",
+    ".svn",
+    ".turbo",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+]);
 
 interface IndexFreshness {
     lastScanAt: number;
@@ -23,6 +38,11 @@ interface IndexFreshness {
 interface FinderIndex extends IndexFreshness {
     readonly kind: "finder";
     readonly finder: FileFinder;
+    /**
+     * Whether fff indexes the folder in the mode of a repository above it that lists none of its
+     * files, so results under dependency trees are left out as fff would in no repository.
+     */
+    readonly unindexedLeftOut: boolean;
 }
 
 /** Git's ignore-aware listing, for a folder nested below its repository's top level. */
@@ -40,11 +60,13 @@ type IndexState = FinderIndex | ListingIndex;
  *
  * fff indexes a repository's top level and a folder in no repository. A folder nested inside a
  * repository is listed by Git instead, because fff loses the ignore rules its ancestors declare
- * there and would offer dependency and build trees. Either index is refreshed only when the Git
- * module's shared working-tree watch reports a path appearing or disappearing, so an idle
- * workspace costs nothing. fff's own watcher stays off: it would be a second recursive watch of
- * the same tree. When a tree cannot be watched, a search falls back to rescanning when the index
- * is more than a couple of seconds old.
+ * there and would offer dependency and build trees. A folder Git lists nothing for — one its
+ * repository ignores entirely, or one Git is told to treat as in no repository — keeps fff's
+ * index, with dependency trees left out of its results as fff leaves them out of a folder in no
+ * repository. Either index is refreshed only when the Git module's shared working-tree watch
+ * reports a path appearing or disappearing, so an idle workspace costs nothing. fff's own watcher
+ * stays off: it would be a second recursive watch of the same tree. When a tree cannot be
+ * watched, a search falls back to rescanning when the index is more than a couple of seconds old.
  */
 export class WorkspaceFileIndex {
     readonly #indexes = new Map<string, IndexState>();
@@ -103,13 +125,24 @@ export class WorkspaceFileIndex {
         if (state.finder.isScanning()) {
             await this.#waitForScan(state.finder, SEARCH_READY_BUDGET_MS);
         }
-        const result = state.finder.fileSearch(query, { pageSize: limit });
-        if (!result.ok) throw new Error(`File search failed: ${result.error}`);
-
-        return result.value.items.map((item) => ({
-            fileName: item.fileName,
-            path: item.relativePath,
-        }));
+        const files: { readonly fileName: string; readonly path: string }[] = [];
+        for (let pageIndex = 0; files.length < limit; pageIndex += 1) {
+            const result = state.finder.fileSearch(query, { pageIndex, pageSize: limit });
+            if (!result.ok) throw new Error(`File search failed: ${result.error}`);
+            for (const item of result.value.items) {
+                if (files.length === limit) break;
+                if (state.unindexedLeftOut && underUnindexed(item.relativePath)) continue;
+                files.push({ fileName: item.fileName, path: item.relativePath });
+            }
+            if (
+                !state.unindexedLeftOut ||
+                (pageIndex + 1) * limit >= result.value.totalMatched ||
+                pageIndex + 1 === MAX_FILTERED_PAGES
+            ) {
+                break;
+            }
+        }
+        return files;
     }
 
     async #stateFor(root: string): Promise<IndexState> {
@@ -158,7 +191,9 @@ export class WorkspaceFileIndex {
     }
 
     async #createIndex(basePath: string, unwatch: () => void): Promise<IndexState> {
-        if (await this.#isNestedInRepository(basePath)) {
+        const FileFinderConstructor = await this.#loadFileFinder();
+        const belowRepository = await this.#belowFinderRepository(FileFinderConstructor, basePath);
+        if (belowRepository) {
             const listing: ListingIndex = {
                 kind: "listing",
                 lastScanAt: 0,
@@ -170,11 +205,11 @@ export class WorkspaceFileIndex {
                 watching: false,
             };
             await this.#relist(listing);
-            // A folder its repository ignores entirely lists nothing; fff still sees its files.
+            // Git lists nothing for a folder its repository ignores entirely, or one it is told
+            // to treat as in no repository; fff still sees its files.
             if (listing.paths.length > 0) return listing;
         }
 
-        const FileFinderConstructor = await this.#loadFileFinder();
         const created = FileFinderConstructor.create({
             aiMode: true,
             basePath,
@@ -190,18 +225,28 @@ export class WorkspaceFileIndex {
             kind: "finder",
             lastScanAt: Date.now(),
             stale: false,
+            unindexedLeftOut: belowRepository,
             unwatch,
             watching: false,
         };
     }
 
-    /** Whether a folder lies inside a repository without being its top level. */
-    async #isNestedInRepository(basePath: string): Promise<boolean> {
-        const topLevel = await this.#git.topLevel(basePath).catch(() => undefined);
-        if (topLevel === undefined) return false;
+    /**
+     * Whether fff would index a folder in the mode of a repository above it, which loses that
+     * repository's ignore rules. fff finds repositories itself and ignores `GIT_CEILING_DIRECTORIES`,
+     * so this asks fff rather than Git: a folder Git is told to treat as in no repository is still
+     * below one for fff.
+     */
+    async #belowFinderRepository(
+        FileFinderConstructor: typeof import("@ff-labs/fff-node").FileFinder,
+        basePath: string,
+    ): Promise<boolean> {
+        const health = FileFinderConstructor.healthCheckStatic(basePath);
+        const workdir = health.ok ? health.value.git.workdir : undefined;
+        if (!health.ok || !health.value.git.repositoryFound || workdir === undefined) return false;
         const [folder, repository] = await Promise.all([
             realpath(basePath).catch(() => basePath),
-            realpath(topLevel).catch(() => topLevel),
+            realpath(workdir).catch(() => resolve(workdir)),
         ]);
         return folder !== repository;
     }
@@ -260,4 +305,12 @@ export class WorkspaceFileIndex {
         );
         return await this.#fileFinderConstructor;
     }
+}
+
+/** Whether a relative path lies in a dependency or repository directory. */
+function underUnindexed(path: string): boolean {
+    return path
+        .split("/")
+        .slice(0, -1)
+        .some((segment) => UNINDEXED_DIRECTORIES.has(segment));
 }

@@ -140,6 +140,37 @@ describe("ProjectFilesModule index", () => {
         expect(refreshed.files).toContainEqual({ fileName: "created.ts", path: "src/created.ts" });
     });
 
+    it("leaves dependency trees out of a folder its repository ignores entirely", async () => {
+        // The gym's default scratch folder is such a folder: ignored by the checkout around it.
+        const repository = await workspace();
+        const root = join(repository, "scratch", "project");
+        await mkdir(join(root, "src"), { recursive: true });
+        await mkdir(join(root, "assets"));
+        await mkdir(join(root, "node_modules", "dependency"), { recursive: true });
+        await writeFile(join(repository, ".gitignore"), "/scratch/\nnode_modules/\n");
+        await writeFile(join(root, "README.md"), "workspace");
+        await writeFile(join(root, "src", "main.ts"), "export {};");
+        await writeFile(join(root, "assets", "data.bin"), new Uint8Array([0, 1, 127, 128, 255]));
+        await writeFile(join(root, "node_modules", "dependency", "index.js"), "dependency");
+        const files = await createFiles();
+        const resolvedRoot = await fileRoot(root);
+
+        const listed = await files.search(resolvedRoot, { query: "" });
+        expect(listed.files.map((file) => file.path).sort()).toEqual([
+            "README.md",
+            "assets/data.bin",
+            "src/main.ts",
+        ]);
+
+        await files.write(resolvedRoot, {
+            content: Buffer.from("created").toString("base64"),
+            expectedHash: null,
+            path: "src/created.ts",
+        });
+        const refreshed = await files.search(resolvedRoot, { query: "created" });
+        expect(refreshed.files).toContainEqual({ fileName: "created.ts", path: "src/created.ts" });
+    });
+
     it("refreshes the warm tree and autocomplete index after an API write", async () => {
         const root = await workspace();
         await writeFile(join(root, "README.md"), "workspace");
@@ -186,7 +217,6 @@ describe("ProjectFilesModule index", () => {
         const git = {
             invalidate: () => undefined,
             markChanged: () => undefined,
-            topLevel: async (path: string) => path,
             watchWorkingTree: () => () => undefined,
         } as unknown as GitModule;
         const runners = new RunnersModule(await temporaryTestConfig());
@@ -243,7 +273,6 @@ describe("ProjectFilesModule index", () => {
         const git = {
             invalidate: () => undefined,
             markChanged: () => undefined,
-            topLevel: async (path: string) => path,
             watchWorkingTree: (_root: string, watching: WorkingTreeObserver) => {
                 observer = watching;
                 return () => undefined;

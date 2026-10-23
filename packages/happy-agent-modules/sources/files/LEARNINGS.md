@@ -18,8 +18,13 @@ declares when it indexes a subfolder, so `node_modules`, build output and ignore
 autocomplete; an earlier 0.10.6 upgrade was reverted for that. The module now uses FFF 0.11 for a
 repository's top level and for a folder in no repository, and lists a folder nested below its
 repository's top level with Git's own ignore-aware `ls-files`, ranked by `rankFilePaths` as runner
-folders are. A nested folder its repository ignores entirely lists nothing from Git and falls back
-to FFF. Tests prove both behaviors together. Plain-folder fixtures must live outside any checkout:
+folders are. Whether a folder is nested is FFF's own answer (`healthCheckStatic`), not Git's: Git
+honours `GIT_CEILING_DIRECTORIES` and libgit2 does not, so asking Git missed folders FFF still
+indexed in an enclosing checkout's mode. A folder Git lists nothing for, because its repository
+ignores it entirely (as the checkout ignores the gym's `.local` scratch, which is how Linux CI
+caught `node_modules` leaking) or because Git is told not to look above it, keeps FFF's index with
+results under dependency directories left out, the same set FFF leaves out of a plain folder.
+Tests prove all three behaviors. Plain-folder fixtures must live outside any checkout:
 libgit2 ignores `GIT_CEILING_DIRECTORIES`, so an enclosing checkout silently switches FFF into its
 Git mode and hides the plain-folder behavior. The gym's default scratch folder sits inside this
 checkout, which is how the binary omission stayed invisible to gym runs that did not set
