@@ -285,7 +285,9 @@ The gym starts the real Happy Agent daemon on a throwaway installation and drive
 
 Use gym tests for behavior spanning the API, inference, tools, processes, filesystem effects, interruption, or concurrency. Put them in `packages/happy-agent-gym-tests/tests` with descriptive behavior-based file names. Always use `createAgentGym`, interact at the API boundary, wait for observable state instead of sleeping, dispose every instance, and keep scenarios isolated. When fixing a bug, reproduce it in the gym before changing production code, then make the same test pass unchanged.
 
-Run the suite with `pnpm test:gym`. Read [`packages/happy-agent-gym/README.md`](packages/happy-agent-gym/README.md) and [`packages/happy-agent-gym-tests/README.md`](packages/happy-agent-gym-tests/README.md) before writing or debugging a gym test; they are the source of truth for the harness API, inference scripts, fixtures, examples, and targeted test commands.
+The gym runs on the pinned Bun with `--bun`, the same runtime Happy Agent ships on, and every Vitest worker fails if it finds itself on Node or another Bun. A deliberate Node lane, listed in `packages/happy-agent-gym-tests/nodeLane.ts`, also runs transport, streaming, event-stream, run-lifecycle, and core scenarios under Node, because source-mode daemons and some tools still run there; terminals are Bun-only and stay out of it. Add a scenario to that lane when it proves behavior Node streams could break differently.
+
+Run the suite with `pnpm test:gym`, which runs every scenario on Bun and then the Node lane; `pnpm test:gym:node` runs the Node lane alone. Read [`packages/happy-agent-gym/README.md`](packages/happy-agent-gym/README.md) and [`packages/happy-agent-gym-tests/README.md`](packages/happy-agent-gym-tests/README.md) before writing or debugging a gym test; they are the source of truth for the harness API, inference scripts, fixtures, examples, and targeted test commands.
 
 The complete Happy Agent API gym, `pnpm test:gym:api`, is an exhaustive gate with
 663 scenarios, 120 deterministic chaos seeds, and 9,640 chaos actions. It takes

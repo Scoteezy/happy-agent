@@ -447,7 +447,8 @@ stays readable in one place.
   real captured vendor traffic; recorded-response tests replay real HTTP failures
   through the real transport. Both are deterministic and need no credentials.
 - Live tests are named `*.live.test.ts` and gated behind an explicit opt-in environment variable.
-- The **gym** (`pnpm test:gym`) starts the real daemon and drives it through its API. Only
+- The **gym** (`pnpm test:gym`) starts the real daemon on the pinned Bun, as production runs
+  it, and drives it through its API; a named Node lane reruns a core selection under Node. Only
   inference is scripted and the machine is emulated; the daemon, routes, tools, permissions, and
   persistence are real. Use it for anything spanning the API, inference, tools, processes,
   filesystem effects, interruption, or concurrency.

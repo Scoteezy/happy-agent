@@ -10,9 +10,12 @@ on:
             - "packages/happy-agent-gym/**"
             - "packages/happy-agent-gym-tests/**"
             - "packages/happy-agent-modules/**"
+            - "mise.toml"
             - "package.json"
             - "pnpm-lock.yaml"
             - "pnpm-workspace.yaml"
+            - "scripts/pinnedBunVersion.ts"
+            - "scripts/requireGymRuntime.ts"
     push:
         branches:
             - main
@@ -24,9 +27,12 @@ on:
             - "packages/happy-agent-gym/**"
             - "packages/happy-agent-gym-tests/**"
             - "packages/happy-agent-modules/**"
+            - "mise.toml"
             - "package.json"
             - "pnpm-lock.yaml"
             - "pnpm-workspace.yaml"
+            - "scripts/pinnedBunVersion.ts"
+            - "scripts/requireGymRuntime.ts"
     workflow_dispatch:
         inputs:
             exhaustive:
@@ -98,14 +104,19 @@ jobs:
                   pnpm --filter @slopus/happy-agent-gym check
                   pnpm --filter @slopus/happy-agent-gym-tests check
 
+            # The gym runs on the pinned Bun, as Happy Agent does in production.
             - name: Run the Linux Files and Git preflight
               run: |
-                  pnpm --filter @slopus/happy-agent-gym-tests exec vitest run \
+                  pnpm --filter @slopus/happy-agent-gym-tests vitest:bun run \
                     tests/happy_api_chaos_files.test.ts \
                     tests/happy_api_files_git.test.ts \
                     tests/happy_api_git_matrix.test.ts \
                     --maxWorkers=1 \
                     --retry=0
+
+            - name: Run the gym's Node lane
+              # Source-mode daemons and tools still run this code under Node, whose streams differ.
+              run: pnpm test:gym:node
 
             - name: Run the complete API gym
               if: ${{ github.event_name == 'workflow_dispatch' && inputs.exhaustive }}

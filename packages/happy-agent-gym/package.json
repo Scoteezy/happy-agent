@@ -9,8 +9,9 @@
     },
     "scripts": {
         "check": "tsc --noEmit",
-        "test": "vitest run",
-        "test:watch": "vitest"
+        "test": "pnpm dlx bun@1.4.4 --bun node_modules/vitest/vitest.mjs run",
+        "test:watch": "pnpm dlx bun@1.4.4 --bun node_modules/vitest/vitest.mjs",
+        "vitest:bun": "pnpm dlx bun@1.4.4 --bun node_modules/vitest/vitest.mjs"
     },
     "dependencies": {
         "@paralleldrive/cuid2": "^3.3.0",

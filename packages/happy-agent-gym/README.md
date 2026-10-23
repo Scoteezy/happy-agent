@@ -32,20 +32,26 @@ the HTTP layer and the event journal — is the product.
 
 ## Running the tests
 
-The gym runs the agent from its sources, and the agent consumes two built packages:
+The gym runs on Bun, the runtime Happy Agent ships on, at the version `mise.toml` pins; its
+`test` script starts Vitest there with `--bun`. Every Vitest worker checks its runtime before a
+test starts and fails under Node or another Bun, unless `HAPPY_GYM_RUNTIME=node` declares a
+deliberate Node run. The gym consumes three built packages:
 
 ```sh
 pnpm --filter @slopus/happy-agent-modules build
 pnpm --filter @slopus/happy-agent-compute build
+pnpm --filter @slopus/happy-agent build
 pnpm --filter @slopus/happy-agent-gym test
 ```
 
-The repository's `pnpm test` builds both packages first, so the gym runs there without extra steps.
 One file at a time:
 
 ```sh
-pnpm --filter @slopus/happy-agent-gym exec vitest run tests/agent_answers_a_user_message.test.ts
+pnpm --filter @slopus/happy-agent-gym test tests/agent_answers_a_user_message.test.ts
 ```
+
+The scenarios that must also pass under Node live in
+[`@slopus/happy-agent-gym-tests`](../happy-agent-gym-tests/README.md#the-node-lane).
 
 On a deeply nested checkout, set `HAPPY_AGENT_GYM_SCRATCH_DIRECTORY` to a shorter ignored
 directory inside the checkout. The default remains `.local`; socket-length checks and fixture

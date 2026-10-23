@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 
+import { pinnedBunVersion } from "../../../scripts/pinnedBunVersion.js";
+
 const MINIMUM_API_SCENARIOS = 596;
 const REQUIRED_CHAOS_SEEDS = 120;
 
@@ -48,8 +50,10 @@ interface CommandResult {
 const repositoryRoot = findRepositoryRoot(process.cwd());
 const packageRoot = resolve(repositoryRoot, "packages/happy-agent-gym-tests");
 const vitestEntry = createRequire(import.meta.url).resolve("vitest/vitest.mjs");
-if (process.versions.bun === undefined) {
-    throw new Error("The complete API gym needs Bun, the Happy Agent terminal runtime.");
+if (process.versions.bun !== pinnedBunVersion()) {
+    throw new Error(
+        `The complete API gym needs the pinned Bun ${pinnedBunVersion()}, the Happy Agent runtime.`,
+    );
 }
 const vitestRuntime = ["--bun", vitestEntry];
 console.error(`API gym runtime: Bun ${process.versions.bun} (${process.execPath})`);
@@ -307,7 +311,7 @@ async function runCommand(
     additionalEnvironment: NodeJS.ProcessEnv = {},
 ): Promise<CommandResult> {
     const environment = { ...process.env };
-    environment.HAPPY_API_REQUIRE_BUN = "1";
+    environment.HAPPY_GYM_RUNTIME = "bun";
     for (const [name, value] of Object.entries(additionalEnvironment)) {
         if (value === undefined) delete environment[name];
         else environment[name] = value;

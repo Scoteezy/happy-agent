@@ -59,11 +59,15 @@ Read [packages/happy-agent-gym/README.md](packages/happy-agent-gym/README.md) an
 creating or debugging a gym test. They are the source of truth for `createAgentGym`, fixtures,
 scripted inference, targeted commands, and cleanup.
 
-Run the complete suite with:
+The gym runs on the Bun version `mise.toml` pins, as Happy Agent does in production. Run the
+complete suite, every scenario on Bun followed by the Node lane, with:
 
 ```sh
 pnpm test:gym
 ```
+
+`pnpm test:gym:node` runs only the Node lane: the scenarios and transport tests that must also
+pass under Node, for source-mode daemons and tools that still run there.
 
 For a behavior regression, first reproduce the failure in
 `packages/happy-agent-gym-tests/tests`, then make the same scenario pass without weakening it.
