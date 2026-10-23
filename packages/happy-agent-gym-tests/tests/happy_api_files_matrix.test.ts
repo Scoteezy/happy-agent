@@ -23,18 +23,19 @@ const fixtures = {
 
 describe("files API matrix: search and tree", () => {
     it.each([
-        ["F001", "README", ["README.md", "src/beta.test.ts"]],
+        // Exact orders are FFF 0.11's ranking, not an API contract; a ranking upgrade updates them.
+        ["F001", "README", ["README.md"]],
         ["F002", "readme", ["README.md", "src/beta.test.ts"]],
         [
             "F003",
             ".TS",
             [
+                "README.md",
+                "docs/notes.md",
                 "src/Alpha.ts",
                 "src/beta.test.ts",
-                "empty/zero.txt",
                 "assets/data.bin",
-                "docs/notes.md",
-                "README.md",
+                "empty/zero.txt",
             ],
         ],
         ["F004", "does-not-exist", []],

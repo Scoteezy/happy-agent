@@ -93,6 +93,53 @@ describe("ProjectFilesModule index", () => {
         );
     });
 
+    it("finds binary filenames in a folder outside any repository", async () => {
+        // Outside every checkout, so no ancestor repository can switch FFF into its Git mode.
+        const root = await plainFolder();
+        await mkdir(join(root, "assets"));
+        await writeFile(join(root, "README.md"), "workspace");
+        await writeFile(join(root, "assets", "data.bin"), new Uint8Array([0, 1, 127, 128, 255]));
+        await writeFile(join(root, "assets", "logo.png"), new Uint8Array([137, 80, 78, 71]));
+        const files = await createFiles();
+
+        const result = await files.search(await fileRoot(root), { query: "" });
+
+        expect(result.files.map((file) => file.path)).toEqual(
+            expect.arrayContaining(["README.md", "assets/data.bin", "assets/logo.png"]),
+        );
+    });
+
+    it("keeps its repository's ignore rules for a folder nested below the top level", async () => {
+        const repository = await workspace();
+        const root = join(repository, "package");
+        await mkdir(join(root, "src"), { recursive: true });
+        await mkdir(join(root, "assets"));
+        await mkdir(join(root, "build"));
+        await mkdir(join(root, "node_modules", "dependency"), { recursive: true });
+        await writeFile(join(repository, ".gitignore"), "node_modules/\n/package/build/\n*.log\n");
+        await writeFile(join(root, "src", "main.ts"), "export {};");
+        await writeFile(join(root, "assets", "data.bin"), new Uint8Array([0, 1, 127, 128, 255]));
+        await writeFile(join(root, "build", "out.js"), "built");
+        await writeFile(join(root, "debug.log"), "log");
+        await writeFile(join(root, "node_modules", "dependency", "index.js"), "dependency");
+        const files = await createFiles();
+        const resolvedRoot = await fileRoot(root);
+
+        const listed = await files.search(resolvedRoot, { query: "" });
+        expect(listed.files.map((file) => file.path).sort()).toEqual([
+            "assets/data.bin",
+            "src/main.ts",
+        ]);
+
+        await files.write(resolvedRoot, {
+            content: Buffer.from("created").toString("base64"),
+            expectedHash: null,
+            path: "src/created.ts",
+        });
+        const refreshed = await files.search(resolvedRoot, { query: "created" });
+        expect(refreshed.files).toContainEqual({ fileName: "created.ts", path: "src/created.ts" });
+    });
+
     it("refreshes the warm tree and autocomplete index after an API write", async () => {
         const root = await workspace();
         await writeFile(join(root, "README.md"), "workspace");
@@ -139,6 +186,7 @@ describe("ProjectFilesModule index", () => {
         const git = {
             invalidate: () => undefined,
             markChanged: () => undefined,
+            topLevel: async (path: string) => path,
             watchWorkingTree: () => () => undefined,
         } as unknown as GitModule;
         const runners = new RunnersModule(await temporaryTestConfig());
@@ -195,6 +243,7 @@ describe("ProjectFilesModule index", () => {
         const git = {
             invalidate: () => undefined,
             markChanged: () => undefined,
+            topLevel: async (path: string) => path,
             watchWorkingTree: (_root: string, watching: WorkingTreeObserver) => {
                 observer = watching;
                 return () => undefined;
@@ -265,6 +314,19 @@ async function createFiles(): Promise<ProjectFilesModule> {
 
 async function fileRoot(root: string): Promise<ProjectFileRoot> {
     return { projectId: "project-1", root: await realpath(root) };
+}
+
+async function plainFolder(): Promise<string> {
+    const directory = await mkdtemp(join(tmpdir(), "happy-plain-file-search-"));
+    directories.add(directory);
+    const enclosing = await git(directory, ["rev-parse", "--show-toplevel"]).catch(() => undefined);
+    if (enclosing !== undefined) {
+        throw new Error(
+            `The plain-folder fixture ${directory} is inside the repository ${enclosing}; ` +
+                "run this test with TMPDIR outside every checkout.",
+        );
+    }
+    return directory;
 }
 
 async function workspace(): Promise<string> {

@@ -12,7 +12,9 @@ workspace root ──┬──> one-level physical tree pages
 
 Indexes are created lazily and kept in least-recently-used order. The module retains at most eight
 indexes; eviction and shutdown destroy the native finder and release its working-tree watch.
-File contents are not indexed. A search spends at most a small first-result budget waiting for an
+File contents are not indexed. A folder nested below its repository's top level is listed by
+Git's ignore-aware `ls-files` and ranked here instead, because FFF loses the ignore rules its
+ancestors declare. A search spends at most a small first-result budget waiting for an
 active scan, then queries FFF's live index instead of blocking on the entire workspace. FFF's own
 watcher is off: the index follows the Git module's shared working-tree watch and rescans only
 after a path appears or disappears. When a tree cannot be watched, a search rescans an index more

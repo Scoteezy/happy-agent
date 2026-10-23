@@ -9,15 +9,22 @@ accepts the same limit through options; strict callers preserve failures while t
 the HTTP preview's nullable result. Absolute native file links are normalized only within the
 selected root; the HTTP request schema still requires relative paths. The 44 MiB default is unchanged.
 
-## Preserve parent ignore rules when upgrading the native finder
+## Binary filenames in plain folders, ancestor ignore rules in nested folders
 
-FFF 0.10.6 includes image and binary filenames in plain folders, but its walker loses parent
-Git ignore rules when indexing a subfolder. This made dependency trees such as `node_modules`
-appear in autocomplete. The upgrade was reverted by user direction; the module remains on
-0.9.6, with its known limitation that binary filenames are omitted outside Git repositories.
-A future upgrade must prove both behaviors together, including a child folder whose ignore
-rules live in its ancestor. Plain-folder fixtures must live outside any checkout so an ancestor
-Git repository cannot silently hide the binary-filename limitation.
+FFF 0.9.6 left binary-extension filenames (`.bin`, `.png`, …) out of every folder that is in no
+Git repository, so a plain-folder project could not `@`-mention its images or data files. FFF
+0.10 and later index them, but their walker loses the ignore rules an ancestor repository
+declares when it indexes a subfolder, so `node_modules`, build output and ignored logs leaked into
+autocomplete; an earlier 0.10.6 upgrade was reverted for that. The module now uses FFF 0.11 for a
+repository's top level and for a folder in no repository, and lists a folder nested below its
+repository's top level with Git's own ignore-aware `ls-files`, ranked by `rankFilePaths` as runner
+folders are. A nested folder its repository ignores entirely lists nothing from Git and falls back
+to FFF. Tests prove both behaviors together. Plain-folder fixtures must live outside any checkout:
+libgit2 ignores `GIT_CEILING_DIRECTORIES`, so an enclosing checkout silently switches FFF into its
+Git mode and hides the plain-folder behavior. The gym's default scratch folder sits inside this
+checkout, which is how the binary omission stayed invisible to gym runs that did not set
+`HAPPY_AGENT_GYM_SCRATCH_DIRECTORY` elsewhere. FFF 0.11 also ranks differently from 0.9.6; exact
+orders in tests are FFF's, not an API contract.
 
 ## Native search starts only when it is needed
 

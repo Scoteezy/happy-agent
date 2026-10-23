@@ -1,15 +1,16 @@
+import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import type { FileFinder } from "@ff-labs/fff-node";
 
 import type { GitModule } from "../git/index.js";
+import { rankFilePaths } from "./impl/rankFilePaths.js";
 
 const DEFAULT_MAX_INDEXES = 8;
 const RESCAN_AFTER_MS = 2_000;
 const SEARCH_READY_BUDGET_MS = 100;
 
-interface FinderState {
-    readonly finder: FileFinder;
+interface IndexFreshness {
     lastScanAt: number;
     /** Whether a file may have been added, removed, or renamed since the last scan started. */
     stale: boolean;
@@ -18,16 +19,35 @@ interface FinderState {
     watching: boolean;
 }
 
+/** fff's own index, for a repository's top level or a folder in no repository. */
+interface FinderIndex extends IndexFreshness {
+    readonly kind: "finder";
+    readonly finder: FileFinder;
+}
+
+/** Git's ignore-aware listing, for a folder nested below its repository's top level. */
+interface ListingIndex extends IndexFreshness {
+    readonly kind: "listing";
+    readonly root: string;
+    paths: readonly string[];
+    pending: Promise<void> | undefined;
+}
+
+type IndexState = FinderIndex | ListingIndex;
+
 /**
  * Bounded file-name indexes, one per recently searched workspace.
  *
- * The index is rescanned only when the Git module's shared working-tree watch reports a path
- * appearing or disappearing, so an idle workspace costs nothing. fff's own watcher stays off:
- * it would be a second recursive watch of the same tree. When a tree cannot be watched, a search
- * falls back to rescanning when the index is more than a couple of seconds old.
+ * fff indexes a repository's top level and a folder in no repository. A folder nested inside a
+ * repository is listed by Git instead, because fff loses the ignore rules its ancestors declare
+ * there and would offer dependency and build trees. Either index is refreshed only when the Git
+ * module's shared working-tree watch reports a path appearing or disappearing, so an idle
+ * workspace costs nothing. fff's own watcher stays off: it would be a second recursive watch of
+ * the same tree. When a tree cannot be watched, a search falls back to rescanning when the index
+ * is more than a couple of seconds old.
  */
 export class WorkspaceFileIndex {
-    readonly #finders = new Map<string, FinderState>();
+    readonly #indexes = new Map<string, IndexState>();
     readonly #git: GitModule;
     readonly #maxIndexes = DEFAULT_MAX_INDEXES;
     #fileFinderConstructor: Promise<typeof import("@ff-labs/fff-node").FileFinder> | undefined;
@@ -37,20 +57,24 @@ export class WorkspaceFileIndex {
     }
 
     close(): void {
-        for (const state of this.#finders.values()) this.#destroy(state);
-        this.#finders.clear();
+        for (const state of this.#indexes.values()) this.#destroy(state);
+        this.#indexes.clear();
     }
 
     /** Marks an index out of date after a structural change the caller made or observed. */
     refresh(root: string): void {
-        const state = this.#finders.get(resolve(root));
+        const state = this.#indexes.get(resolve(root));
         if (state !== undefined) state.stale = true;
     }
 
     /** Requests a scan only when a file proven by a direct read is absent from a warm index. */
     ensure(root: string, path: string): void {
-        const state = this.#finders.get(resolve(root));
+        const state = this.#indexes.get(resolve(root));
         if (state === undefined) return;
+        if (state.kind === "listing") {
+            if (state.pending !== undefined || !state.paths.includes(path)) state.stale = true;
+            return;
+        }
         // A scan in flight may have passed the path before it existed, so the next search rescans.
         if (state.finder.isScanning()) {
             state.stale = true;
@@ -71,6 +95,10 @@ export class WorkspaceFileIndex {
         const state = await this.#stateFor(root);
         const outdated =
             state.stale || (!state.watching && Date.now() - state.lastScanAt > RESCAN_AFTER_MS);
+        if (state.kind === "listing") {
+            if (outdated || state.pending !== undefined) await this.#relist(state);
+            return rankFilePaths(state.paths, query, limit);
+        }
         if (outdated) this.#startScan(state);
         if (state.finder.isScanning()) {
             await this.#waitForScan(state.finder, SEARCH_READY_BUDGET_MS);
@@ -84,28 +112,16 @@ export class WorkspaceFileIndex {
         }));
     }
 
-    async #stateFor(root: string): Promise<FinderState> {
+    async #stateFor(root: string): Promise<IndexState> {
         const basePath = resolve(root);
-        const existing = this.#finders.get(basePath);
+        const existing = this.#indexes.get(basePath);
         if (existing !== undefined) {
-            this.#finders.delete(basePath);
-            this.#finders.set(basePath, existing);
+            this.#indexes.delete(basePath);
+            this.#indexes.set(basePath, existing);
             return existing;
         }
 
-        const FileFinderConstructor = await this.#loadFileFinder();
-        const created = FileFinderConstructor.create({
-            aiMode: true,
-            basePath,
-            disableContentIndexing: true,
-            disableMmapCache: true,
-            disableWatch: true,
-        });
-        if (!created.ok) {
-            throw new Error(`Workspace files could not be indexed: ${created.error}`);
-        }
-
-        const holder: { state?: FinderState } = {};
+        const holder: { state?: IndexState } = {};
         const unwatch = this.#git.watchWorkingTree(basePath, {
             onChanges: (changes) => {
                 const state = holder.state;
@@ -122,24 +138,99 @@ export class WorkspaceFileIndex {
                 state.stale = true;
             },
         });
-        const state: FinderState = {
+        let state: IndexState;
+        try {
+            state = await this.#createIndex(basePath, unwatch);
+        } catch (error) {
+            unwatch();
+            throw error;
+        }
+        // A concurrent first search may have built the same index while this one was waiting.
+        const raced = this.#indexes.get(basePath);
+        if (raced !== undefined) {
+            this.#destroy(state);
+            return raced;
+        }
+        holder.state = state;
+        this.#indexes.set(basePath, state);
+        this.#removeOldestIndex();
+        return state;
+    }
+
+    async #createIndex(basePath: string, unwatch: () => void): Promise<IndexState> {
+        if (await this.#isNestedInRepository(basePath)) {
+            const listing: ListingIndex = {
+                kind: "listing",
+                lastScanAt: 0,
+                paths: [],
+                pending: undefined,
+                root: basePath,
+                stale: true,
+                unwatch,
+                watching: false,
+            };
+            await this.#relist(listing);
+            // A folder its repository ignores entirely lists nothing; fff still sees its files.
+            if (listing.paths.length > 0) return listing;
+        }
+
+        const FileFinderConstructor = await this.#loadFileFinder();
+        const created = FileFinderConstructor.create({
+            aiMode: true,
+            basePath,
+            disableContentIndexing: true,
+            disableMmapCache: true,
+            disableWatch: true,
+        });
+        if (!created.ok) {
+            throw new Error(`Workspace files could not be indexed: ${created.error}`);
+        }
+        return {
             finder: created.value,
+            kind: "finder",
             lastScanAt: Date.now(),
             stale: false,
             unwatch,
             watching: false,
         };
-        holder.state = state;
-        this.#finders.set(basePath, state);
-        this.#removeOldestIndex();
-        return state;
+    }
+
+    /** Whether a folder lies inside a repository without being its top level. */
+    async #isNestedInRepository(basePath: string): Promise<boolean> {
+        const topLevel = await this.#git.topLevel(basePath).catch(() => undefined);
+        if (topLevel === undefined) return false;
+        const [folder, repository] = await Promise.all([
+            realpath(basePath).catch(() => basePath),
+            realpath(topLevel).catch(() => topLevel),
+        ]);
+        return folder !== repository;
+    }
+
+    async #relist(state: ListingIndex): Promise<void> {
+        if (state.pending !== undefined) return await state.pending;
+        // Cleared before listing, so a change reported while it runs leaves the listing stale.
+        state.stale = false;
+        state.pending = this.#git
+            .listWorkingTreeFiles({ path: state.root })
+            .then((listed) => {
+                state.paths = listed.paths;
+                state.lastScanAt = Date.now();
+            })
+            .catch((error: unknown) => {
+                state.stale = true;
+                throw error;
+            })
+            .finally(() => {
+                state.pending = undefined;
+            });
+        return await state.pending;
     }
 
     async #waitForScan(finder: FileFinder, timeoutMs: number): Promise<void> {
         await finder.waitForScan(timeoutMs).catch(() => undefined);
     }
 
-    #startScan(state: FinderState): void {
+    #startScan(state: FinderIndex): void {
         if (state.finder.isScanning()) return;
         // Cleared before scanning, so a change during the scan leaves the index stale again.
         state.stale = false;
@@ -148,19 +239,19 @@ export class WorkspaceFileIndex {
     }
 
     #removeOldestIndex(): void {
-        if (this.#finders.size <= this.#maxIndexes) return;
+        if (this.#indexes.size <= this.#maxIndexes) return;
 
-        const oldestPath = this.#finders.keys().next().value as string | undefined;
+        const oldestPath = this.#indexes.keys().next().value as string | undefined;
         if (oldestPath === undefined) return;
 
-        const oldest = this.#finders.get(oldestPath);
-        this.#finders.delete(oldestPath);
+        const oldest = this.#indexes.get(oldestPath);
+        this.#indexes.delete(oldestPath);
         if (oldest !== undefined) this.#destroy(oldest);
     }
 
-    #destroy(state: FinderState): void {
+    #destroy(state: IndexState): void {
         state.unwatch();
-        state.finder.destroy();
+        if (state.kind === "finder") state.finder.destroy();
     }
 
     async #loadFileFinder(): Promise<typeof import("@ff-labs/fff-node").FileFinder> {
