@@ -18,27 +18,40 @@ export async function listGitWorkingTreeFiles(options: {
     runGit?: ScanGitRunner;
     signal?: AbortSignal;
 }): Promise<GitWorkingTreeFiles> {
-    let result;
-    try {
-        result = await (options.runGit ?? runScanGit)({
-            args: ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    const run = async (args: readonly string[]) =>
+        await (options.runGit ?? runScanGit)({
+            args: ["ls-files", "-z", ...args],
             cwd: options.path,
             ...(options.signal === undefined ? {} : { signal: options.signal }),
         });
+    let result;
+    let deleted;
+    try {
+        // The index still holds a tracked file removed from disk; the working tree does not.
+        [result, deleted] = await Promise.all([
+            run(["--cached", "--others", "--exclude-standard"]),
+            run(["--deleted"]),
+        ]);
     } catch (error) {
         if (isMissingRepository(error)) return { paths: [], truncated: false };
         throw error;
     }
-    const stdout = result.truncated
-        ? result.stdout.slice(0, result.stdout.lastIndexOf("\0") + 1)
-        : result.stdout;
-    const paths = [...new Set(stdout.split("\0").filter(Boolean))].sort((left, right) =>
-        left < right ? -1 : left > right ? 1 : 0,
-    );
+    const removed = new Set(entries(deleted));
+    const paths = [...new Set(entries(result))]
+        .filter((path) => !removed.has(path))
+        .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
     return {
         paths: paths.slice(0, WORKING_TREE_FILE_LIMIT),
         truncated: result.truncated || paths.length > WORKING_TREE_FILE_LIMIT,
     };
+}
+
+/** The complete NUL-separated paths of one listing, without a cut-off last one. */
+function entries(result: { readonly stdout: string; readonly truncated: boolean }): string[] {
+    const stdout = result.truncated
+        ? result.stdout.slice(0, result.stdout.lastIndexOf("\0") + 1)
+        : result.stdout;
+    return stdout.split("\0").filter(Boolean);
 }
 
 function isMissingRepository(error: unknown): boolean {

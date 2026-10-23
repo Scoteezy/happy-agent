@@ -24,8 +24,13 @@ indexed in an enclosing checkout's mode. A folder Git lists nothing for, because
 ignores it entirely (as the checkout ignores the gym's `.local` scratch, which is how Linux CI
 caught `node_modules` leaking) or because Git is told not to look above it, keeps FFF's index with
 results under dependency directories left out, the same set FFF leaves out of a plain folder.
-Tests prove all three behaviors. Plain-folder fixtures must live outside any checkout:
-libgit2 ignores `GIT_CEILING_DIRECTORIES`, so an enclosing checkout silently switches FFF into its
+Git's listing is bounded at 20,000 paths, and a folder that reaches the cap is indexed by FFF the
+same way, because ranking a cut-off listing silently lost every later file. The listing also
+subtracts `ls-files --deleted`: the index keeps a tracked file removed from disk, which search must
+not suggest. Tests prove each behavior. FFF 0.11 also ships one bundled entry, so the standalone
+binary build rewrites the library resolver inside `dist/index.js`, and the release smoke proves file
+search loaded the embedded library. Plain-folder fixtures must live outside any checkout: libgit2
+ignores `GIT_CEILING_DIRECTORIES`, so an enclosing checkout silently switches FFF into its
 Git mode and hides the plain-folder behavior. The gym's default scratch folder sits inside this
 checkout, which is how the binary omission stayed invisible to gym runs that did not set
 `HAPPY_AGENT_GYM_SCRATCH_DIRECTORY` elsewhere. FFF 0.11 also ranks differently from 0.9.6; exact

@@ -140,6 +140,36 @@ describe("ProjectFilesModule index", () => {
         expect(refreshed.files).toContainEqual({ fileName: "created.ts", path: "src/created.ts" });
     });
 
+    it("finds files past Git's listing cap in a folder nested below the top level", async () => {
+        const repository = await workspace();
+        const root = join(repository, "package");
+        await mkdir(join(root, "node_modules", "dependency"), { recursive: true });
+        await writeFile(join(repository, ".gitignore"), "node_modules/\n");
+        await writeFile(join(root, "a.ts"), "export {};");
+        await writeFile(join(root, "zz-past-the-cap.ts"), "export {};");
+        await writeFile(join(root, "node_modules", "dependency", "index.js"), "dependency");
+        // A listing cut off at its cap, as a folder of more than 20,000 files is.
+        const listed = GitModule.prototype.listWorkingTreeFiles;
+        const listing = vi
+            .spyOn(GitModule.prototype, "listWorkingTreeFiles")
+            .mockImplementation(async function (this: GitModule, options) {
+                const result = await listed.call(this, options);
+                return { paths: result.paths.slice(0, 1), truncated: true };
+            });
+        try {
+            const files = await createFiles();
+
+            const result = await files.search(await fileRoot(root), { query: "" });
+
+            expect(result.files.map((file) => file.path).sort()).toEqual([
+                "a.ts",
+                "zz-past-the-cap.ts",
+            ]);
+        } finally {
+            listing.mockRestore();
+        }
+    });
+
     it("leaves dependency trees out of a folder its repository ignores entirely", async () => {
         // The gym's default scratch folder is such a folder: ignored by the checkout around it.
         const repository = await workspace();

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,6 +18,17 @@ describe("Git file reads", () => {
         await writeFile(join(repository, "ignored.txt"), "ignored\n");
         await expect(listGitWorkingTreeFiles({ path: repository })).resolves.toEqual({
             paths: [".gitignore", "tracked.txt", "untracked.txt"],
+            truncated: false,
+        });
+    });
+
+    it("leaves out a tracked file that was removed from disk", async () => {
+        const repository = await createRepository();
+        await commitFile(repository, "kept.txt", "kept\n");
+        await commitFile(repository, "removed.txt", "removed\n");
+        await rm(join(repository, "removed.txt"));
+        await expect(listGitWorkingTreeFiles({ path: repository })).resolves.toEqual({
+            paths: ["kept.txt"],
             truncated: false,
         });
     });

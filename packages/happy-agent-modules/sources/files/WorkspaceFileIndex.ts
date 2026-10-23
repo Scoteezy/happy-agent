@@ -39,8 +39,9 @@ interface FinderIndex extends IndexFreshness {
     readonly kind: "finder";
     readonly finder: FileFinder;
     /**
-     * Whether fff indexes the folder in the mode of a repository above it that lists none of its
-     * files, so results under dependency trees are left out as fff would in no repository.
+     * Whether fff indexes the folder in the mode of a repository above it whose listing of the
+     * folder is empty or cut off, so results under dependency trees are left out as fff would in
+     * no repository.
      */
     readonly unindexedLeftOut: boolean;
 }
@@ -51,6 +52,8 @@ interface ListingIndex extends IndexFreshness {
     readonly root: string;
     paths: readonly string[];
     pending: Promise<void> | undefined;
+    /** Whether the last listing stopped at Git's cap, so fff must index the folder instead. */
+    truncated: boolean;
 }
 
 type IndexState = FinderIndex | ListingIndex;
@@ -63,7 +66,8 @@ type IndexState = FinderIndex | ListingIndex;
  * there and would offer dependency and build trees. A folder Git lists nothing for — one its
  * repository ignores entirely, or one Git is told to treat as in no repository — keeps fff's
  * index, with dependency trees left out of its results as fff leaves them out of a folder in no
- * repository. Either index is refreshed only when the Git module's shared working-tree watch
+ * repository; so does a folder too large for Git's bounded listing, whose files past the cap
+ * would otherwise never be found. Either index is refreshed only when the Git module's shared working-tree watch
  * reports a path appearing or disappearing, so an idle workspace costs nothing. fff's own watcher
  * stays off: it would be a second recursive watch of the same tree. When a tree cannot be
  * watched, a search falls back to rescanning when the index is more than a couple of seconds old.
@@ -119,7 +123,10 @@ export class WorkspaceFileIndex {
             state.stale || (!state.watching && Date.now() - state.lastScanAt > RESCAN_AFTER_MS);
         if (state.kind === "listing") {
             if (outdated || state.pending !== undefined) await this.#relist(state);
-            return rankFilePaths(state.paths, query, limit);
+            if (!state.truncated) return rankFilePaths(state.paths, query, limit);
+            // The folder outgrew the listing; the next index for it is fff's.
+            this.#forget(state);
+            return await this.search(root, query, limit);
         }
         if (outdated) this.#startScan(state);
         if (state.finder.isScanning()) {
@@ -201,13 +208,14 @@ export class WorkspaceFileIndex {
                 pending: undefined,
                 root: basePath,
                 stale: true,
+                truncated: false,
                 unwatch,
                 watching: false,
             };
             await this.#relist(listing);
             // Git lists nothing for a folder its repository ignores entirely, or one it is told
-            // to treat as in no repository; fff still sees its files.
-            if (listing.paths.length > 0) return listing;
+            // to treat as in no repository, and only part of a folder past its cap; fff sees all.
+            if (listing.paths.length > 0 && !listing.truncated) return listing;
         }
 
         const created = FileFinderConstructor.create({
@@ -259,6 +267,7 @@ export class WorkspaceFileIndex {
             .listWorkingTreeFiles({ path: state.root })
             .then((listed) => {
                 state.paths = listed.paths;
+                state.truncated = listed.truncated;
                 state.lastScanAt = Date.now();
             })
             .catch((error: unknown) => {
@@ -292,6 +301,13 @@ export class WorkspaceFileIndex {
         const oldest = this.#indexes.get(oldestPath);
         this.#indexes.delete(oldestPath);
         if (oldest !== undefined) this.#destroy(oldest);
+    }
+
+    /** Drops an index so the next search builds a new one for its folder. */
+    #forget(state: ListingIndex): void {
+        if (this.#indexes.get(state.root) !== state) return;
+        this.#indexes.delete(state.root);
+        this.#destroy(state);
     }
 
     #destroy(state: IndexState): void {
