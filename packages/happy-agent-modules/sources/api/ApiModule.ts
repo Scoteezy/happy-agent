@@ -4232,6 +4232,11 @@ export class ApiModule implements AgentModule {
         );
         if (agent === undefined || this.#announcedAgentCreations.has(agentId)) return;
         boundedAdd(this.#announcedAgentCreations, agentId, MAX_ANNOUNCED_AGENT_CREATIONS);
+        // An agent a request created, such as a person's task, keeps that request's echo.
+        if (mutationId === undefined) {
+            this.#journal.append("agent.created", { agent });
+            return;
+        }
         this.#mutationIds.run({ mutationId, inLoop: false }, () => {
             this.#journal.append("agent.created", { agent });
         });
