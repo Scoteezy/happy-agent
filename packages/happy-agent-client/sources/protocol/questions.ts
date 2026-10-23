@@ -28,6 +28,22 @@ export interface QuestionSecretRequest {
     environmentVariables: QuestionSecretRequestVariable[];
 }
 
+/**
+ * Marks a question asked by something outside the agent, such as an MCP server
+ * wanting the person's approval. The agent cannot answer it, and the answer goes
+ * to whatever asked. Clients should tell it apart from the agent's own questions
+ * and name `serverTitle` as the party asking. Treat an unknown `source` as a
+ * permission request from an unnamed party.
+ */
+export interface QuestionPermissionRequest {
+    /** `"mcp_elicitation"`: an MCP server elicitation during an agent tool call. */
+    source: "mcp_elicitation";
+    /** The configured MCP server name, 1–128 characters. */
+    server: string;
+    /** The server's display name, 1–128 characters. */
+    serverTitle: string;
+}
+
 /** One prompt inside a question. */
 export interface QuestionPrompt {
     id: Cuid2;
@@ -59,6 +75,11 @@ export interface Question {
     context?: string;
     /** One or more prompts, answered together. */
     questions: QuestionPrompt[];
+    /**
+     * Present only when something outside the agent asks for permission.
+     * Absent from daemons that predate permission requests.
+     */
+    permissionRequest?: QuestionPermissionRequest;
     /** When the agent proceeds on its own; `null` waits indefinitely. */
     autoResolveAt: Timestamp | null;
     /** `null` while pending; a map from prompt ID to the chosen values. */

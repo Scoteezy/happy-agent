@@ -296,6 +296,43 @@ describe("HappyReducer agent synchronization", () => {
         reducer.stop();
     });
 
+    it("keeps a permission request's origin on the pending question", async () => {
+        const harness = new AgentReducerHarness();
+        const reducer = new HappyReducer(harness.client);
+        reducer.agentVisible(AGENT_A);
+        reducer.start();
+        harness.connect();
+        await vi.waitFor(() => expect(harness.startedAgentIds).toEqual([AGENT_A]));
+        harness.complete(AGENT_A, agentBootstrap(AGENT_A, { cursor: CURSOR_0 }), emptyActivity());
+        await vi.waitFor(() => expect(reducer.getState().agents[AGENT_A]).toBeDefined());
+
+        const question: Question = {
+            ...pendingQuestion("question-a", AGENT_A, CURSOR_1),
+            permissionRequest: {
+                source: "mcp_elicitation",
+                server: "bambu_printer",
+                serverTitle: "Bambu Printer",
+            },
+        };
+        harness.stream.push(
+            eventUpdate({
+                cursor: CURSOR_1,
+                occurredAt: 1,
+                payload: { question },
+                type: "question.created",
+            }),
+        );
+        await vi.waitFor(() =>
+            expect(reducer.getState().agents[AGENT_A]?.question?.permissionRequest).toEqual({
+                source: "mcp_elicitation",
+                server: "bambu_printer",
+                serverTitle: "Bambu Printer",
+            }),
+        );
+
+        reducer.stop();
+    });
+
     it("applies agent SSE updates with structural sharing", async () => {
         const harness = new AgentReducerHarness();
         const reducer = new HappyReducer(harness.client);

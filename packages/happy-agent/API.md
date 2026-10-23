@@ -421,6 +421,10 @@ Question context is additive and does not increment the protocol version. A daem
 it includes the question's `context`; older compatible daemons omit it, and clients then show only
 the prompts.
 
+Permission requests are additive and do not increment the protocol version. Older daemons never
+send a question's optional `permissionRequest`. A client that does not recognize it renders the
+question as an ordinary question, and answering it works the same way.
+
 Secret deletion through `DELETE /v0/secrets/:secretId` is additive and does not increment the
 protocol version. An older compatible daemon answers that route with `404` even for a secret that
 `GET /v0/secrets/:secretId` still returns; clients then treat deletion as unavailable. The
@@ -7001,6 +7005,8 @@ The question object:
   `header`, the `question` text, `options` the person picks from (possibly empty — then the
   answer is free text), and `multiSelect`. A prompt may also carry `secretRequest`, described
   below.
+- `permissionRequest` — present only when something outside the agent asks the person for
+  permission or input, described below. Absent on every other question.
 - `autoResolveAt` — when set, the moment the agent proceeds on its own without an answer;
   `null` means it waits indefinitely.
 - `answers` — `null` while pending; once answered, a map from question `id` to the chosen
@@ -7045,6 +7051,32 @@ question then has exactly one prompt, and that prompt carries `secretRequest`:
 prefilled from these fields, so the person only types the values, and creates the secret through
 `POST /v0/secrets`. The client may instead let the person pick an existing secret from the catalog.
 Either way it then answers the question with that secret's ID, never with a value.
+
+#### Permission requests
+
+Most questions come from the agent. A permission request comes from something outside it, such as
+an MCP server asking the person to approve an action. The agent cannot answer it on the person's
+behalf. The answer goes to whatever asked, and the agent sees only what that party reports back.
+The question then carries `permissionRequest`:
+
+```json
+{
+    "source": "mcp_elicitation",
+    "server": "bambu_printer",
+    "serverTitle": "Bambu Printer"
+}
+```
+
+- `source` — what is asking. `"mcp_elicitation"` means an MCP server sent an elicitation during one
+  of the agent's tool calls. A client that does not recognize a source shows the question as a
+  permission request without naming what is asking.
+- `server` — the configured MCP server name, 1–128 characters.
+- `serverTitle` — the server's display name, 1–128 characters, which clients show instead of
+  `server`.
+
+A client should present a permission request so the person can tell it apart from the agent's own
+questions, naming `serverTitle` as the party asking. The prompts, options, and answer route are the
+same as for any other question.
 
 #### `GET /v0/agents/:agentId/question`
 
