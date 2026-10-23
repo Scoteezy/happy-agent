@@ -26,6 +26,9 @@ describe("media layout style grammar", () => {
         ["aspectRatio", "16/9", "16 / 9"],
         ["aspectRatio", "auto 4 / 3", "auto 4 / 3"],
         ["aspectRatio", "auto", "auto"],
+        ["aspectRatio", "1 / 10", "1 / 10"],
+        ["aspectRatio", "10", "10"],
+        ["aspectRatio", "auto 4000 / 400", "auto 4000 / 400"],
         ["objectFit", "scale-down", "scale-down"],
         ["objectPosition", "right 20%", "right 20%"],
         [
@@ -96,6 +99,12 @@ describe("media layout style grammar", () => {
         ["overflow", "scroll"],
         ["lineHeight", "-1"],
         ["aspectRatio", "0 / 1"],
+        // A box at most ten times wider than tall, or taller than wide.
+        ["aspectRatio", "1 / 10000"],
+        ["aspectRatio", ".01 / 10000"],
+        ["aspectRatio", "auto 1 / 11"],
+        ["aspectRatio", "11"],
+        ["aspectRatio", "10000 / 1"],
         ["display", "block;position:fixed"],
         ["display", "'block'"],
         ["position", "relative"],

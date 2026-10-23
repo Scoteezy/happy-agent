@@ -12,7 +12,7 @@
  * the rest of the line it closes on. A block holding no `<img>` is ordinary Markdown.
  */
 
-import { fenceOpening, isFenceClose, skipCodeSpan, type MarkdownFence } from "./markdownBlocks.js";
+import { fenceOpening, isFenceClose, type MarkdownFence } from "./markdownBlocks.js";
 import type { MediaItemSource } from "./protocol/messages.js";
 
 /**
@@ -42,6 +42,7 @@ export function splitMediaLayoutBlocks(markdown: string): MediaLayoutBlockSegmen
     let markdownStart = 0;
     let lineStart = 0;
     let fence: MarkdownFence | undefined;
+    const spans = new CodeSpans(markdown);
     // Where the code span covering the current paragraph's text ends; nothing starts before it.
     let codeUntil = 0;
     while (lineStart < markdown.length) {
@@ -90,7 +91,7 @@ export function splitMediaLayoutBlocks(markdown: string): MediaLayoutBlockSegmen
                 return segments;
             }
         }
-        codeUntil = skipCodeSpans(markdown, Math.max(lineStart, codeUntil), lineEnd, codeUntil);
+        codeUntil = spans.skip(Math.max(lineStart, codeUntil), lineEnd, codeUntil);
         lineStart = lineEnd;
     }
     pushMarkdown(markdown.slice(markdownStart));
@@ -103,7 +104,7 @@ export function splitMediaLayoutBlocks(markdown: string): MediaLayoutBlockSegmen
  * An incomplete block is broken HTML rather than a layout, so it stays as written.
  */
 export function stripMediaLayoutBlocks(markdown: string): string {
-    let text = "";
+    const parts: string[] = [];
     let removed = false;
     for (const segment of splitMediaLayoutBlocks(markdown)) {
         if (segment.type === "layout" && segment.complete) {
@@ -112,14 +113,46 @@ export function stripMediaLayoutBlocks(markdown: string): string {
         }
         let part = segment.type === "markdown" ? segment.text : segment.html;
         if (removed) {
-            part = part.replace(/^(?:[ \t]*\r?\n)+/u, "");
+            part = part.slice(leadingBlankLinesLength(part));
             if (part === "") continue;
-            text = text === "" ? "" : `${text.replace(/(?:\r?\n[ \t]*)+$/u, "")}\n\n`;
+            if (parts.length > 0) {
+                const last = parts.length - 1;
+                const before = parts[last]!;
+                parts[last] =
+                    `${before.slice(0, before.length - trailingBlankLinesLength(before))}\n\n`;
+            }
             removed = false;
         }
-        text += part;
+        parts.push(part);
     }
-    return removed ? text.replace(/\s+$/u, "") : text;
+    const text = parts.join("");
+    return removed ? text.trimEnd() : text;
+}
+
+/** How many leading characters of `text` are whole blank lines. */
+function leadingBlankLinesLength(text: string): number {
+    let length = 0;
+    let index = 0;
+    while (index < text.length) {
+        const character = text[index];
+        if (character === "\n") length = index + 1;
+        else if (character !== " " && character !== "\t" && character !== "\r") break;
+        index += 1;
+    }
+    return length;
+}
+
+/** How many trailing characters of `text` are line breaks with the spaces after them. */
+function trailingBlankLinesLength(text: string): number {
+    let length = 0;
+    let index = text.length - 1;
+    while (index >= 0) {
+        const character = text[index];
+        if (character === "\n") length = text.length - index;
+        else if (character !== " " && character !== "\t" && character !== "\r") break;
+        index -= 1;
+    }
+    return length;
 }
 
 /**
@@ -206,37 +239,104 @@ function openTagEnd(markdown: string, index: number): number {
 }
 
 /**
- * Skips the code spans that open in `[from, lineEnd)`, returning where the last one ends, or
- * `codeUntil` when none opens. A span is bounded by its paragraph, which a blank line or a fence
- * ends.
+ * The code spans of one text, found in a single pass however they are asked for. Callers ask in
+ * increasing order of position, so each lookup resumes where the last stopped: finding a span's
+ * closing run and its paragraph's end costs time in proportion to the text, not to the text for
+ * every span.
  */
-function skipCodeSpans(markdown: string, from: number, lineEnd: number, codeUntil: number): number {
-    let until = codeUntil;
-    let index = from;
-    let end: number | undefined;
-    while (index < lineEnd) {
-        const character = markdown[index];
-        if (character === "\\") {
-            index += 2;
-        } else if (character === "`") {
-            end ??= paragraphEnd(markdown, lineEnd);
-            index = skipCodeSpan(markdown, index, end, false);
-            until = index;
-        } else {
-            index += 1;
-        }
+class CodeSpans {
+    readonly #markdown: string;
+    /** The maximal backtick runs by length, each list in increasing order; built on first use. */
+    #runs: Map<number, number[]> | undefined;
+    /** Per run length, how many of its runs lie before every position asked about so far. */
+    readonly #passed = new Map<number, number>();
+    #paragraph: { readonly from: number; readonly end: number } | undefined;
+
+    constructor(markdown: string) {
+        this.#markdown = markdown;
     }
-    return until;
+
+    /**
+     * Skips the code spans that open in `[from, lineEnd)`, returning where the last one ends, or
+     * `codeUntil` when none opens. A span is bounded by its paragraph, which a blank line or a
+     * fence ends. Backticks without a closing run of the same length are literal.
+     */
+    skip(from: number, lineEnd: number, codeUntil: number): number {
+        const markdown = this.#markdown;
+        let until = codeUntil;
+        let index = from;
+        while (index < lineEnd) {
+            const next = markdown.indexOf("`", index);
+            if (next === -1 || next >= lineEnd) break;
+            if (isEscaped(markdown, index, next)) {
+                index = next + 1;
+                continue;
+            }
+            let length = 1;
+            while (markdown[next + length] === "`") length += 1;
+            const close = this.#closing(next + length, length, this.#paragraphEnd(lineEnd));
+            index = close === undefined ? next + length : close + length;
+            if (close !== undefined) until = index;
+        }
+        return until;
+    }
+
+    /** The first maximal run of exactly `length` backticks at or after `from`, before `end`. */
+    #closing(from: number, length: number, end: number): number | undefined {
+        this.#runs ??= backtickRuns(this.#markdown);
+        const runs = this.#runs.get(length);
+        if (runs === undefined) return undefined;
+        let passed = this.#passed.get(length) ?? 0;
+        while (passed < runs.length && runs[passed]! < from) passed += 1;
+        this.#passed.set(length, passed);
+        const run = runs[passed];
+        return run !== undefined && run < end ? run : undefined;
+    }
+
+    /** Where the paragraph holding the line at `from` ends: its next blank or fence line. */
+    #paragraphEnd(from: number): number {
+        const known = this.#paragraph;
+        if (known !== undefined && known.from <= from && from <= known.end) return known.end;
+        const markdown = this.#markdown;
+        let lineStart = from;
+        let end = markdown.length;
+        while (lineStart < markdown.length) {
+            const newline = markdown.indexOf("\n", lineStart);
+            const line = markdown.slice(lineStart, newline === -1 ? markdown.length : newline);
+            if (BLANK_LINE.test(line) || fenceOpening(line) !== undefined) {
+                end = lineStart;
+                break;
+            }
+            if (newline === -1) break;
+            lineStart = newline + 1;
+        }
+        this.#paragraph = { from, end };
+        return end;
+    }
 }
 
-function paragraphEnd(markdown: string, from: number): number {
-    let lineStart = from;
-    while (lineStart < markdown.length) {
-        const newline = markdown.indexOf("\n", lineStart);
-        const line = markdown.slice(lineStart, newline === -1 ? markdown.length : newline);
-        if (BLANK_LINE.test(line) || fenceOpening(line) !== undefined) return lineStart;
-        if (newline === -1) return markdown.length;
-        lineStart = newline + 1;
+/**
+ * Whether the backtick at `at` is escaped by an odd run of backslashes that starts at or after
+ * `from`, where the caller's scan stands; a backslash escapes the character after it.
+ */
+function isEscaped(markdown: string, from: number, at: number): boolean {
+    let backslashes = 0;
+    while (at - backslashes - 1 >= from && markdown[at - backslashes - 1] === "\\") {
+        backslashes += 1;
     }
-    return markdown.length;
+    return backslashes % 2 === 1;
+}
+
+function backtickRuns(markdown: string): Map<number, number[]> {
+    const runs = new Map<number, number[]>();
+    let index = markdown.indexOf("`");
+    while (index !== -1) {
+        let length = 1;
+        while (markdown[index + length] === "`") length += 1;
+        const list = runs.get(length);
+        if (list === undefined) runs.set(length, [index]);
+        else list.push(index);
+        index = markdown.indexOf("`", index + length);
+    }
+    return runs;
 }

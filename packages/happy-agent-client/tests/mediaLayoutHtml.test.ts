@@ -393,4 +393,54 @@ describe("parseMediaLayoutHtml", () => {
                 ?.join("") ?? "";
         expect(text.length).toBe(8000);
     });
+
+    it("stops at 32 levels of any HTML, kept or not, and never recurses further", () => {
+        for (const tag of ["x", "b", "em", "i", "dl"]) {
+            const html = `<div>${`<${tag}>`.repeat(3000)}<img src="out/overview.png">${`</${tag}>`.repeat(3000)}</div>`;
+            expect(html.length).toBeLessThan(32 * 1024);
+            const result = parsed(html);
+            expect(result.truncated, tag).toBe(true);
+            expect(result.ignored).toContain("elements nested more than 32 deep");
+            expect(result.placed).toEqual([]);
+        }
+        // Up to the limit, wrappers the subset lacks are unwrapped as before.
+        const shallow = parsed(`${"<x>".repeat(30)}${PLACE_ALL}${"</x>".repeat(30)}`);
+        expect(shallow.truncated).toBe(false);
+        expect(shallow.placed).toEqual([0, 1, 2]);
+    });
+
+    it("counts every element toward the node budget, including the ones it unwraps or drops", () => {
+        for (const filler of ["<x></x>", "<script></script>", "<b></b>"]) {
+            const result = parsed(`<div>${filler.repeat(600)}</div>${PLACE_ALL}`);
+            expect(result.truncated, filler).toBe(true);
+            expect(result.ignored).toContain("nodes beyond 500");
+            expect(result.placed).toEqual([]);
+        }
+    });
+
+    it("never throws, whatever the input or the resolver does", () => {
+        const inputs = [
+            "<b>".repeat(4000) + "x".repeat(4000),
+            "<b>x".repeat(6000),
+            "<b><div></b>".repeat(2500),
+            "<p><b><i><u>x".repeat(2000),
+            "<table>" + "<td>x".repeat(5000),
+            "<svg>".repeat(5000),
+            "<!--".repeat(8000),
+            '<img src="'.repeat(3000),
+        ];
+        for (const html of inputs) {
+            expect(() => parseMediaLayoutHtml(html, () => 0)).not.toThrow();
+        }
+        expect(
+            parseMediaLayoutHtml('<img src="a.png">', () => {
+                throw new Error("resolver failed");
+            }),
+        ).toEqual({
+            root: [],
+            placed: [],
+            ignored: ["the whole layout, which could not be read"],
+            truncated: true,
+        });
+    });
 });

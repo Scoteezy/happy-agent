@@ -296,6 +296,11 @@ const gridLines: Grammar = (components) => {
     return parts.length <= 2 && parts.every(gridLine);
 };
 
+/** The widest and tallest shapes a ratio may give a box, so `width: 100%` cannot make it huge. */
+const MIN_RATIO = 0.1;
+const MAX_RATIO = 10;
+
+/** `N` or `N / M`, positive, whose width-to-height ratio is from 1:10 to 10:1. */
 const ratio: Grammar = (components) => {
     const parts = split(components, "slash");
     if (parts.length > 2) return false;
@@ -303,7 +308,11 @@ const ratio: Grammar = (components) => {
         const texts = words(part);
         return texts?.length === 1 ? number(texts[0]!) : undefined;
     });
-    return values.every((value) => value !== undefined && value > 0 && value <= 10_000);
+    if (!values.every((value) => value !== undefined && value > 0 && value <= 10_000)) {
+        return false;
+    }
+    const shape = values[0]! / (values[1] ?? 1);
+    return shape >= MIN_RATIO && shape <= MAX_RATIO;
 };
 
 const aspectRatio: Grammar = (components) => {

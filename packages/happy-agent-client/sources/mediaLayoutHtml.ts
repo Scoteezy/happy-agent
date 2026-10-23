@@ -17,6 +17,11 @@ type Element = DefaultTreeAdapterTypes.Element;
 /** The most layout HTML that is read, in UTF-16 code units; a longer layout is not used. */
 export const MAX_MEDIA_LAYOUT_HTML_LENGTH = 32 * 1024;
 const MAX_DEPTH = 12;
+/**
+ * How deep the HTML itself may nest, counting every element, kept or unwrapped. Content below it
+ * is dropped, so neither the walk nor a renderer ever recurses further than this.
+ */
+const MAX_HTML_DEPTH = 32;
 const MAX_NODES = 500;
 const MAX_TEXT = 8000;
 const MAX_ALT = 1000;
@@ -89,8 +94,9 @@ export interface ParsedMediaLayoutHtml {
     /** Short descriptions of what was left out, such as `position on <div>`, for the agent. */
     readonly ignored: readonly string[];
     /**
-     * Whether content was lost to a limit: the whole HTML was too long, or nodes or text beyond
-     * the tree's bounds were dropped. Unsupported markup left out on purpose does not count.
+     * Whether content was lost to a limit: the whole HTML was too long, or nodes, text, or
+     * elements nested beyond the bounds were dropped. Unsupported markup left out on purpose does
+     * not count.
      */
     readonly truncated: boolean;
 }
@@ -119,6 +125,20 @@ export function parseMediaLayoutHtml(
     source: string,
     resolve: MediaLayoutSourceResolver,
 ): ParsedMediaLayoutHtml {
+    try {
+        return parseBounded(source, resolve);
+    } catch {
+        // The bounds below should make this unreachable; a layout must still never throw.
+        return {
+            root: [],
+            placed: [],
+            ignored: ["the whole layout, which could not be read"],
+            truncated: true,
+        };
+    }
+}
+
+function parseBounded(source: string, resolve: MediaLayoutSourceResolver): ParsedMediaLayoutHtml {
     if (source.length > MAX_MEDIA_LAYOUT_HTML_LENGTH) {
         return {
             root: [],
@@ -155,22 +175,33 @@ export function parseMediaLayoutHtml(
             }
         }
     }
-    const root = body === undefined ? [] : children(body.childNodes, false, 0, walk);
+    const root = body === undefined ? [] : children(body.childNodes, false, 0, 0, walk);
     return { root, placed: walk.placed, ignored: walk.ignored, truncated: walk.truncated };
 }
 
+/**
+ * Converts nodes into the tree. `depth` counts the elements kept around them, which the tree
+ * bounds by unwrapping; `htmlDepth` counts every element around them, which bounds the walk.
+ */
 function children(
     nodes: readonly ChildNode[],
     ignoresWhitespace: boolean,
     depth: number,
+    htmlDepth: number,
     walk: LayoutWalk,
 ): MediaLayoutNode[] {
     const converted: MediaLayoutNode[] = [];
-    for (const node of nodes) convert(node, depth, walk, converted);
+    for (const node of nodes) convert(node, depth, htmlDepth, walk, converted);
     return tidyWhitespace(converted, ignoresWhitespace);
 }
 
-function convert(node: ChildNode, depth: number, walk: LayoutWalk, into: MediaLayoutNode[]): void {
+function convert(
+    node: ChildNode,
+    depth: number,
+    htmlDepth: number,
+    walk: LayoutWalk,
+    into: MediaLayoutNode[],
+): void {
     if (node.nodeName === "#text" && "value" in node) {
         const text = node.value.replaceAll(/[\t\n\f\r ]+/gu, " ");
         const room = MAX_TEXT - walk.text;
@@ -191,6 +222,12 @@ function convert(node: ChildNode, depth: number, walk: LayoutWalk, into: MediaLa
     if (!("tagName" in node)) return;
     const element = node;
     const tag = element.tagName;
+    if (htmlDepth >= MAX_HTML_DEPTH) {
+        truncate(walk, `elements nested more than ${String(MAX_HTML_DEPTH)} deep`);
+        return;
+    }
+    // Every element counts, kept or not, so no markup can make the walk outgrow the budget.
+    if (!count(walk)) return;
     if (element.namespaceURI !== htmlSpec.NS.HTML || DROPPED_TAGS.has(tag)) {
         note(walk, `<${tag}> and its contents`);
         return;
@@ -202,7 +239,7 @@ function convert(node: ChildNode, depth: number, walk: LayoutWalk, into: MediaLa
     }
     if (tag === "br") {
         attributes(element, [], walk);
-        if (count(walk)) into.push({ type: "break" });
+        into.push({ type: "break" });
         return;
     }
     const elementTag = ELEMENT_TAGS[tag];
@@ -215,10 +252,9 @@ function convert(node: ChildNode, depth: number, walk: LayoutWalk, into: MediaLa
                 `elements nested more than ${String(MAX_DEPTH)} deep (their content is kept)`,
             );
         }
-        for (const child of element.childNodes) convert(child, depth, walk, into);
+        for (const child of element.childNodes) convert(child, depth, htmlDepth + 1, walk, into);
         return;
     }
-    if (!count(walk)) return;
     const style = elementStyle(element, [], walk);
     const display = style?.display ?? "";
     const flowIgnoresWhitespace = /flex|grid/u.test(display);
@@ -226,7 +262,13 @@ function convert(node: ChildNode, depth: number, walk: LayoutWalk, into: MediaLa
         type: "element",
         tag: elementTag,
         ...(style === undefined ? {} : { style }),
-        children: children(element.childNodes, flowIgnoresWhitespace, depth + 1, walk),
+        children: children(
+            element.childNodes,
+            flowIgnoresWhitespace,
+            depth + 1,
+            htmlDepth + 1,
+            walk,
+        ),
     });
 }
 
@@ -245,7 +287,6 @@ function imageItem(element: Element, walk: LayoutWalk): MediaLayoutNode | undefi
         note(walk, `a second <img src=${quote(shorten(src))}>`);
         return undefined;
     }
-    if (!count(walk)) return undefined;
     walk.placed.push(index);
     const style = elementStyle(element, ["src", "alt"], walk);
     const alt = element.attrs

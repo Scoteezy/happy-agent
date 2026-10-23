@@ -6372,7 +6372,8 @@ The properties and the grammar of each are a subset of CSS:
   between start and end).
 - Sizing: `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, and `maxHeight` (a length,
   `auto`, `min-content`, `max-content`, `fit-content`, `fit-content(length)`, and `none` for the
-  maximums), `aspectRatio` (`auto`, `N`, `N / M`, or `auto` with a ratio), and `boxSizing`.
+  maximums), `aspectRatio` (`auto`, `N`, `N / M`, or `auto` with a ratio, where the ratio of width to
+  height is from 1:10 to 10:1), and `boxSizing`.
 - Box: `padding`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `margin`,
   `marginTop`, `marginRight`, `marginBottom`, `marginLeft` (lengths, and `auto` for margins),
   `borderRadius` (one to four `px` radii up to 999), and `overflow`, `overflowX`, and `overflowY`
@@ -6433,8 +6434,11 @@ rest, and the call's result tells the agent in a short sentence what it ignored:
   backslash or a quote is dropped whole, so no escape, string, or `url()` reaches a client.
   `!important`, at-rules, `position`, `z-index`, colours and backgrounds, `content`, `cursor`,
   `pointer-events`, animations, transitions, transforms, and `var()` are never kept.
-- Limits: elements nested more than 12 deep are unwrapped, and nodes beyond 500 or text beyond
-  8,000 characters are dropped. A `layout` over 32 KiB is ignored whole.
+- Limits: kept elements nested more than 12 deep are unwrapped. Every element of the HTML counts
+  toward its nesting, whether it is kept, unwrapped, or dropped, and anything nested more than 32
+  deep is dropped with its contents. Every element and text counts toward 500 nodes, and nodes
+  beyond 500 or text beyond 8,000 characters are dropped. A `layout` over 32 KiB is ignored whole.
+  The parser never fails, whatever the input.
 - A file the layout leaves out is appended to the end of the tree, and the result says so. A
   layout that places none of the files is ignored whole and the presentation has no `layout`.
 

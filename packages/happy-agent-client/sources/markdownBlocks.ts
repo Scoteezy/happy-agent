@@ -3,7 +3,6 @@
  * Reference tags and file links both scan with these, so they agree on what is code.
  */
 
-const FENCE_OPEN = /^[ \t]*(?:>[ \t]?)*[ \t]*(`{3,}|~{3,})(.*)$/;
 const BLANK_LINE = /^[ \t\r]*$/;
 
 /**
@@ -49,17 +48,41 @@ export interface MarkdownFence {
 
 /** The fence `line` opens, or `undefined` when it opens none. */
 export function fenceOpening(line: string): MarkdownFence | undefined {
-    const open = FENCE_OPEN.exec(line);
-    const marker = open?.[1];
-    const info = open?.[2] ?? "";
-    if (marker === undefined || (marker.startsWith("`") && info.includes("`"))) return undefined;
-    return { marker: marker.charAt(0), length: marker.length };
+    const start = fencePrefixEnd(line);
+    const marker = line[start];
+    if (marker !== "`" && marker !== "~") return undefined;
+    const length = runLength(line, start, marker);
+    if (length < 3) return undefined;
+    const info = line.slice(start + length);
+    // A line terminator is not part of an info string, so a line holding one opens nothing.
+    if (/[\r\u2028\u2029]/u.test(info)) return undefined;
+    if (marker === "`" && info.includes("`")) return undefined;
+    return { marker, length };
 }
 
 /** Whether `line` closes the open `fence`. */
 export function isFenceClose(line: string, fence: MarkdownFence): boolean {
-    const close = /^[ \t]*(?:>[ \t]?)*[ \t]*(`+|~+)[ \t\r]*$/.exec(line)?.[1];
-    return close !== undefined && close.charAt(0) === fence.marker && close.length >= fence.length;
+    const start = fencePrefixEnd(line);
+    const marker = line[start];
+    if (marker !== fence.marker) return false;
+    const length = runLength(line, start, marker);
+    return length >= fence.length && /^[ \t\r]*$/u.test(line.slice(start + length));
+}
+
+/**
+ * Where a fence marker may start: after indentation and blockquote markers, each `>` taking at
+ * most one following space or tab, and any spaces after them. A scan rather than a pattern, so a
+ * long run of spaces or markers cannot make it backtrack.
+ */
+function fencePrefixEnd(line: string): number {
+    let index = 0;
+    while (line[index] === " " || line[index] === "\t") index += 1;
+    while (line[index] === ">") {
+        index += 1;
+        if (line[index] === " " || line[index] === "\t") index += 1;
+    }
+    while (line[index] === " " || line[index] === "\t") index += 1;
+    return index;
 }
 
 /**

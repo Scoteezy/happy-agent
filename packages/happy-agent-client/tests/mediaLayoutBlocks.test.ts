@@ -162,6 +162,35 @@ describe("stripMediaLayoutBlocks", () => {
     });
 });
 
+describe("pathological text", () => {
+    const SIZE = 64 * 1024;
+    /** `unit` repeated to 64 KiB. */
+    const filled = (unit: string) => unit.repeat(Math.ceil(SIZE / unit.length));
+
+    // Each of these took seconds while the scan was quadratic; linear, each takes milliseconds.
+    it.each([
+        ["code spans on every line", filled("`x`\n")],
+        ["unmatched backtick runs", filled("``x`\n")],
+        ["backticks with escapes", filled("\\`x``\n")],
+        ["fences opening and closing", filled("```\nx\n```\n")],
+        ["blank lines between spans", filled("`x\n\n")],
+        ["one line of spaces", `${" ".repeat(SIZE)}x`],
+        ["one line of quote markers", `${"> ".repeat(SIZE / 2)}x`],
+        ["layout blocks between spans", filled('`x`\n<img src="a.png">\n')],
+        ["unclosed tags", filled("<div x\n")],
+    ])("splits and strips %s in linear time", (_name, markdown) => {
+        const started = performance.now();
+        const segments = splitMediaLayoutBlocks(markdown);
+        stripMediaLayoutBlocks(markdown);
+        expect(performance.now() - started).toBeLessThan(500);
+        expect(
+            segments
+                .map((segment) => (segment.type === "markdown" ? segment.text : segment.html))
+                .join(""),
+        ).toBe(markdown);
+    });
+});
+
 describe("mediaSourceMatches", () => {
     it("matches the path as written or the absolute path, exactly", () => {
         const source = { path: "shots/a.png", absolutePath: "/repo/shots/a.png" };
