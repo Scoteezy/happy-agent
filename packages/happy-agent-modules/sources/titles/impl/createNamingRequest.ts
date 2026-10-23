@@ -23,8 +23,8 @@ const RULES: Readonly<Record<keyof TitleNamesWanted, string>> = {
         "retry-policy-rewrite. No path, no prefix, no number, no file extension.",
     ].join(" "),
     title: [
-        "<title>: two to six words naming what the work is about, the way a person writes a title.",
-        "No quotes, no trailing punctuation, no markdown.",
+        "<title>: one to three words, at most 32 characters, naming what the work is about, such as Sidebar fixes.",
+        'Name the subject, not every part of it: no "and", no "&", no quotes, no trailing punctuation, no markdown.',
     ].join(" "),
 };
 
@@ -81,7 +81,7 @@ export function createBotNamingRequest(firstMessage: string): NamingRequestText 
             "",
             "<title>The name</title>",
             "",
-            "At most three words and 40 characters. No quotes, punctuation, markdown, or generic words such as Bot or Assistant.",
+            "At most three words and 32 characters. No quotes, punctuation, markdown, or generic words such as Bot or Assistant.",
             "",
             CLOSING,
         ].join("\n"),

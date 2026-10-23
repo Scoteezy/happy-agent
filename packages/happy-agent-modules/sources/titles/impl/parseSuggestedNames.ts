@@ -52,6 +52,9 @@ function shortenTitle(title: string): string {
         .split(/\s+/u)
         .filter(Boolean)
         .slice(0, MAX_CHAT_TITLE_WORDS);
+    // A cut that ends on a joining word reads as unfinished ("Sidebar fixes &").
+    while (words.length > 1 && /^(?:and|or|&|\+|with|for|of|to|the|a)$/iu.test(words.at(-1)!))
+        words.pop();
     const shortened = words.join(" ");
     return shortened.length <= MAX_CHAT_TITLE_CHARS
         ? shortened

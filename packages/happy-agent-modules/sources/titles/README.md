@@ -25,13 +25,15 @@ The request runs on its own provider session, outside the agent loop, so nothing
 history a person reads or the context the agent works from. Each of the first two user-message
 positions can launch at most one request.
 
-The model is the cheapest one served by the account the chat already runs on — that account is the
-only one known to be signed in and paid for — at the least reasoning effort the model accepts.
-Writing three words does not deserve a reasoning budget.
+The model is the one the chat itself runs on, at that model's default effort. A new chat starts on
+the default model from Settings, so names come from the person's chosen model rather than a cheap
+one. When that model is no longer served, the first model of the chat's account answers, since only
+that account is known to be signed in; then the configured default. A request may take up to a
+minute; the row stays a stem cell meanwhile.
 
 Each name is asked for as its own tag, `<title>…</title>` and `<slug>…</slug>`, because that is the
 shape models answer most reliably, and only the names still wanted are asked for. A greeting, a code fence or a closing remark around it is ignored; an answer with no tag at
-all is read as the name itself. A chat title is bounded to six words and 80 characters; a workspace
+all is read as the name itself. A chat title is bounded to three words and 32 characters, without a trailing joining word; a workspace
 or branch name is reduced to lower-case kebab-case and bounded to 48 characters. Text that is merely
 too long is shortened rather than rejected — a slightly long name beats no name.
 
@@ -42,7 +44,7 @@ that became a rewrite, the bug report that became a design. The second user mess
 where the module looks again. By then committed history includes the opening request, any work
 recorded between the two messages, and the new request itself.
 
-The second look is the same cheap model on the same account, reading the conversation instead of the
+The second look is the same model on the same account, reading the conversation instead of the
 opening message, and asked a different question: not "name this" but "is this still what it is
 called". The title it was given is the answer unless the conversation plainly contradicts it, because
 a title that keeps moving is worse than one that was slightly wrong — a person looking for the chat
@@ -67,7 +69,7 @@ because renaming either would move it out from under agents already working ther
 
 | Module                                        | Why                                                                                 |
 | --------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [`ConfigModule`](../config/README.md)         | The accounts a name is written on, and the catalog the cheapest model comes from.   |
+| [`ConfigModule`](../config/README.md)         | The accounts a name is written on, and the catalog its model comes from.            |
 | [`HistoryModule`](../history/README.md)       | The committed conversation read after the second accepted user message.             |
 | [`WorkspacesModule`](../workspaces/README.md) | Agent placement and the catalog that applies a generated workspace and branch name. |
 

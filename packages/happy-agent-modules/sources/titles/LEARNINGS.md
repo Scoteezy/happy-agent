@@ -43,3 +43,24 @@ means chosen for compatibility; an explicit false keeps the workspace eligible f
 naming. Names supplied by the workspace-creation agent tool are deliberate. Eligibility is checked
 again by the workspaces catalog when the generated slug is applied, so a user rename that races
 naming still wins.
+
+## Generated titles are three words at most
+
+Six-word, 80-character titles such as "Sidebar UI fixes and draggable spaces" were too long for
+the sidebar. Naming now asks for one to three words naming the subject, never a list of its parts,
+and the parser keeps at most three words and 32 characters, dropping a trailing joining word such
+as "and" or "&" so a cut never reads as unfinished.
+
+## Names come from the chat's own model, not a cheap one
+
+Naming ran on a hardcoded list of inexpensive models at the lowest effort, and the names misread
+what the work was. Kirill asked for the default model from Settings at its default effort, as
+Prioritizing uses. Titles cannot read Settings: `UserSettingsModule` takes `TeamModule`, which
+takes `TasksModule`, which takes `TitlesModule`, so the dependency would be a construction cycle,
+and the module rules forbid setters or host objects to break it. Names are therefore written by
+the model the chat itself runs on (`scope.agent.model`, passed by Titles, Tasks, and Bots) at that
+model's default effort. A new chat starts on the Settings default, so at the first message this is
+that model unless the person picked another for the chat, which is then the better choice anyway.
+When the chat's model is not served, the first model of the chat's account answers, then the
+configured default. A stronger model at its default effort is slower, so one request may take up
+to a minute instead of ten seconds; naming is detached and the row stays a stem cell meanwhile.

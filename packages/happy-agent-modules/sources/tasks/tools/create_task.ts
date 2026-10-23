@@ -48,7 +48,7 @@ export function createTaskTool(
         searchKeywords: ["make a task", "new task", "create task", "task folder"],
         description: [
             "Create one persistent task: a user-visible conversation with its own dedicated folder, owned by the person you are working for. A task has no avatar; it can create its own subtasks for project work.",
-            'Give it a short name such as "Fix login redirect"; prefer 2–3 words, 4 at most. Omit the name to let the task name itself from its first message. Put the details in text, which is delivered as the task\'s first message and starts its work. Omit text to create an idle task for the person to open.',
+            'Give it a short name such as "Fix login redirect"; 1–3 words naming the subject, never a list of parts. Omit the name to let the task name itself from its first message. Put the details in text, which is delivered as the task\'s first message and starts its work. Omit text to create an idle task for the person to open.',
             "Returns the task without waiting. Talk to it later with send_task_message; there is no wait tool.",
             `Choose an optional model and effort; harness and provider default to yours when they serve the model.\n\n${options}\n\nCall agent_options for the current list.`,
         ].join("\n\n"),

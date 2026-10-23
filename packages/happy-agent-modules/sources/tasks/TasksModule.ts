@@ -218,7 +218,7 @@ export class TasksModule implements AgentModule {
                 if ((await scope.kv.read(hookCtx, NAME_ATTEMPTED_KEY)) !== undefined) return;
                 await scope.kv.write(hookCtx, NAME_ATTEMPTED_KEY, { at: Date.now() });
                 afterCommit(hookCtx, () => {
-                    this.#startNaming(task.id, scope.agent.provider, message);
+                    this.#startNaming(task.id, scope.agent.provider, scope.agent.model, message);
                 });
                 return;
             }
@@ -674,6 +674,7 @@ export class TasksModule implements AgentModule {
         ctx: Context,
         taskId: string,
         providerId: string,
+        modelId: string | undefined,
         message: string,
     ): Promise<void> {
         try {
@@ -685,6 +686,7 @@ export class TasksModule implements AgentModule {
                     firstMessage: message,
                     wanted: { title: true },
                     providerId,
+                    ...(modelId === undefined ? {} : { modelId }),
                 })
             ).title;
             const name = suggested?.split(/\s+/u).slice(0, 6).join(" ").slice(0, 60).trimEnd();
@@ -709,7 +711,12 @@ export class TasksModule implements AgentModule {
     }
 
     /** Start one detached naming request without delaying message acceptance or the real turn. */
-    #startNaming(taskId: string, providerId: string, message: string): void {
+    #startNaming(
+        taskId: string,
+        providerId: string,
+        modelId: string | undefined,
+        message: string,
+    ): void {
         const lifetime = this.#lifetime;
         if (this.#closed || lifetime === undefined || this.#namingTasks.has(taskId)) return;
         let task!: Promise<void>;
@@ -720,6 +727,7 @@ export class TasksModule implements AgentModule {
                         lifetime.named("task-initial-naming"),
                         taskId,
                         providerId,
+                        modelId,
                         message,
                     ),
             )

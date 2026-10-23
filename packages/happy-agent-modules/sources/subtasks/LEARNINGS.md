@@ -77,9 +77,10 @@ new list.
 
 ## Titles are short sidebar labels
 
-Subtask session titles were too long for the sidebar. The creation tool now asks for 2–3 words,
-with 4 at most and only as a last resort, and directs task details into the message text. This is
-loose prompt guidance, not a runtime word-count limit or automatic truncation.
+Subtask session titles were too long for the sidebar; even "Sidebar UI fixes and draggable spaces"
+was called out. The creation tool now asks for 1–3 words naming the subject, never a list of parts
+joined by "and" or "&", and directs task details into the message text. This is prompt guidance,
+not a runtime limit: a title an agent chooses is deliberate and is not truncated.
 
 ## Conversation subtasks have no opening task
 
