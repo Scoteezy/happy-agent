@@ -299,6 +299,32 @@ describe("UserInputModule", () => {
                 id: "internal-batch-call",
                 status: "answered",
                 answers: { scope: "Small", rollout: "Yes" },
+                presentation: {
+                    type: "user_input",
+                    questions: [
+                        {
+                            id: "scope",
+                            header: "Scope",
+                            question: "Which scope should I use?",
+                            multiSelect: false,
+                            options: [
+                                { label: "Small", description: "Safer first step." },
+                                { label: "Wide", description: "Faster broad rollout." },
+                            ],
+                        },
+                        {
+                            id: "rollout",
+                            header: "Rollout",
+                            question: "Should rollout be gradual?",
+                            multiSelect: false,
+                            options: [
+                                { label: "Yes", description: "Reduce deployment risk." },
+                                { label: "No", description: "Finish sooner." },
+                            ],
+                        },
+                    ],
+                    answers: { scope: ["Small"], rollout: ["Yes"] },
+                },
             });
         } finally {
             database.close();

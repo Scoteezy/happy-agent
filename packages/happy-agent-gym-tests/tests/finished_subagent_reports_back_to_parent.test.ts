@@ -96,6 +96,9 @@ describe("finished subagent reporting", () => {
         );
         if (report === undefined)
             throw new Error("The child report is absent from parent history.");
+        expect(report.metadata).toMatchObject({
+            senderAgentExplanation: "Finished: final answer",
+        });
 
         const boundaries = (await gym.client.getEvents({ limit: 10_000 })).events.filter(
             (event) => event.type === "run.boundary" && event.payload.agentId === parentAgentId,

@@ -97,10 +97,20 @@ describe("cross-workspace Agent-ID messaging", () => {
         }, "the unrelated workspace agent to finish the delivered message");
         expect(JSON.stringify(recipientHistory)).toContain("CROSS_WORKSPACE_MESSAGE_RECEIVED");
         expect(JSON.stringify(recipientHistory)).toContain("CROSS_WORKSPACE_RECIPIENT_FINISHED");
+        const received = recipientHistory.runs
+            .flatMap((run) => run.messages)
+            .find((message) => message.role === "agent");
+        expect(received?.metadata).toMatchObject({
+            senderAgentId,
+            senderAgentExplanation: "Cross-workspace hello",
+        });
         expect(senderCalls).toBe(2);
         expect(recipientCalls).toBe(1);
         expect(gym.errors).toEqual([]);
         expect(gym.inference.unscripted).toEqual([]);
+        await gym.restart();
+        const reloaded = await gym.client.getMessages(recipientAgentId);
+        expect(reloaded.runs).toEqual(recipientHistory.runs);
     }, 45_000);
 });
 
