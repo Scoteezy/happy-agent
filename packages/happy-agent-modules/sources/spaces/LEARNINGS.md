@@ -155,6 +155,23 @@ sidebar out of sight. A client never sends it for a gesture. The daemon's own fa
 five minutes: two still landed while the person was reading between clicks. Every row a batch
 folds out of view is named in its note, because that is the change the person can no longer see.
 
+## People who never opted in are untouched
+
+Spaces is an experiment, and a person who has not turned it on must see the daemon behave exactly
+as before. Opting in is the first sidebar read or write, or the first stem cell: only those create
+the person's owner state, Prioritizing, and the sidebar document. Everything else (lifecycle
+inserts, new-session and new-work briefs, the calm check, notes in Happy's chat) works from that
+state and so does nothing without it. The `request_space_placement` tool is offered only to
+conversations whose person has a live Prioritizing, and asking for a placement never creates an
+owner.
+
+## The sidebar format is marked by a migration
+
+`006-sidebar-document-format` changes no data a reader depends on (it drops the old visibility
+reports), but its key is what an older build that knows Spaces sees as unknown, so it refuses the
+database cleanly instead of failing on the flat document. Any later change older builds cannot
+read needs its own marker migration.
+
 ## Stored state survives a rollback
 
 A desktop swapped a database written by a newer build to release 0.4.104, whose strict read of

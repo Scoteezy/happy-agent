@@ -273,7 +273,17 @@ export class SpacesModule implements AgentModule {
         tools: async (ctx, scope): Promise<readonly AnyAgentTool[]> => {
             // People ask for sidebar changes in the conversations they have, not in helpers.
             if ((await this.#requireAgents().parentOf(ctx, scope.agent.id)) !== null) return [];
-            return [requestSpacePlacementTool(this, scope.agent.id)];
+            // Only people who opted into the sidebar have a Prioritizing to ask; nobody else's
+            // conversations change.
+            const owners = new Set(
+                (await querySpacesByAgent(ctx, scope.agent.id)).map((row) => row.ownerUserId),
+            );
+            if (!this.#config.configuration.values.feature.team.enabled)
+                owners.add(SPACE_STANDALONE_OWNER);
+            for (const owner of owners)
+                if ((await this.#livePrioritizing(ctx, owner)) !== undefined)
+                    return [requestSpacePlacementTool(this, scope.agent.id)];
+            return [];
         },
         // Prioritizing is one job with one tool array and nothing else.
         overrideTools: async (ctx, scope, input) => {
@@ -1618,7 +1628,11 @@ export class SpacesModule implements AgentModule {
     ): Promise<string> {
         return await ctx.inTx(async (txCtx) => {
             let rows = await querySpacesByAgent(txCtx, input.agentId);
-            if (rows.length === 0 && !this.#config.configuration.values.feature.team.enabled) {
+            if (
+                rows.length === 0 &&
+                !this.#config.configuration.values.feature.team.enabled &&
+                (await this.#livePrioritizing(txCtx, SPACE_STANDALONE_OWNER)) !== undefined
+            ) {
                 await this.#ensureOwner(txCtx, SPACE_STANDALONE_OWNER);
                 rows = await querySpacesByAgent(txCtx, input.agentId);
             }

@@ -159,4 +159,18 @@ export const spaceMigrations = [
             );
         },
     ],
+    [
+        // The flat sidebar document and the owner state that goes with it cannot be read by
+        // builds before it. This migration marks the change, so an older build that knows Spaces
+        // refuses the database cleanly instead of failing on it. Folds now live in the document,
+        // so the clients' visibility reports are dropped.
+        "006-sidebar-document-format",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            await agentDatabaseRun(
+                database,
+                sql`UPDATE ${sql.raw(SPACE_OWNERS_TABLE)}
+                    SET state_json = json_remove(state_json, '$.sidebarObservations')`,
+            );
+        },
+    ],
 ] as const;
