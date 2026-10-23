@@ -116,6 +116,69 @@ function restoredAgentTurns(request: GymInferenceRequest): GymTurn {
 }
 
 describe("a mutation echo owned by an agent's run", () => {
+    it("survives a restart in the middle of the run", async () => {
+        const gym = await createAgentGym({
+            files: { ".agents/skills/review/SKILL.md": SKILL },
+            inference: (request: GymInferenceRequest): GymTurn => {
+                if (request.sessionId.startsWith("naming:")) {
+                    return { content: [{ text: "<title>Restarted review</title>", type: "text" }] };
+                }
+                return JSON.stringify(request.messages).includes("taggedwait")
+                    ? { content: [{ text: "review finished", type: "text" }] }
+                    : {
+                          content: [
+                              {
+                                  arguments: { duration: { seconds: 3 } },
+                                  callId: "taggedwait",
+                                  name: "wait",
+                                  type: "tool_call",
+                              },
+                          ],
+                      };
+            },
+        });
+        running.add(gym);
+        await gym.client.invokeSlashCommand(gym.defaultSessionId, "review", {
+            mode: {
+                effort: gym.selection.effort,
+                modelId: gym.selection.modelId,
+                permissionMode: "full_access",
+                providerId: gym.selection.providerId,
+                serviceTier: null,
+            },
+            mutationId: "restarted-skill",
+        });
+        const started = await gym.waitForEvent(
+            (event) =>
+                event.type === "run.started" && event.payload.mutationId === "restarted-skill",
+            "the tagged run to start",
+        );
+        if (started.type !== "run.started") throw new Error("The tagged run did not start.");
+        const runId = started.payload.run.id;
+        await gym.waitForEvent(
+            (event) =>
+                event.type === "agent.updated" &&
+                event.payload.agentId === gym.defaultSessionId &&
+                event.payload.changes.wait != null,
+            "the run to start waiting",
+        );
+        const before = new Set((await gym.events()).map((event) => event.cursor));
+        await gym.restart();
+        await gym.waitForRun(runId);
+
+        // What the run did after the restart, from its resumed wait to its finish.
+        const resumed = (await gym.events()).filter(
+            (event) => runIdOf(event) === runId && !before.has(event.cursor),
+        );
+        expect(resumed.map((event) => event.type)).toContain("run.finished");
+        expect(
+            resumed.flatMap((event) =>
+                echoOf(event) === "restarted-skill" ? [] : [[event.type, echoOf(event) ?? null]],
+            ),
+        ).toEqual([]);
+        expect(gym.errors).toEqual([]);
+    }, 60_000);
+
     it("never reaches an event that names no agent, during a restored run or after it", async () => {
         const gym = await createAgentGym({
             files: { ".agents/skills/review/SKILL.md": SKILL, "notes.txt": "old line\n" },

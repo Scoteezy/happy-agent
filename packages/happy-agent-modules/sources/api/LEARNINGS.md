@@ -428,6 +428,10 @@ helper keeps its parent's retry and its report keeps it too. A created agent's `
 echoes the mutation recorded in its metadata at creation. Acceptance never consults the sender's
 live run.
 
+The run owners live in memory, so a run left in flight by a stopped process resumed with none and
+every event after the restart echoed nothing. When Agent Base restores an agent whose run is still
+active, the API now reads that run's mutation back from History.
+
 ## A failure retry's run echoes the retry's mutation
 
 Retry and switch accepted `mutationId` but started their run with a hidden notice that carried

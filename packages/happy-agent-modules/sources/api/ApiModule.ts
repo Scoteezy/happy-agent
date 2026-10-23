@@ -842,6 +842,24 @@ export class ApiModule implements AgentModule {
                     MAX_RUN_MUTATIONS,
                 );
             },
+            afterAgentActivatedTransact: async (hookCtx, scope, activation) => {
+                // A run the last process left in flight resumes here, still answering the
+                // mutation recorded on the message that started it.
+                if (!activation.restored) return;
+                const agentId = scope.agent.id;
+                const runId = this.#events.activeRunId(agentId);
+                if (runId === undefined || this.#runMutations.has(agentId)) return;
+                const mutationId = await this.#history.runMutationId(hookCtx, agentId);
+                afterCommit(hookCtx, () => {
+                    if (this.#runMutations.has(agentId)) return;
+                    boundedSet(
+                        this.#runMutations,
+                        agentId,
+                        { runId, mutationId },
+                        MAX_RUN_MUTATIONS,
+                    );
+                });
+            },
             metadataChangedTransact: async (hookCtx, scope, change) => {
                 const archivedAt = change.update["archivedAt"];
                 if (
