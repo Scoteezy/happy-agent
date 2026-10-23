@@ -1,7 +1,7 @@
 import { open, type FileHandle } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { pipeline } from "node:stream/promises";
 
+import { streamToOutgoing } from "../transport/index.js";
 import { ApiError } from "./ApiError.js";
 
 /**
@@ -74,7 +74,7 @@ export async function sendStoredFile(
             : file.mimeType,
         "x-content-type-options": "nosniff",
     });
-    await pipeline(body, response);
+    await streamToOutgoing(body, response);
 }
 
 function etagMatches(header: string | undefined, etag: string): boolean {

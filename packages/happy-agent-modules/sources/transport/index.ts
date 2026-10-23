@@ -2,3 +2,4 @@ export type { BinaryWebSocket, BinaryWebSocketHandlers } from "./BinaryWebSocket
 export { createNodeBinaryWebSocket } from "./createNodeBinaryWebSocket.js";
 export { WebSocketDuplex, type WebSocketDuplexMetrics } from "./WebSocketDuplex.js";
 export { createSseWriter, type SseWriter, type SseWriterOptions } from "./sseWriter.js";
+export { streamToOutgoing } from "./streamToOutgoing.js";

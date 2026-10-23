@@ -14,3 +14,11 @@ that follows a manual compaction is large enough to hit this reliably under load
 The writer now also counts each frame's write callback, and resumes once every frame it handed to
 Node has been flushed, whichever of the two signals comes first. The byte bounds and whole-frame
 ordering are unchanged.
+
+Stored files and workspace proxy bodies had the same dependency through `pipeline()` straight
+into the message. `streamToOutgoing` keeps `pipeline()`, which owns the whole transfer's
+lifetime, and pipes into a sink that finishes each chunk on the message's own write callback. The
+sink turns the message's `error` or premature `close` into its own failure, so a client that
+leaves while the source is idle, a source that fails during backpressure, and a write that fails
+after it was accepted all end the transfer, destroy the other side, and reject. A first version
+rebuilt that lifecycle by hand and missed each of those cases; do not hand-roll it again.

@@ -10,7 +10,9 @@ import {
     type ServerResponse,
 } from "node:http";
 import type { Socket } from "node:net";
-import { pipeline, type Duplex } from "node:stream";
+import type { Duplex } from "node:stream";
+
+import { streamToOutgoing } from "../transport/index.js";
 
 /** How long opening one connection may take. Nothing bounds a connection once it is open. */
 const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
@@ -362,9 +364,10 @@ export class WorkspaceProxy {
                             upstreamResponse.statusMessage,
                             endToEndHeaders(upstreamResponse.headers),
                         );
-                        pipeline(upstreamResponse, response, () => {
+                        const settled = (): void => {
                             outgoing.destroy();
-                        });
+                        };
+                        void streamToOutgoing(upstreamResponse, response).then(settled, settled);
                     },
                 );
                 upstream = outgoing;
@@ -375,7 +378,7 @@ export class WorkspaceProxy {
                         response.destroy();
                     }
                 });
-                pipeline(request, outgoing, () => undefined);
+                void streamToOutgoing(request, outgoing).catch(() => undefined);
             },
             (error: unknown) => {
                 if (abandoned) return;
