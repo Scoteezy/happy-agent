@@ -57,6 +57,7 @@ import {
     type HappyReadFileAtRevisionResponse,
 } from "./HappyWorkspaceRead.js";
 import { happyComposerDraftSnapshotSchema } from "./HappyComposerDraft.js";
+import { createHappyAccountFingerprint } from "./credentials/createHappyAccountFingerprint.js";
 
 const HTTP_TIMEOUT_MS = 15_000;
 const RETRY_DELAY_MS = 2_000;
@@ -69,6 +70,16 @@ const OUTBOX_BATCH = 50;
 const INCOMING_PAGE = 100;
 /** A session kicked continuously starts a full pass at most this often. */
 const MIN_SYNC_PASS_INTERVAL_MS = 1_000;
+const MAX_MISSING_SESSION_ERROR_BYTES = 4_096;
+
+const missingSessionSchema = Type.Object({ error: Type.Literal("Session not found") });
+
+/** Only the session messages endpoint can establish that its binding has disappeared. */
+class HappyRemoteSessionMissing extends Error {
+    constructor(readonly remoteSessionId: string) {
+        super("Happy no longer has this conversation.");
+    }
+}
 
 /** The socket surface this client needs, which is the part of Socket.IO it uses. */
 export interface HappySocket {
@@ -266,8 +277,10 @@ export interface HappySessionChange {
 }
 
 export class HappySessionClient {
+    readonly #accountFingerprint: string;
     readonly #options: HappySessionClientOptions;
     readonly #closeController = new AbortController();
+    #remoteController = new AbortController();
     readonly #completedQuestions = new Map<string, HappyResolvedCommunication>();
     readonly #questionFirstSeen = new Map<string, number>();
     readonly #pendingAttachments = new Map<string, Promise<HappyInboundImage | undefined>>();
@@ -283,6 +296,7 @@ export class HappySessionClient {
     #closed = false;
     /** An unreadable remote session is replaced at most once per client lifetime. */
     #replacedRemoteSession = false;
+    #sessionRecovery: "available" | "reattaching" | "recovered" | "paused" = "available";
     // A new session is created with no agent state, so nothing is owed until a question arrives.
     #lastAgentState: string | undefined = "null";
     /**
@@ -322,6 +336,10 @@ export class HappySessionClient {
 
     constructor(options: HappySessionClientOptions) {
         this.#options = options;
+        this.#accountFingerprint = createHappyAccountFingerprint(
+            options.configuration.credentials,
+            options.configuration.serverUrl,
+        );
     }
 
     /** Begins keeping this session in step with Happy. */
@@ -333,7 +351,7 @@ export class HappySessionClient {
 
     /** Says there is something new to send, without waiting for it to be sent. */
     kick(): void {
-        if (this.#closed) return;
+        if (this.#closed || this.#sessionRecovery === "paused") return;
         if (this.#syncPromise !== undefined) {
             this.#needsAnotherSync = true;
             return;
@@ -546,6 +564,25 @@ export class HappySessionClient {
                 await this.#syncAgentState(state, snapshot);
                 this.#kickAvatar(snapshot);
             } catch (error) {
+                if (error instanceof HappyRemoteSessionMissing) {
+                    if (this.#archiving || this.#closed) return;
+                    if (this.#sessionRecovery !== "available") {
+                        this.#pauseMissingSession();
+                        return;
+                    }
+                    // Local active conversations own their publication. A remote-only deletion
+                    // is repaired once, using the same tag, key and complete durable queue.
+                    // Keep the old durable binding until POST succeeds so changing its id and
+                    // resetting the incoming cursor commit together.
+                    this.#sessionRecovery = "reattaching";
+                    this.#options.context.log.warn(
+                        "Happy is reattaching a missing conversation; queued messages are retained.",
+                        {},
+                    );
+                    this.#resetRemoteHydration();
+                    this.#needsAnotherSync = true;
+                    continue;
+                }
                 this.#options.context.log.debug("Happy synchronization will retry.", {}, error);
                 this.#scheduleRetry();
                 return;
@@ -553,6 +590,37 @@ export class HappySessionClient {
                 this.#finishFirstPass();
             }
         } while (this.#needsAnotherSync && !this.#closed);
+    }
+
+    #pauseMissingSession(): void {
+        this.#sessionRecovery = "paused";
+        this.#clearRetry();
+        this.#resetRemoteHydration();
+        this.#options.context.log.warn(
+            "Happy conversation synchronization is paused because the reattached conversation is missing or has an unexpected key. Queued messages are retained until its mobile connection is recreated.",
+            {},
+        );
+    }
+
+    #resetRemoteHydration(): void {
+        this.#remoteController.abort();
+        this.#remoteController = new AbortController();
+        this.#socket?.disconnect();
+        this.#socket = undefined;
+        for (const abandon of this.#unanswered) abandon();
+        this.#metadataVersion = undefined;
+        this.#lastMetadata = undefined;
+        this.#metadataBase = {};
+        this.#pendingMetadataUpdate = undefined;
+        this.#agentStateVersion = undefined;
+        this.#lastAgentState = undefined;
+        this.#projectIdSent = undefined;
+        this.#pendingAttachments.clear();
+        this.#sentSessionEnd = false;
+        this.#avatarClient = undefined;
+        this.#avatarRequestedVersion = -1;
+        this.#avatarCompletedVersion = -1;
+        this.#clearAvatarRetry();
     }
 
     /**
@@ -667,6 +735,7 @@ export class HappySessionClient {
         const ctx = this.#options.context;
         const current = await this.#options.sync.readSession(ctx, this.#options.agentId);
         if (current === undefined) return undefined;
+        if (current.credentialFingerprint !== this.#accountFingerprint) return undefined;
         const projectId =
             this.#options.projectId === undefined ? undefined : await this.#options.projectId();
         if (
@@ -702,11 +771,17 @@ export class HappySessionClient {
             },
         );
         const body: unknown = await response.json();
+        if (this.#closed || (this.#archiving && this.#sessionRecovery === "reattaching"))
+            return undefined;
         if (!Value.Check(remoteSessionSchema, body)) {
             throw new Error("Happy returned a session Happy Agent could not read.");
         }
         const remote = body.session;
         if (!this.#readableRemoteSession(sent, remote)) {
+            if (this.#sessionRecovery === "reattaching") {
+                this.#pauseMissingSession();
+                return undefined;
+            }
             if (this.#archiving) {
                 // Retiring it needs no replacement: the phone could never read it anyway.
                 await this.#deleteRemoteSession(remote.id);
@@ -726,20 +801,39 @@ export class HappySessionClient {
             await this.#replaceRemoteSession(remote.id);
             return await this.#ensureRemoteSession();
         }
-        if (
-            sent.dataEncryptionKeyBase64 === undefined &&
-            typeof remote.dataEncryptionKey === "string" &&
-            current.encryptionVariant === "dataKey"
-        ) {
-            // Bound before keys were recorded and judged this daemon's, so later checks are exact.
-            await ctx.inTx(async (txCtx) => {
+        const bound = await ctx.inTx(async (txCtx) => {
+            if (this.#closed || (this.#archiving && this.#sessionRecovery === "reattaching"))
+                return false;
+            const applied = await this.#options.sync.setRemoteSession(
+                txCtx,
+                this.#options.agentId,
+                remote.id,
+                Date.now(),
+                current,
+            );
+            if (!applied) return false;
+            if (
+                sent.dataEncryptionKeyBase64 === undefined &&
+                typeof remote.dataEncryptionKey === "string" &&
+                current.encryptionVariant === "dataKey"
+            ) {
+                // Bound before keys were recorded and judged this daemon's, so later checks are exact.
                 await this.#options.sync.setDataEncryptionKey(
                     txCtx,
                     this.#options.agentId,
                     remote.dataEncryptionKey as string,
                     Date.now(),
                 );
-            });
+            }
+            return true;
+        });
+        if (!bound || this.#closed) return undefined;
+        if (this.#sessionRecovery === "reattaching") {
+            this.#sessionRecovery = "recovered";
+            this.#options.context.log.warn(
+                "Happy reattached the conversation and will deliver its queued messages.",
+                {},
+            );
         }
         // Old relays omit avatar entirely. Missing/invalid optional artwork must not break chat.
         if (remote.avatar === null || Value.Check(happySessionAvatarSchema, remote.avatar)) {
@@ -748,7 +842,10 @@ export class HappySessionClient {
                 state: { ...current, remoteSessionId: remote.id },
                 remote: remote.avatar,
                 ...(this.#options.fetch === undefined ? {} : { fetch: this.#options.fetch }),
-                signal: this.#closeController.signal,
+                signal: AbortSignal.any([
+                    this.#closeController.signal,
+                    this.#remoteController.signal,
+                ]),
                 version: this.#options.version,
             });
             this.#avatarCompletedVersion = -1;
@@ -771,14 +868,6 @@ export class HappySessionClient {
             this.#lastMetadata = metadata;
             this.#metadataBase = { ...metadata };
         }
-        await ctx.inTx(async (txCtx) => {
-            await this.#options.sync.setRemoteSession(
-                txCtx,
-                this.#options.agentId,
-                remote.id,
-                Date.now(),
-            );
-        });
         return await this.#options.sync.readSession(ctx, this.#options.agentId);
     }
 
@@ -885,6 +974,7 @@ export class HappySessionClient {
         if (this.#socket !== undefined) return;
         const socket = this.#options.socket(remoteSessionId);
         socket.on("connect", () => {
+            if (this.#socket !== socket || this.#closed) return;
             this.#onArchiveConnected?.();
             // Happy does not replay missed updates, including edits between HTTP hydration and
             // the first connection. A forced CAS retrieves them through a version conflict.
@@ -898,9 +988,11 @@ export class HappySessionClient {
         // The pass waiting on one of them fails now rather than at its timeout, and the next
         // `connect` starts it again.
         socket.on("disconnect", () => {
-            for (const abandon of [...this.#unanswered]) abandon();
+            if (this.#socket !== socket) return;
+            for (const abandon of this.#unanswered) abandon();
         });
         socket.on("update", (value: unknown) => {
+            if (this.#socket !== socket || this.#closed) return;
             if (
                 Value.Check(sessionMetadataUpdateSchema, value) &&
                 value.body.id === remoteSessionId &&
@@ -914,6 +1006,7 @@ export class HappySessionClient {
             this.kick();
         });
         socket.on("rpc-request", (request: unknown, callback: (response: string) => void) => {
+            if (this.#socket !== socket || this.#closed) return;
             void this.#handleRpcRequest(remoteSessionId, request, callback);
         });
         this.#socket = socket;
@@ -941,6 +1034,7 @@ export class HappySessionClient {
                     }),
                     method: "POST",
                 },
+                remoteSessionId,
             );
             await this.#options.context.inTx(async (txCtx) => {
                 await this.#options.sync.acknowledge(
@@ -963,7 +1057,7 @@ export class HappySessionClient {
             );
             url.searchParams.set("after_seq", String(after));
             url.searchParams.set("limit", String(INCOMING_PAGE));
-            const response = await this.#request(url.toString());
+            const response = await this.#request(url.toString(), {}, remoteSessionId);
             const body: unknown = await response.json();
             if (!Value.Check(messagePageSchema, body)) {
                 throw new Error("Happy returned a message page Happy Agent could not read.");
@@ -1520,7 +1614,11 @@ export class HappySessionClient {
         });
     }
 
-    async #request(url: string, init: RequestInit = {}): Promise<Response> {
+    async #request(
+        url: string,
+        init: RequestInit = {},
+        messageSessionId?: string,
+    ): Promise<Response> {
         const response = await (this.#options.fetch ?? fetch)(url, {
             ...init,
             headers: {
@@ -1531,7 +1629,16 @@ export class HappySessionClient {
             },
             signal: this.#signal(),
         });
-        if (!response.ok) throw new Error(`Happy answered with HTTP ${String(response.status)}.`);
+        if (!response.ok) {
+            // The explicit argument is supplied only by the GET/POST session-message routes.
+            // A missing attachment, archive route, proxy, or an untyped 404 is not a lost binding.
+            if (response.status === 404 && messageSessionId !== undefined) {
+                const body = await readMissingSessionError(response);
+                if (Value.Check(missingSessionSchema, body))
+                    throw new HappyRemoteSessionMissing(messageSessionId);
+            }
+            throw new Error(`Happy answered with HTTP ${String(response.status)}.`);
+        }
         return response;
     }
 
@@ -1539,6 +1646,7 @@ export class HappySessionClient {
         return AbortSignal.any([
             AbortSignal.timeout(HTTP_TIMEOUT_MS),
             this.#closeController.signal,
+            this.#remoteController.signal,
         ]);
     }
 
@@ -1561,7 +1669,13 @@ export class HappySessionClient {
     }
 
     #scheduleRetry(): void {
-        if (this.#closed || this.#archiving || this.#retryTimer !== undefined) return;
+        if (
+            this.#closed ||
+            this.#archiving ||
+            this.#sessionRecovery === "paused" ||
+            this.#retryTimer !== undefined
+        )
+            return;
         this.#retryTimer = setTimeout(() => {
             this.#retryTimer = undefined;
             this.kick();
@@ -1577,6 +1691,29 @@ export class HappySessionClient {
 
 function decodeKey(value: string): Uint8Array {
     return new Uint8Array(Buffer.from(value, "base64"));
+}
+
+/** A proxy's arbitrarily large error page must not become an unbounded JSON read. */
+async function readMissingSessionError(response: Response): Promise<unknown> {
+    const reader = response.body?.getReader();
+    if (reader === undefined) return undefined;
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            bytes += next.value.byteLength;
+            if (bytes > MAX_MISSING_SESSION_ERROR_BYTES) return undefined;
+            chunks.push(next.value);
+        }
+        return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    } catch {
+        return undefined;
+    } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+    }
 }
 
 /**

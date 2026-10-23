@@ -21,6 +21,7 @@ import type {
 } from "../../sources/happy/index.js";
 import type { UserInputRequest } from "../../sources/userInput/index.js";
 import { moduleDatabase, type ModuleDatabase } from "../support/moduleDatabase.js";
+import { createHappyAccountFingerprint } from "../../sources/happy/credentials/createHappyAccountFingerprint.js";
 
 const AGENT_ID = "agent-1";
 const SESSION_ID = "session-1";
@@ -106,6 +107,7 @@ class FakeSocket implements HappySocket {
     acknowledgements: unknown[] = [];
 
     connect(): void {
+        this.connected = true;
         this.#listeners.get("connect")?.();
     }
 
@@ -346,7 +348,10 @@ beforeEach(async () => {
         store.context,
         {
             agentId: AGENT_ID,
-            credentialFingerprint: "fingerprint",
+            credentialFingerprint: createHappyAccountFingerprint(
+                CONFIGURATION.credentials,
+                CONFIGURATION.serverUrl,
+            ),
             encryptionKeyBase64: KEY,
             encryptionVariant: "legacy",
             sessionId: SESSION_ID,
@@ -1949,6 +1954,426 @@ describe("publishing account quota without churn", () => {
     });
 });
 
+describe("recovering a missing relay session", () => {
+    it("receives a low-sequence phone message after rebinding a session with a high incoming cursor", async () => {
+        const server = fakeServer();
+        const original = server.fetch;
+        const { calls, operations } = fakeOperations();
+        let missing = false;
+        const cursors: string[] = [];
+        server.fetch = (async (input, init) => {
+            const url = new URL(String(input));
+            if (missing && url.pathname === "/v1/sessions")
+                return Response.json({ session: { id: "new-session", metadataVersion: 0 } });
+            if (missing && url.pathname === "/v3/sessions/remote-1/messages")
+                return Response.json({ error: "Session not found" }, { status: 404 });
+            if (url.pathname === "/v3/sessions/new-session/messages") {
+                cursors.push(url.searchParams.get("after_seq")!);
+                return Response.json({
+                    messages:
+                        cursors.length === 1
+                            ? [
+                                  remoteMessage(1, "new-input", {
+                                      role: "user",
+                                      content: { type: "text", text: "New phone message" },
+                                  }),
+                              ]
+                            : [],
+                });
+            }
+            return await original(input, init);
+        }) as typeof fetch;
+        const session = client({ operations, server, socket: new FakeSocket() });
+        try {
+            await session.settle();
+            await sync.advanceRemoteSequence(store.context, AGENT_ID, 999, 2_000);
+            missing = true;
+            await session.settle();
+            expect(cursors[0]).toBe("0");
+            expect(calls.filter((call) => call.kind === "submit")).toEqual([
+                expect.objectContaining({
+                    detail: expect.objectContaining({
+                        text: "New phone message",
+                        remoteMessageId: "happy:new-input",
+                    }),
+                }),
+            ]);
+            expect((await sync.readSession(store.context, AGENT_ID))?.lastRemoteSeq).toBe(1);
+        } finally {
+            await session.close();
+        }
+    });
+
+    it.each([
+        { status: 404, body: { error: "Route not found" } },
+        { status: 404, body: { message: "Session not found" } },
+        { status: 401, body: { error: "Session not found" } },
+        { status: 404, body: "Session not found" },
+        { status: 404, body: "<html>A proxy error</html>" },
+        { status: 404, body: { error: "Session not found", padding: "x".repeat(4096) } },
+    ])(
+        "does not treat a different message failure as a stale binding (case %#)",
+        async ({ status, body }) => {
+            const server = fakeServer();
+            const original = server.fetch;
+            let creates = 0;
+            server.fetch = (async (input, init) => {
+                if (String(input).endsWith("/v1/sessions")) creates++;
+                if (String(input).includes("/messages"))
+                    return typeof body === "string"
+                        ? new Response(body, { status })
+                        : Response.json(body, { status });
+                return await original(input, init);
+            }) as typeof fetch;
+            const session = client({
+                operations: fakeOperations().operations,
+                server,
+                socket: new FakeSocket(),
+            });
+            try {
+                await session.settle();
+                await session.settle();
+                expect(creates).toBe(1);
+                expect(await sync.readSession(store.context, AGENT_ID)).toMatchObject({
+                    remoteSessionId: "remote-1",
+                });
+            } finally {
+                await session.close();
+            }
+        },
+    );
+
+    it("does not reattach when the session creation route itself returns the missing-session error", async () => {
+        const server = fakeServer();
+        server.fetch = vi.fn(async () =>
+            Response.json({ error: "Session not found" }, { status: 404 }),
+        ) as unknown as typeof fetch;
+        const session = client({
+            operations: fakeOperations().operations,
+            server,
+            socket: new FakeSocket(),
+        });
+        try {
+            await session.settle();
+            expect(server.fetch).toHaveBeenCalledTimes(1);
+            expect(
+                (await sync.readSession(store.context, AGENT_ID))?.remoteSessionId,
+            ).toBeUndefined();
+        } finally {
+            await session.close();
+        }
+    });
+
+    it("repairs one remote-only deletion on incoming reads, preserves a same-id cursor, and pauses on a second deletion", async () => {
+        const server = fakeServer();
+        const original = server.fetch;
+        let missing = false;
+        let creates = 0;
+        let requests = 0;
+        const reads: number[] = [];
+        server.fetch = (async (input, init) => {
+            requests++;
+            const url = new URL(String(input));
+            if (url.pathname === "/v1/sessions") {
+                creates++;
+                missing = false;
+            }
+            if (url.pathname.endsWith("/messages")) {
+                if (init?.method !== "POST") reads.push(Number(url.searchParams.get("after_seq")));
+                if (missing) return Response.json({ error: "Session not found" }, { status: 404 });
+            }
+            return await original(input, init);
+        }) as typeof fetch;
+        const socket = new FakeSocket();
+        const session = client({
+            operations: fakeOperations().operations,
+            server,
+            socket,
+        });
+        vi.useFakeTimers();
+        try {
+            await session.settle();
+            await sync.advanceRemoteSequence(store.context, AGENT_ID, 99, 2_000);
+            missing = true;
+            await session.settle();
+            expect(creates).toBe(2);
+            expect(reads.slice(-2)).toEqual([99, 99]);
+            expect((await sync.readSession(store.context, AGENT_ID))?.lastRemoteSeq).toBe(99);
+            missing = true;
+            await sync.enqueue(
+                store.context,
+                AGENT_ID,
+                [{ localId: "kept", payload: { text: "Keep me" } }],
+                3_000,
+            );
+            await session.settle();
+            const attempts = reads.length;
+            const requestCount = requests;
+            socket.update();
+            socket.reconnect();
+            await vi.advanceTimersByTimeAsync(60_000);
+            await session.settle();
+            expect(requests).toBe(requestCount);
+            expect(creates).toBe(2);
+            expect(reads).toHaveLength(attempts);
+            expect(await sync.pending(store.context, AGENT_ID, 10)).toHaveLength(1);
+        } finally {
+            await session.close();
+            vi.useRealTimers();
+        }
+    });
+
+    it("keeps retrying transient reattachment failures without spending the successful-rebind budget", async () => {
+        const server = fakeServer();
+        const original = server.fetch;
+        let missing = false;
+        let attempts = 0;
+        server.fetch = (async (input, init) => {
+            const url = new URL(String(input));
+            if (missing && url.pathname === "/v1/sessions") {
+                attempts++;
+                if (attempts === 1) throw new Error("Network disconnected");
+                if (attempts === 2) throw new DOMException("Timed out", "TimeoutError");
+                if (attempts <= 4) return new Response(null, { status: 503 });
+                missing = false;
+            }
+            if (missing && url.pathname.endsWith("/messages"))
+                return Response.json({ error: "Session not found" }, { status: 404 });
+            return await original(input, init);
+        }) as typeof fetch;
+        const session = client({
+            operations: fakeOperations().operations,
+            server,
+            socket: new FakeSocket(),
+        });
+        vi.useFakeTimers();
+        try {
+            await session.settle();
+            await sync.enqueue(
+                store.context,
+                AGENT_ID,
+                [{ localId: "kept", payload: { text: "Keep me" } }],
+                2_000,
+            );
+            const before = await sync.readSession(store.context, AGENT_ID);
+            missing = true;
+            await session.settle();
+            expect(attempts).toBe(1);
+            for (const attempt of [2, 3, 4, 5]) {
+                await vi.advanceTimersByTimeAsync(1_999);
+                expect(attempts).toBe(attempt - 1);
+                expect(await sync.readSession(store.context, AGENT_ID)).toEqual(before);
+                expect(await sync.pending(store.context, AGENT_ID, 10)).toHaveLength(1);
+                await vi.advanceTimersByTimeAsync(1);
+                expect(attempts).toBe(attempt);
+            }
+            expect(await sync.pending(store.context, AGENT_ID, 10)).toEqual([]);
+        } finally {
+            await session.close();
+            vi.useRealTimers();
+        }
+    });
+
+    it.each([false, true])(
+        "does not recreate a missing session while archiving (metadata only=%s)",
+        async (metadataOnly) => {
+            const server = fakeServer();
+            const original = server.fetch;
+            let missing = false;
+            let creates = 0;
+            server.fetch = (async (input, init) => {
+                if (String(input).endsWith("/v1/sessions")) creates++;
+                if (missing) return Response.json({ error: "Session not found" }, { status: 404 });
+                return await original(input, init);
+            }) as typeof fetch;
+            const session = client({
+                operations: fakeOperations().operations,
+                server,
+                socket: new FakeSocket(),
+            });
+            await session.settle();
+            await sync.enqueue(
+                store.context,
+                AGENT_ID,
+                [{ localId: "kept", payload: { text: "Keep me" } }],
+                2_000,
+            );
+            missing = true;
+            await session.archive({ metadataOnly });
+            expect(creates).toBe(1);
+            expect(await sync.pending(store.context, AGENT_ID, 10)).toHaveLength(1);
+        },
+    );
+
+    it.each(["close", "clear"])(
+        "does not apply a late reattachment after a concurrent %s",
+        async (change) => {
+            const server = fakeServer();
+            const original = server.fetch;
+            let missing = false;
+            let entered!: () => void;
+            const creating = new Promise<void>((resolve) => {
+                entered = resolve;
+            });
+            let release!: (response: Response) => void;
+            server.fetch = (async (input, init) => {
+                const url = new URL(String(input));
+                if (missing && url.pathname === "/v1/sessions") {
+                    entered();
+                    return await new Promise<Response>((resolve) => {
+                        release = resolve;
+                    });
+                }
+                if (missing && url.pathname.endsWith("/messages"))
+                    return Response.json({ error: "Session not found" }, { status: 404 });
+                return await original(input, init);
+            }) as typeof fetch;
+            const session = client({
+                operations: fakeOperations().operations,
+                server,
+                socket: new FakeSocket(),
+            });
+            try {
+                await session.settle();
+                await sync.enqueue(
+                    store.context,
+                    AGENT_ID,
+                    [{ localId: "kept", payload: { text: "Keep me" } }],
+                    2_000,
+                );
+                const before = await sync.readSession(store.context, AGENT_ID);
+                missing = true;
+                const pending = session.settle();
+                await creating;
+                const closing = change === "close" ? session.unsubscribe() : undefined;
+                if (change === "clear")
+                    await sync.clearRemoteSession(store.context, AGENT_ID, 3_000);
+                release(Response.json({ session: { id: "late-binding", metadataVersion: 0 } }));
+                await Promise.all([pending, closing]);
+                expect((await sync.readSession(store.context, AGENT_ID))?.remoteSessionId).toBe(
+                    change === "close" ? before!.remoteSessionId : undefined,
+                );
+                expect(await sync.pending(store.context, AGENT_ID, 10)).toHaveLength(1);
+            } finally {
+                await session.close();
+            }
+        },
+    );
+
+    it("reattaches a stale binding and delivers the entire ordered outbox with stable retry identities", async () => {
+        const server = fakeServer();
+        const { calls, operations } = fakeOperations();
+        const sockets = new Map<string, FakeSocket>();
+        const delivered = new Map<string, unknown>();
+        const attempts: string[][] = [];
+        const attachments: Record<string, unknown>[] = [];
+        let missing = false;
+        let loseAnswer = true;
+        const session = new HappySessionClient({
+            agentId: AGENT_ID,
+            configuration: CONFIGURATION,
+            context: store.context,
+            fetch: (async (input, init = {}) => {
+                const url = String(input);
+                if (url.endsWith("/v1/sessions")) {
+                    attachments.push(JSON.parse(String(init.body)));
+                    return Response.json({
+                        session: {
+                            id: missing ? "remote-rebound" : "remote-1",
+                            metadata: encode({ custom: "remote metadata" }),
+                            metadataVersion: missing ? 17 : 4,
+                        },
+                    });
+                }
+                if (missing && new URL(url).pathname === "/v3/sessions/remote-1/messages") {
+                    return Response.json({ error: "Session not found" }, { status: 404 });
+                }
+                if (url.includes("/messages") && init.method === "POST") {
+                    const body = JSON.parse(String(init.body)) as {
+                        messages: { content: string; localId: string }[];
+                    };
+                    attempts.push(body.messages.map((message) => message.localId));
+                    for (const message of body.messages) {
+                        if (!delivered.has(message.localId))
+                            delivered.set(message.localId, decode(message.content));
+                    }
+                    if (loseAnswer) {
+                        loseAnswer = false;
+                        throw new Error("The relay accepted this batch but its answer was lost.");
+                    }
+                    return Response.json({ ok: true });
+                }
+                return await server.fetch(input, init);
+            }) as typeof fetch,
+            operations,
+            sessionId: SESSION_ID,
+            socket: (id) => {
+                const socket = new FakeSocket();
+                sockets.set(id, socket);
+                return socket;
+            },
+            sync,
+            version: "1.2.3",
+        });
+        try {
+            await session.settle();
+            await sync.advanceRemoteSequence(store.context, AGENT_ID, 999, 2_000);
+            const messages = Array.from({ length: 123 }, (_, index) => ({
+                localId: `queued-${index}`,
+                payload: { index },
+            }));
+            const eventId = "01900000-0000-7000-8000-000000000001";
+            await sync.backfillHistory(store.context, AGENT_ID, [], undefined, 2_000);
+            await sync.projectEvent(store.context, {
+                agentId: AGENT_ID,
+                eventId,
+                messages,
+                now: 3_000,
+            });
+            const before = await sync.readSession(store.context, AGENT_ID);
+            missing = true;
+            await session.settle();
+            expect(await sync.pending(store.context, AGENT_ID, 200)).toHaveLength(123);
+            await session.settle();
+            expect([...delivered]).toEqual(
+                messages.map((message) => [message.localId, message.payload]),
+            );
+            expect(attempts.map((batch) => batch.length)).toEqual([50, 50, 50, 23]);
+            expect(attempts[0]).toEqual(attempts[1]);
+            expect(await sync.pending(store.context, AGENT_ID, 200)).toEqual([]);
+            expect(await sync.readSession(store.context, AGENT_ID)).toMatchObject({
+                ...before,
+                lastRemoteSeq: 0,
+                remoteSessionId: "remote-rebound",
+                updatedAt: expect.any(Number),
+            });
+            expect(attachments).toHaveLength(2);
+            expect(attachments[1]).toMatchObject({
+                tag: attachments[0]!.tag,
+                dataEncryptionKey: attachments[0]!.dataEncryptionKey,
+                machineId: "machine-1",
+            });
+            expect(sockets.get("remote-1")!.connected).toBe(false);
+            expect(
+                sockets.get("remote-rebound")!.emittedValues("update-metadata")[0],
+            ).toMatchObject({ expectedVersion: 17 });
+            expect(calls.some((call) => call.kind === "replaceRemoteSession")).toBe(false);
+            expect(
+                server.requests.filter(
+                    (request) =>
+                        request.method === "GET" && request.url.includes("remote-rebound/messages"),
+                ),
+            ).toEqual([
+                expect.objectContaining({
+                    url: `${SERVER}/v3/sessions/remote-rebound/messages?after_seq=0&limit=100`,
+                }),
+            ]);
+        } finally {
+            await session.close();
+        }
+    });
+});
+
 describe("a session Happy holds under another data key", () => {
     const DATA_KEY_AGENT = "agent-data-key";
     const DATA_KEY_SESSION = "session-data-key";
@@ -2022,7 +2447,10 @@ describe("a session Happy holds under another data key", () => {
             store.context,
             {
                 agentId: DATA_KEY_AGENT,
-                credentialFingerprint: "fingerprint",
+                credentialFingerprint: createHappyAccountFingerprint(
+                    DATA_KEY_CONFIGURATION.credentials,
+                    DATA_KEY_CONFIGURATION.serverUrl,
+                ),
                 encryptionKeyBase64: KEY,
                 encryptionVariant: "dataKey",
                 sessionId: DATA_KEY_SESSION,
@@ -2048,6 +2476,93 @@ describe("a session Happy holds under another data key", () => {
             version: "1.2.3",
         });
     }
+
+    it.each([false, true])(
+        "retains the full queue and original data key when reattaching (foreign key=%s)",
+        async (foreignKey) => {
+            await attach();
+            const { calls, operations } = fakeOperations();
+            let missing = false;
+            const posted: { tag: string; dataEncryptionKey: string; metadata: string }[] = [];
+            const sent: { localId: string; content: string }[] = [];
+            const session = dataKeyClient(
+                {
+                    fetch: (async (input, init = {}) => {
+                        const url = new URL(String(input));
+                        if (url.pathname === "/v1/sessions") {
+                            const body = JSON.parse(String(init.body));
+                            posted.push(body);
+                            return Response.json({
+                                session: {
+                                    id: missing ? "remote-new" : "remote-old",
+                                    metadata: body.metadata,
+                                    dataEncryptionKey:
+                                        missing && foreignKey
+                                            ? FOREIGN_DATA_KEY
+                                            : body.dataEncryptionKey,
+                                    metadataVersion: 1,
+                                },
+                            });
+                        }
+                        if (missing && url.pathname === "/v3/sessions/remote-old/messages")
+                            return Response.json({ error: "Session not found" }, { status: 404 });
+                        if (url.pathname.endsWith("/messages") && init.method === "POST") {
+                            sent.push(...JSON.parse(String(init.body)).messages);
+                            return Response.json({ ok: true });
+                        }
+                        return Response.json({ messages: [], hasMore: false });
+                    }) as typeof fetch,
+                },
+                operations,
+            );
+            try {
+                await session.settle();
+                const messages = Array.from({ length: 73 }, (_, index) => ({
+                    localId: `key-${index}`,
+                    payload: { index },
+                }));
+                await sync.enqueue(store.context, DATA_KEY_AGENT, messages, Date.now());
+                const before = await sync.readSession(store.context, DATA_KEY_AGENT);
+                missing = true;
+                await session.settle();
+                expect(posted).toHaveLength(2);
+                expect(posted[1]).toMatchObject({
+                    tag: posted[0]!.tag,
+                    dataEncryptionKey: posted[0]!.dataEncryptionKey,
+                });
+                const after = await sync.readSession(store.context, DATA_KEY_AGENT);
+                expect(after).toMatchObject({
+                    encryptionKeyBase64: before!.encryptionKeyBase64,
+                    dataEncryptionKeyBase64: before!.dataEncryptionKeyBase64,
+                    tag: before!.tag,
+                });
+                expect(calls.some((call) => call.kind === "replaceRemoteSession")).toBe(false);
+                if (foreignKey) {
+                    await session.settle();
+                    expect(posted).toHaveLength(2);
+                    expect(await sync.pending(store.context, DATA_KEY_AGENT, 100)).toHaveLength(73);
+                    expect(after).toEqual(before);
+                    expect(sent).toEqual([]);
+                } else {
+                    expect(sent.map((message) => message.localId)).toEqual(
+                        messages.map((message) => message.localId),
+                    );
+                    expect(
+                        sent.map((message) =>
+                            decryptHappyPayload(
+                                new Uint8Array(Buffer.from(KEY, "base64")),
+                                "dataKey",
+                                new Uint8Array(Buffer.from(message.content, "base64")),
+                            ),
+                        ),
+                    ).toEqual(messages.map((message) => message.payload));
+                    expect(await sync.pending(store.context, DATA_KEY_AGENT, 100)).toEqual([]);
+                }
+            } finally {
+                await session.close();
+            }
+        },
+    );
 
     it("binds every new session's tag to its key", async () => {
         const row = await attach();

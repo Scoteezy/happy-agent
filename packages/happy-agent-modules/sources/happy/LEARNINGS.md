@@ -138,6 +138,34 @@ layout is left out, as the mapper already leaves out empty text.
     - A session being archived, such as a reaped subtask, is only deleted and forgotten.
       Publishing a replacement just to archive it would put a new session on the phone.
 
+## Missing relay sessions
+
+A cached metadata version used to keep a deleted relay session bound forever: message reads and
+writes returned `404`, but the ordinary retry never revisited creation by tag. Only a message
+endpoint's JSON `404` with `error: "Session not found"`, read within 4 KB, now triggers recovery.
+An active local conversation remains authoritative after a remote-only deletion, matching the
+existing restart and resubscription behavior: reattach through the existing
+owner's creation route with the same tag, wrapped key and full durable outbox. Replace the binding
+and reset its incoming sequence atomically only if the remote ID changes, conditional on the old
+binding still being present. Closing prevents a late creation response from restoring the binding.
+Stable message IDs keep delivery retries deduplicated; history and projection cursors are never
+requeued or discarded. Already acknowledged messages disappeared with the deleted remote session
+and are not replayed; the complete conversation remains in local History.
+
+This differs from an unreadable-key replacement, which discards the old projection. Recovery must
+never call that path, including when creation returns a foreign key. Each client permits one
+successful reattachment. Network, timeout and server failures retry normally without consuming
+that budget. A foreign key or another confirmed missing session pauses that client's synchronization
+with a warning and retains all queued work. Recreating the client (including resubscription or
+daemon restart) starts a new budget; this is not a durable deletion tombstone. Archive and
+membership-retirement paths never repair a confirmed missing message binding. A remote-only
+deletion therefore does not permanently hide an active local conversation; archive it locally or
+unlink the computer to stop publication. Missing attachments, routes, malformed errors and other
+HTTP failures retain their ordinary behavior. A live machine connection alone does not establish
+that a paused conversation's messages are being delivered.
+Ordinary cold full archival retains its existing hydration behavior, which can create by tag
+before any missing-session response; metadata-only retirement never creates by tag.
+
 ## Session state
 
 - Task roots are a distinct mobile catalog, not project sessions or bots. A connection publishes

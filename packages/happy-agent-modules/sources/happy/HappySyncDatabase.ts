@@ -301,19 +301,25 @@ export function createHappySyncDatabase(ownerId = "") {
             }));
         },
 
-        /** Records the session Happy created for this agent. */
+        /** Records a binding and resets its incoming cursor only when the remote identity changes. */
         async setRemoteSession(
             ctx: Context,
             agentId: string,
             remoteSessionId: string,
             now: number,
-        ): Promise<void> {
-            await agentDatabaseRun(
+            expected?: Pick<HappySyncSession, "remoteSessionId" | "credentialFingerprint">,
+        ): Promise<boolean> {
+            const rows = await agentDatabaseRows<{ agent_id: string }>(
                 ctx.db,
                 sql`UPDATE ${sql.raw(SESSIONS_TABLE)}
-                    SET remote_session_id = ${remoteSessionId}, updated_at_ms = ${now}
-                    WHERE owner_id = ${ownerId} AND agent_id = ${agentId}`,
+                    SET last_remote_seq = CASE WHEN remote_session_id IS NOT ${remoteSessionId}
+                            THEN 0 ELSE last_remote_seq END,
+                        remote_session_id = ${remoteSessionId}, updated_at_ms = ${now}
+                    WHERE owner_id = ${ownerId} AND agent_id = ${agentId}
+                        ${expected === undefined ? sql`` : sql`AND remote_session_id IS ${expected.remoteSessionId ?? null} AND credential_fingerprint = ${expected.credentialFingerprint}`}
+                    RETURNING agent_id`,
             );
+            return rows.length > 0;
         },
 
         /** Forgets a remote session that was deleted, so nothing is sent to it again. */
