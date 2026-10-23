@@ -30,5 +30,6 @@ export const nodeOnlyScenarios: readonly string[] = [
 /** Unit test paths, relative to `packages/happy-agent-modules`, that also run under Node. */
 export const nodeLaneModuleTests: readonly string[] = [
     "tests/transport/sseWriter.test.ts",
+    "tests/transport/streamToOutgoing.test.ts",
     "tests/transport/WebSocketDuplex.test.ts",
 ];
