@@ -71,3 +71,12 @@ override. Only absolute paths are accepted. A relative path has no working direc
 on, and `~` depends on which home the daemon resolves, so the saved entry is always the exact path. A missing folder or a file path is also rejected, so a typo cannot be saved and
 then quietly find nothing. There is no database intent to recover. The runtime file write is atomic
 and adding or removing is idempotent, so the tools are marked durable without Durable Functions.
+
+## A missing machine leaves skill discovery empty
+
+Discovery builds the agent's machine to read its skill folders. A machine that cannot be built
+yet, such as one whose workspace folder provisioning has not made, threw out of discovery, so an
+agent's slash-command catalog failed and every reply that carried it failed with it, including
+replies to mutations that had already committed. Discovery now logs that the machine is
+unavailable and offers no skills; the catalog is discovered again before the agent's next turn.
+A machine that exists but cannot be read still reports its own failure.

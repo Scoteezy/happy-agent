@@ -5259,11 +5259,15 @@ export class ApiModule implements AgentModule {
 
     async #focusedAgentResponse(ctx: Context, agentId: string): Promise<Record<string, unknown>> {
         const agent = await this.#requireAgentResource(ctx, agentId);
-        return {
-            agent,
-            profiles: requestProfilesForAgent(agentId),
-            slashCommands: await this.#slashCommands.catalog(ctx, agentId),
-        };
+        // This reply often follows a mutation that already committed; an optional catalog that
+        // cannot load now must not report that mutation as failed. Its update event follows.
+        const slashCommands = await this.#slashCommands
+            .catalog(ctx, agentId)
+            .catch((error: unknown) => {
+                ctx.log.warn("The agent's slash commands could not be loaded.", {}, error);
+                return [];
+            });
+        return { agent, profiles: requestProfilesForAgent(agentId), slashCommands };
     }
 
     #assertAvailableAgentMode(mode: MessageMode): void {

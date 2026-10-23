@@ -301,7 +301,7 @@ export class SkillsModule implements AgentModule {
     /** The catalog as it stands right now, or nothing at all when this agent has no machine. */
     async #discover(ctx: Context, agentId: string): Promise<readonly SkillEntry[]> {
         const compute = await ctx.span("skills.resolve_compute", (ctx) =>
-            this.#resolveCompute(ctx, agentId),
+            this.#resolveCompute(ctx, agentId, true),
         );
         if (compute === undefined) return [];
         return await this.#entries(ctx, compute, this.#compute.permissionsForContext(ctx));
@@ -379,10 +379,20 @@ export class SkillsModule implements AgentModule {
      * The agent's machine, or nothing when it has none.
      *
      * A machine that cannot answer the calls discovery makes is refused here, where the reason is
-     * still legible, rather than surfacing later as a missing-property failure mid-walk.
+     * still legible, rather than surfacing later as a missing-property failure mid-walk. For
+     * discovery, a machine that cannot be built yet, such as one whose workspace folder is still
+     * being made, counts as none: the catalog is discovered again before the agent's turn.
      */
-    async #resolveCompute(ctx: Context, agentId: string): Promise<HostCompute | undefined> {
-        const compute = await this.#compute.resolve(ctx, agentId);
+    async #resolveCompute(
+        ctx: Context,
+        agentId: string,
+        unbuiltIsNone = false,
+    ): Promise<HostCompute | undefined> {
+        const compute = await this.#compute.resolve(ctx, agentId).catch((error: unknown) => {
+            if (!unbuiltIsNone) throw error;
+            ctx.log.warn("The agent's machine is not available for skill discovery.", {}, error);
+            return undefined;
+        });
         if (compute === undefined) return undefined;
         if (!Value.Check(skillsComputeSchema, compute)) {
             throw new Error("The compute module returned an invalid compute.");

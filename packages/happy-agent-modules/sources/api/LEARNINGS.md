@@ -389,3 +389,10 @@ A manual compaction set the agent idle on every compaction event that was not ru
 the late `tokensAfter` measurement recorded during the next run. That run then flickered idle
 between working updates. A manual compaction now moves the agent status only when it is created
 or its own status changes; the measurement updates the message alone.
+
+## A reply does not fail a committed mutation
+
+The focused agent reply loads the agent's slash commands after the route's mutation has
+committed. A catalog that could not load turned a successful reorder, rename or creation into a
+`500`, though the change had landed. The reply now carries an empty catalog when it cannot load
+one and logs why; the catalog's own update event brings it once it does.
