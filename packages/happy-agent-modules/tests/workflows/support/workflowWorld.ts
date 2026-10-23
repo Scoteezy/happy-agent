@@ -12,6 +12,7 @@ import type { Context } from "@steve.kite/stdlib";
 
 import type { CollaborationModule } from "../../../sources/collaboration/CollaborationModule.js";
 import { ConfigModule } from "../../../sources/config/index.js";
+import type { HistoryModule } from "../../../sources/history/index.js";
 import { WorkflowsModule } from "../../../sources/workflows/index.js";
 import { scriptedComputeModule, testConfig } from "../../support/computeModule.js";
 import { moduleDatabase } from "../../support/moduleDatabase.js";
@@ -38,7 +39,24 @@ export interface StartedCollaborator {
     readonly options: {
         readonly reportToCreator?: boolean;
         readonly metadata?: Record<string, unknown>;
+        readonly mutationId?: string | null;
     };
+}
+
+/**
+ * A stand-in for History's answer to which mutation the owner's current run answers. A test sets
+ * `current` to move the owner between runs.
+ */
+export class RunMutations {
+    current: string | undefined;
+
+    async runMutationId(): Promise<string | undefined> {
+        return this.current;
+    }
+
+    asModule(): HistoryModule {
+        return this as unknown as HistoryModule;
+    }
 }
 
 /**
@@ -100,6 +118,7 @@ export interface WorkflowWorld {
     readonly hooks: AgentModuleHooks;
     readonly ctx: Context;
     readonly collaborators: Collaborators;
+    readonly runMutations: RunMutations;
     /** The tools this module offers the agent that owns the runs. */
     tools(): Promise<readonly AnyAgentTool[]>;
     /** Say what a collaborator finally said, exactly as Agent Base settles it. */
@@ -141,12 +160,13 @@ export async function workflowWorld(
     // transactions a fanned-out script opens would collide on the one in-memory connection.
     ensureAgentDatabaseConnection(database.database);
     const config = await configWithWorkflows(options.enabled ?? true);
-    return await buildWorld(database, config);
+    return await buildWorld(database, config, new RunMutations());
 }
 
 async function buildWorld(
     database: ReturnType<typeof moduleDatabase>,
     config: ConfigModule,
+    runMutations: RunMutations,
 ): Promise<WorkflowWorld> {
     const collaborators = new Collaborators();
     const module = new WorkflowsModule(
@@ -154,6 +174,7 @@ async function buildWorld(
         collaborators.asModule(),
         // No test here reaches a machine: a script named by path has nowhere to be read from.
         scriptedComputeModule(async () => undefined),
+        runMutations.asModule(),
     );
     // A run executes on the database's own context, so the module cannot be built before the
     // database is: its migrations are applied here rather than through `moduleDatabase`.
@@ -174,6 +195,7 @@ async function buildWorld(
         hooks,
         ctx: database.context,
         collaborators,
+        runMutations,
         tools: async () =>
             (await hooks.tools?.(database.context, ownerScope())) ?? ([] as AnyAgentTool[]),
         answer: async (collaborator, text) => {
@@ -194,7 +216,7 @@ async function buildWorld(
                 settlement(collaborator.agentId),
             );
         },
-        restart: async () => await buildWorld(database, config),
+        restart: async () => await buildWorld(database, config, runMutations),
         close: database.close,
     };
 }

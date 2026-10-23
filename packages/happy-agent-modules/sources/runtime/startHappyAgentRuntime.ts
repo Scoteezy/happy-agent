@@ -689,7 +689,12 @@ export async function startHappyAgentRuntime(
         const compactions = new CompactionsModule(events, usage, history);
         const slashCommands = new SlashCommandsModule(events, compactions, compute.skillsModule);
         const contextWindow = new ContextWindowModule(config);
-        const workflows = new WorkflowsModule(config, collaboration, compute.computeModule);
+        const workflows = new WorkflowsModule(
+            config,
+            collaboration,
+            compute.computeModule,
+            history,
+        );
         const codeMode = new CodeModeModule(config, compute.computeModule);
         registerShutdown("code-mode", async (shutdownCtx) => {
             await system?.close(shutdownCtx);

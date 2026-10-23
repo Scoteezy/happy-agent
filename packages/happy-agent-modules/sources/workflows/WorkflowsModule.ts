@@ -20,6 +20,7 @@ import { afterCommit, detach, type Context } from "@steve.kite/stdlib";
 import type { CollaborationModule } from "../collaboration/CollaborationModule.js";
 import type { ComputeModule } from "../compute/index.js";
 import type { ConfigModule } from "../config/index.js";
+import type { HistoryModule } from "../history/index.js";
 import {
     MAX_WORKFLOW_ARGS_BYTES,
     MAX_WORKFLOW_DESCRIPTION_LENGTH,
@@ -135,6 +136,7 @@ export class WorkflowsModule implements AgentModule {
     readonly #config: ConfigModule;
     readonly #collaboration: CollaborationModule;
     readonly #compute: ComputeModule;
+    readonly #history: HistoryModule | undefined;
 
     readonly #live = new Map<string, LiveWorkflowRun>();
     readonly #waiters = new Map<string, WorkflowAgentWaiter>();
@@ -252,10 +254,20 @@ export class WorkflowsModule implements AgentModule {
         ],
     ];
 
-    constructor(config: ConfigModule, collaboration: CollaborationModule, compute: ComputeModule) {
+    /**
+     * @param history The mutation the launching run answers, kept with the launch so every agent
+     * the run starts answers it, however long the script runs. Without it, they answer none.
+     */
+    constructor(
+        config: ConfigModule,
+        collaboration: CollaborationModule,
+        compute: ComputeModule,
+        history?: HistoryModule,
+    ) {
         this.#config = config;
         this.#collaboration = collaboration;
         this.#compute = compute;
+        this.#history = history;
     }
 
     /** Whether the configuration turned workflows on for this installation. */
@@ -410,7 +422,11 @@ export class WorkflowsModule implements AgentModule {
         if ((await readWorkflowRun(ctx, agentId, id)) !== undefined) {
             throw new Error(`Workflow run "${id}" already exists.`);
         }
-        const request = await this.#resolveLaunch(ctx, agentId, input, id);
+        const mutationId = await this.#history?.runMutationId(ctx, agentId);
+        const request: WorkflowLaunchRequest = {
+            ...(await this.#resolveLaunch(ctx, agentId, input, id)),
+            ...(mutationId === undefined ? {} : { mutationId }),
+        };
         const at = this.#now();
         const run: WorkflowRun = {
             id,
@@ -720,7 +736,7 @@ export class WorkflowsModule implements AgentModule {
         const runner = new WorkflowScriptRunner({
             args: request.args ?? null,
             startAgent: (start, signal) =>
-                this.#startAgent(ctx, agentId, request.id, start, signal),
+                this.#startAgent(ctx, agentId, request.id, start, request.mutationId, signal),
             onAgentResult: async (callIndex, result) => {
                 await this.#rememberAgentResult(ctx, agentId, request.id, callIndex, result);
             },
@@ -764,6 +780,7 @@ export class WorkflowsModule implements AgentModule {
         agentId: string,
         runId: string,
         start: WorkflowAgentStart,
+        mutationId: string | undefined,
         signal: AbortSignal,
     ): Promise<string> {
         const existing = await readWorkflowAgentCall(ctx, agentId, runId, start.callIndex);
@@ -812,6 +829,8 @@ export class WorkflowsModule implements AgentModule {
                         // would say the same thing twice — once per agent.
                         reportToCreator: false,
                         metadata: { workflow: { runId, callIndex: start.callIndex } },
+                        // The owner may be on another run by now; the agent answers the launch's.
+                        mutationId: mutationId ?? null,
                     },
                 );
             });

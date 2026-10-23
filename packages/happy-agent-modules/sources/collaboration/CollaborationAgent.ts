@@ -101,6 +101,14 @@ export const collaborationCreateOptionsSchema = Type.Object(
     {
         reportToCreator: Type.Optional(Type.Boolean()),
         metadata: Type.Optional(agentMetadataSchema),
+        /**
+         * The client mutation the collaborator answers, for a creator that is not on its own run,
+         * such as a workflow that took it at launch; null for none. Omitted, it is the mutation the
+         * creating run answers now.
+         */
+        mutationId: Type.Optional(
+            Type.Union([Type.String({ minLength: 1, maxLength: 512 }), Type.Null()]),
+        ),
     },
     { additionalProperties: false },
 );

@@ -228,6 +228,8 @@ export const workflowLaunchRequestSchema = Type.Object(
         script: workflowScriptSchema,
         args: Type.Optional(workflowArgsSchema),
         resumeFromRunId: Type.Optional(workflowIdSchema),
+        /** The client mutation the launching run answered; every agent the run starts answers it. */
+        mutationId: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     },
     { additionalProperties: false },
 );

@@ -340,12 +340,14 @@ export class CollaborationModule implements AgentModule {
     ): Promise<CollaborationCreateResult> {
         const agents = this.#requireAgents();
         const existing = await agents.config(ctx, agentId);
-        // The collaborator and its opening task answer the mutation the creating run answers now;
-        // a retried call keeps the one the collaborator was created with.
+        // The collaborator and its opening task answer the mutation its creator names, else the one
+        // the creating run answers now; a retried call keeps the one it was created with.
         const mutationId =
-            existing === undefined
-                ? await this.#history.runMutationId(ctx, actingAgentId)
-                : mutationIdOf(existing.metadata);
+            existing !== undefined
+                ? mutationIdOf(existing.metadata)
+                : options.mutationId !== undefined
+                  ? (options.mutationId ?? undefined)
+                  : await this.#history.runMutationId(ctx, actingAgentId);
 
         // A durable tool call may be retried after the collaborator was created but before the
         // result was recorded. An identity this agent already created is that retry, so only the

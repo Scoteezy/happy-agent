@@ -92,6 +92,40 @@ describe("workflow execution", () => {
     );
 
     it(
+        "starts every agent on the mutation of the run that launched it, after that run moved on",
+        async () => {
+            const world = await workflowWorld("workflows-launch-mutation");
+            try {
+                world.runMutations.current = "a-echo";
+                await world.module.launch(
+                    world.ctx,
+                    WORKFLOW_OWNER,
+                    {
+                        script: [
+                            `agent("First.", ${agentOptions("First")})`,
+                            `agent("Second.", ${agentOptions("Second")})`,
+                        ].join("\n"),
+                    },
+                    "run-mutation",
+                );
+                const [first] = await world.collaborators.waitFor(1);
+                // The owner settles the launching run and starts another before the second agent.
+                world.runMutations.current = "b-echo";
+                await world.answer(first!, "First done.");
+                const [, second] = await world.collaborators.waitFor(2);
+                await world.answer(second!, "Second done.");
+                await world.module.whenRunsSettle();
+
+                expect(first?.options.mutationId).toBe("a-echo");
+                expect(second?.options.mutationId).toBe("a-echo");
+            } finally {
+                world.close();
+            }
+        },
+        RUN_TIMEOUT,
+    );
+
+    it(
         "ignores an agent that is not one of its own",
         async () => {
             const world = await workflowWorld("workflows-foreign-agent");
@@ -597,6 +631,6 @@ describe("workflow subscriptions", () => {
     );
 
     it("takes only modules, with no options bag left to pass", async () => {
-        expect(WorkflowsModule.length).toBe(3);
+        expect(WorkflowsModule.length).toBe(4);
     });
 });

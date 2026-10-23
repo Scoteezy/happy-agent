@@ -21,3 +21,11 @@ afterward, so neither external-call waiting nor earlier segments consumes the ne
 allowance. A killed harness can leave an in-flight worker briefly, but not an unlimited CPU loop.
 Windows retains its existing native watchdog. Cancellation is checked before executing Python and
 after external awaits; in-flight requests settle under their existing execution/request budgets.
+
+## Agents a run starts answer the mutation of the run that launched it
+
+A workflow's agents were created through Collaboration, which read the owner's current run when
+each agent started. The owner may have settled and started another run by then, so a later agent
+answered that run's `mutationId`. The launch now records the launching run's mutation, from
+History's `runMutationId`, and passes it to every `createAgent` call, `null` when there was none,
+so a restored run keeps it too.
