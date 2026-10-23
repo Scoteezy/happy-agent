@@ -660,6 +660,17 @@ export class HistoryModule implements AgentModule {
         });
     }
 
+    /**
+     * The mutation the agent's current run answers: the one recorded on the message that started
+     * it. A message the agent sends carries it, so the run that message starts answers the same
+     * mutation however long it waits in an inbox.
+     */
+    async runMutationId(ctx: Context, agentId: string): Promise<string | undefined> {
+        const runId = this.#events?.activeRunId(agentId);
+        if (runId === undefined) return undefined;
+        return (await this.message(ctx, agentId, runId))?.mutationId;
+    }
+
     /** The same durable failure identity is used by reload, live delivery and replay. */
     async runFailure(
         ctx: Context,
@@ -2483,7 +2494,8 @@ export class HistoryModule implements AgentModule {
                       }
                     : {}),
                 // Any accepted message may start a run on a request's behalf, such as the hidden
-                // notice a failure retry sends; its run echoes the mutation recorded here.
+                // notice a failure retry sends or a message from an agent whose run answers one;
+                // its run echoes the mutation recorded here.
                 ...(mutationId === undefined ? {} : { mutationId }),
                 ...(sender === undefined ? {} : { senderAgentId: sender }),
                 ...(accepted.metadata?.hideFromUser === undefined

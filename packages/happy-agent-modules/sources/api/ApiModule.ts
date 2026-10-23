@@ -193,7 +193,7 @@ import {
     type HistoryPendingMessage,
     type HistoryRunState,
 } from "../history/index.js";
-import { senderAgentIdOf, USER_MESSAGE_ORIGIN_METADATA } from "../impl/messageOrigin.js";
+import { USER_MESSAGE_ORIGIN_METADATA } from "../impl/messageOrigin.js";
 import { decodeRequestProfile, requestProfilesForAgent } from "../impl/requestProfile.js";
 import {
     PermissionsModule,
@@ -826,25 +826,23 @@ export class ApiModule implements AgentModule {
                 const chain = this.#mutationIds.getStore();
                 if (chain !== undefined) chain.inLoop = true;
                 // A message that starts the agent's next run, as Events decides the boundary,
-                // owns it: its own mutation, else the run of the agent that sent it, else none.
+                // owns it with the mutation it carries. A message from another agent carries the
+                // mutation of the run that sent it, taken when it was sent.
                 const runId = await this.#events.runIdForAccepted(
                     hookCtx,
                     scope.agent.id,
                     accepted,
                 );
                 if (runId !== accepted.id) return;
-                const own = accepted.metadata?.["mutationId"];
-                const sender = senderAgentIdOf(accepted.metadata);
+                const mutationId = accepted.metadata?.["mutationId"];
                 boundedSet(
                     this.#runMutations,
                     scope.agent.id,
                     {
                         runId,
-                        mutationId: Value.Check(mutationIdSchema, own)
-                            ? (own as string)
-                            : sender === undefined
-                              ? undefined
-                              : this.#runMutations.get(sender)?.mutationId,
+                        mutationId: Value.Check(mutationIdSchema, mutationId)
+                            ? (mutationId as string)
+                            : undefined,
                     },
                     MAX_RUN_MUTATIONS,
                 );

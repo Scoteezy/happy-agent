@@ -108,3 +108,13 @@ Agent ID, to write a file that will be read outside their own chat as
 `[name:line](happy-file://agents/<own ID>/<path>#L…)`, to use another agent's or a workspace's ID
 for files elsewhere, and to copy received links unchanged. Plain `path:line` remains the default
 inside the agent's own chat. The guidance lives here because the Agent ID it builds on does.
+
+## A message carries the mutation its sending run answers
+
+The API echoed a collaboration message's `mutationId` by looking up the sender's run when the
+recipient accepted the message. A message that waited in a busy recipient's inbox took the
+sender's later run, or nothing once the sender had settled, and every settlement report lost it.
+Delivery and the settlement report now stamp `mutationId` from History's `runMutationId` for the
+sending agent when the message is sent, inside the same transaction; the report reads it before
+its settlement ends the run. The run the message starts echoes that mutation, whatever the sender
+does meanwhile.

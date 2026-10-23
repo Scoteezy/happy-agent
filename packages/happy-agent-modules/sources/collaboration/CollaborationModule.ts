@@ -649,6 +649,8 @@ export class CollaborationModule implements AgentModule {
             answer === ""
                 ? stoppedReport(scope.agent.id, settlement.error)
                 : answerReport(scope.agent.id, answer);
+        // Read before this settlement ends the run, so the report answers the run's mutation.
+        const mutationId = await this.#history.runMutationId(ctx, scope.agent.id);
         await agents.steer(
             ctx,
             parent,
@@ -671,6 +673,7 @@ export class CollaborationModule implements AgentModule {
                         toAgentId: parent,
                     },
                     ...senderAgentIdMetadata(scope.agent.id),
+                    ...(mutationId === undefined ? {} : { mutationId }),
                 },
             },
         );
@@ -733,12 +736,16 @@ export class CollaborationModule implements AgentModule {
                           providerId: selection.provider,
                           serviceTier: selection.serviceTier ?? null,
                       };
+            // The run this message starts answers the mutation the sending run answers now, not
+            // whatever the sender is doing by the time the recipient gets to it.
+            const mutationId = await this.#history.runMutationId(txCtx, fromAgentId);
             const options = {
                 id: messageId,
                 metadata: {
                     collaboration: { fromAgentId, toAgentId },
                     ...senderAgentIdMetadata(fromAgentId),
                     ...(mode === undefined ? {} : { mode }),
+                    ...(mutationId === undefined ? {} : { mutationId }),
                 },
                 ...(selection === undefined
                     ? fallback?.options

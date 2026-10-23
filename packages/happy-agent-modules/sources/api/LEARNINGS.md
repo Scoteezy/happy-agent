@@ -411,11 +411,19 @@ chain accepts a message into an agent loop it is marked as running a loop and ec
 its own again. An agent event then echoes only through the agent its producer names: the agent's
 current run records the mutation that started it, written in `messageAcceptedTransact` when a
 message starts the agent's next run as Events decides the boundary, and deleted when that run
-settles. The owner is the message's own `mutationId`, else the current run of the agent that sent
-it, so a helper keeps its parent's retry, else none. A message joining the run already going
-changes nothing, and a steer that opens a successor run counts as a new run. Questions name their
-asking agent. An event that names no agent gets no inherited echo. Accepted-message batches
-announce later, so each message keeps the owner it had when it was accepted.
+settles. The owner is the `mutationId` the message carries, else none. A message joining the run
+already going changes nothing, and a steer that opens a successor run counts as a new run.
+Questions name their asking agent. An event that names no agent gets no inherited echo.
+Accepted-message batches announce later, so each message keeps the owner it had when it was
+accepted.
+
+A message from another agent once took its owner from the sender's run at the moment the
+recipient accepted it. A message that waited in a busy recipient's inbox was then labelled with
+the sender's later run, or with nothing once the sender had settled; a helper's report, sent as
+the helper settles, always lost it. Collaboration now stamps the sending run's mutation on the
+message when it is sent, read from History's `runMutationId`, so a helper keeps its parent's
+retry and its report keeps it too. Acceptance never consults the sender's live run. Messages to
+bots and tasks carry no mutation and start runs that echo nothing.
 
 ## A failure retry's run echoes the retry's mutation
 
