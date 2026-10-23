@@ -136,14 +136,24 @@ read before that transaction and only for admitted senders: regular files only, 
 following links, at most 10 of at most 32 MiB each. Pictures are shown to the model; other files
 are named by path.
 
-The reply is the text the run produced after its last tool call, together with the images it
-generated or read and the files it showed with `present_files` during the run. The tool calls are noted
-as they end, because tool-call hooks see only call-scoped stores, and their media is read from
-`ChatMediaModule.storedItems` when the run settles. The reply is then owed through the
-`exportedBots.reply` Durable Function, invoked in the settlement transaction and sent after commit
-through the adapter in the pieces it chooses. Progress is kept per piece, so a restart resumes
-where sending stopped, and a refusal the service will never accept drops the rest. A run that
-answers `NO_REPLY` sends nothing. While a conversation works, the service shows the bot as typing.
+Every text block the run writes is a reply. A block waits in the run store only until the next
+block or a tool call follows it, and is then owed in the transaction that keeps what followed, so a
+note written before a tool call reaches the person before that tool runs. The run's last block is
+its answer: it is owed when the run settles, together with the images the run generated or read
+and the files it showed with `present_files`. The tool calls are noted as they end, because
+tool-call hooks see only call-scoped stores, and their media is read from
+`ChatMediaModule.storedItems` at settlement. Each reply is owed through the `exportedBots.reply`
+Durable Function under one lock per chat, so replies go out in the order they were owed, and is
+sent after commit through the adapter in the pieces it chooses. Progress is kept per piece, so a
+restart resumes where sending stopped, and a refusal the service will never accept drops the
+rest. A block that is exactly `NO_REPLY` is never sent, and a run whose answer is `NO_REPLY` sends
+no media either.
+
+While a conversation works, the service shows the bot as typing. The indicator starts when the
+run's loop starts and is renewed every `typing.intervalMs` the adapter gives, and again right after
+each reply, since a service may hide it once the bot speaks, until the run settles. It runs in a
+`<kind>-exported-bot-typing` context of its own, is never durable, and stops after an hour even if
+the run never settles; the next inference starts it again.
 
 - **Telegram** sends text in pieces of at most 4,000 characters, images as photos up to 10 MB,
   and other files as documents up to 50 MB. A photo from an admitted sender is downloaded into

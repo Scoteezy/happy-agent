@@ -160,6 +160,7 @@ async function bridgeGym() {
             if (text.includes("send the chart")) {
                 return {
                     content: [
+                        { type: "text", text: "Looking for the chart." },
                         {
                             type: "tool_call",
                             name: "present_files",
@@ -509,6 +510,14 @@ describe("a bot exported through a bridge", () => {
                 size: PNG.length,
             });
             expect(await readFile(attachments[0]!.path)).toEqual(PNG);
+            // What the conversation wrote before presenting it reached the bridge first, as a
+            // reply of its own; the media went with the answer.
+            const note = first
+                .replies("U-ADA")
+                .find((reply) => reply["text"] === "Looking for the chart.");
+            expect(note).toBeDefined();
+            expect(note!["attachments"]).toBeUndefined();
+            expect(note!["seq"] as number).toBeLessThan(chart["seq"] as number);
 
             // A newer connection replaces the older one.
             const second = await connect(token);

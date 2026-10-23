@@ -143,7 +143,10 @@ const GUEST_PERMISSION_MODE: AgentPermissionMode = "auto";
 
 /** The reply a run gives when it deliberately sends nothing to the person. */
 const NO_REPLY = "NO_REPLY";
-/** The run-store key holding the text the model said since its last tool call. */
+/**
+ * The run-store key holding the text block the model wrote last, not yet owed to the person. It
+ * is owed once anything follows it, and what is left when the run settles is the run's answer.
+ */
 const REPLY_KEY = "reply";
 /** The run-store key listing the run's tool calls, whose presented media the reply carries. */
 const CALLS_KEY = "calls";
@@ -160,6 +163,11 @@ const MAX_DENIED_SENDERS = 1_000;
 /** Turned-away people a status lists. */
 const MAX_LISTED_DENIED = 10;
 /**
+ * The longest one run keeps showing "typing…". A run that settles stops it sooner; this only
+ * bounds one whose settlement never arrives, such as a process stopped mid-run.
+ */
+const MAX_TYPING_MS = 60 * 60_000;
+/**
  * What a stranger is told once when their request is made. It is fixed text, never written by a
  * model, so nothing a stranger says can shape what is sent back before they are let in.
  */
@@ -172,7 +180,6 @@ const ACCESS_REQUEST_INSTRUCTIONS = [
     "When someone who is not on an exported bot's allowlist writes to it, you are told who is asking — the service, the bot, their ID, username, and display name — never what they wrote. Tell the user who is asking and ask whether to let them in, unless the user already told you what to do about this person. Then call approve_exported_bot_user or deny_exported_bot_user with the kind, botId, and userId the request named. Never approve someone on your own judgment of them: an approved person becomes a guest who talks to that bot and uses what it can reach, even though their messages never count as the user's instructions. get_exported_bot_status lists everyone waiting.",
 ].join("\n");
 
-const replyPartsSchema = Type.Array(Type.String());
 const callIdsSchema = Type.Array(Type.String());
 const archivedMetadataSchema = Type.Object({ archivedAt: Type.Number() });
 
@@ -227,7 +234,13 @@ interface LiveExportedBot {
     ignored: IgnoredSender[];
     stopReason: ExportedBotStopReason | undefined;
     running: Promise<void> | undefined;
-    readonly typingAt: Map<string, number>;
+}
+
+/** "Typing…" kept up for one conversation's run until it settles. Nothing here is durable. */
+interface TypingRun {
+    readonly controller: AbortController;
+    readonly ctx: Context;
+    readonly conversation: ExportedBotConversation;
 }
 
 /** A conversation's first mode: the one to record, and the send options that run with it. */
@@ -247,8 +260,8 @@ class AllowlistChanged extends Error {}
  * bridges. An admin bot saves each export in this module's table, and the change applies at once:
  * every enabled export of an active bot runs its adapter, admits only allowlisted people in
  * one-to-one chats, makes each of them a guest user, holds each guest's conversation in a subtask
- * of the bot, and sends each run's final reply, with the media it presented, back to their chat.
- * Nothing here knows any particular service.
+ * of the bot, and sends every text block each run writes, then the media it presented, back to
+ * their chat. Nothing here knows any particular service.
  */
 export class ExportedBotsModule implements AgentModule {
     readonly name = "exportedBots";
@@ -264,6 +277,8 @@ export class ExportedBotsModule implements AgentModule {
     readonly #team: TeamModule;
     /** Exports running now, by kind and bot. */
     readonly #live = new Map<string, LiveExportedBot>();
+    /** Conversations working now, by agent, each showing "typing…". */
+    readonly #typing = new Map<string, TypingRun>();
     readonly #reconcileLock = asyncLock();
     #agents: AgentSystemRef | undefined;
     #closed = false;
@@ -339,16 +354,30 @@ export class ExportedBotsModule implements AgentModule {
             ];
         },
         /**
-         * Keep what the model has said since its last tool call. Text before a tool call is
-         * working commentary; what follows the last one is the answer the person is waiting for.
+         * Owe the person every text block the model writes. Each block waits only until the
+         * next one or a tool call follows it, which is before that tool runs, and is then owed
+         * in the transaction that keeps what followed, so each reaches the chat once and in
+         * order while the run goes on. The run's last block is its answer and waits for
+         * settlement, which sends it with the media the run presented.
          */
         onEventTransact: async (
             ctx: Context,
             scope: AgentModuleScope,
             event: AgentBasePersistedEvent,
         ): Promise<void> => {
-            if (exportedBotOf(scope.agent) === undefined) return;
-            if (event.type === "toolcall_end") {
+            const conversation = exportedBotOf(scope.agent);
+            if (conversation === undefined) return;
+            if (event.type !== "toolcall_end" && event.type !== "text_end") return;
+            const text = event.type === "text_end" ? event.block.text.trim() : "";
+            if (event.type === "text_end" && text === "") return;
+            const pending = await scope.runKV.read(ctx, REPLY_KEY);
+            if (typeof pending === "string" && pending !== NO_REPLY) {
+                // Owed in the same transaction that clears it, so it needs no operation ID.
+                await this.#oweReply(ctx, conversation, scope.agent.id, { text: pending });
+            }
+            if (event.type === "text_end") {
+                await scope.runKV.write(ctx, REPLY_KEY, text);
+            } else {
                 await scope.runKV.delete(ctx, REPLY_KEY);
                 // Tool-call hooks see only their own call's store, so the run remembers its calls
                 // here and asks for their presented media when it settles.
@@ -359,20 +388,12 @@ export class ExportedBotsModule implements AgentModule {
                     }
                     return [...calls, event.callId];
                 });
-                return;
             }
-            if (event.type !== "text_end") return;
-            const text = event.block.text.trim();
-            if (text === "") return;
-            await scope.runKV.update(ctx, REPLY_KEY, (current) => {
-                const parts = Value.Check(replyPartsSchema, current) ? current : [];
-                const size = parts.reduce((total, part) => total + part.length, 0);
-                return size > MAX_EXPORTED_BOT_REPLY_CHARACTERS ? parts : [...parts, text];
-            });
         },
         /**
-         * Owe the person the run's final reply in the transaction that settles the run, which is
-         * also the last moment the run store can be read. The send itself happens after commit.
+         * Owe the person the run's answer, with the media it presented, or an apology when it
+         * failed without one, in the transaction that settles the run, which is also the last
+         * moment the run store can be read. The send itself happens after commit.
          */
         afterAgentSettledTransact: async (
             ctx: Context,
@@ -382,43 +403,40 @@ export class ExportedBotsModule implements AgentModule {
             const conversation = exportedBotOf(scope.agent);
             if (conversation === undefined) return;
             const stored = await scope.runKV.read(ctx, REPLY_KEY);
-            const parts = Value.Check(replyPartsSchema, stored) ? stored : [];
-            let text = parts.join("\n\n").trim();
-            if (text === NO_REPLY) return;
+            if (stored === NO_REPLY) return;
             const attachments = await this.#replyAttachments(
                 ctx,
                 scope.agent.id,
                 await scope.runKV.read(ctx, CALLS_KEY),
             );
-            if (text === "" && attachments.length === 0 && settlement.error !== undefined) {
+            let text = typeof stored === "string" ? stored : undefined;
+            if (text === undefined && attachments.length === 0 && settlement.error !== undefined) {
                 text = `Sorry, I couldn't finish that reply. ${settlement.error.slice(0, 500)}`;
             }
-            if (text === "" && attachments.length === 0) return;
-            if (text.length > MAX_EXPORTED_BOT_REPLY_CHARACTERS) {
-                text = `${text.slice(0, MAX_EXPORTED_BOT_REPLY_CHARACTERS)}\n\n(The rest of this reply is in Happy.)`;
-            }
-            await this.#durableFunctions.invoke(ctx, {
-                function: EXPORTED_BOT_REPLY_FUNCTION,
-                arguments: {
-                    kind: conversation.kind,
-                    botId: conversation.botId,
-                    agentId: scope.agent.id,
-                    userId: conversation.userId,
-                    chatId: conversation.chatId,
-                    ...(text === "" ? {} : { text }),
+            if (text === undefined && attachments.length === 0) return;
+            await this.#oweReply(
+                ctx,
+                conversation,
+                scope.agent.id,
+                {
+                    ...(text === undefined ? {} : { text }),
                     ...(attachments.length === 0 ? {} : { attachments }),
                 },
-                operationId: `${EXPORTED_BOT_REPLY_FUNCTION}:${settlement.settlementId}`,
-                // Replies to one chat go out in the order their runs settled.
-                lockKeys: [
-                    `exported-bot-chat:${conversation.kind}:${conversation.botId}:${conversation.chatId}`,
-                ],
-            });
+                `${EXPORTED_BOT_REPLY_FUNCTION}:${settlement.settlementId}`,
+            );
         },
-        /** Show "typing…" while the conversation is working. Best effort and never awaited. */
+        /** Show "typing…" from the moment the conversation starts working until it settles. */
+        beforeAgentLoop: (_ctx: Context, scope: AgentModuleScope): void => {
+            const conversation = exportedBotOf(scope.agent);
+            if (conversation !== undefined) this.#startTyping(scope.agent.id, conversation);
+        },
+        /** Usually typing already; starts it again if it lapsed, such as after its time limit. */
         beforeInference: (_ctx: Context, scope: AgentModuleScope): void => {
             const conversation = exportedBotOf(scope.agent);
-            if (conversation !== undefined) this.#showTyping(conversation);
+            if (conversation !== undefined) this.#startTyping(scope.agent.id, conversation);
+        },
+        afterAgentSettled: (_ctx: Context, scope: AgentModuleScope): void => {
+            this.#stopTyping(scope.agent.id);
         },
     };
 
@@ -440,6 +458,7 @@ export class ExportedBotsModule implements AgentModule {
         if (this.#closed) return;
         this.#closed = true;
         this.#unsubscribeBots?.();
+        for (const agentId of this.#typing.keys()) this.#stopTyping(agentId);
         const live = [...this.#live.values()];
         for (const exportedBot of live) exportedBot.controller.abort();
         await Promise.allSettled(live.map(async (exportedBot) => await exportedBot.running));
@@ -905,7 +924,6 @@ export class ExportedBotsModule implements AgentModule {
             ignored: [],
             stopReason: undefined,
             running: undefined,
-            typingAt: new Map(),
         };
         this.#live.set(key, live);
         const connection = this.#connection(live);
@@ -1749,19 +1767,91 @@ export class ExportedBotsModule implements AgentModule {
             }
             await call.kv.write(ctx, "sent", index + 1);
         }
+        // A service may hide "typing…" once the bot speaks, so a conversation still working shows
+        // it again at once rather than at its next renewal.
+        const working = this.#typing.get(agentId);
+        if (working !== undefined) void this.#showTyping(working.ctx, working.conversation);
         return null;
     }
 
-    #showTyping(conversation: ExportedBotConversation): void {
+    /**
+     * Owe a conversation's person one reply, sent after the caller's transaction commits. Replies
+     * to one chat go out in the order they were owed.
+     */
+    async #oweReply(
+        ctx: Context,
+        conversation: ExportedBotConversation,
+        agentId: string,
+        reply: { readonly text?: string; readonly attachments?: ExportedBotReplyAttachment[] },
+        operationId?: string,
+    ): Promise<void> {
+        const text =
+            reply.text !== undefined && reply.text.length > MAX_EXPORTED_BOT_REPLY_CHARACTERS
+                ? `${reply.text.slice(0, MAX_EXPORTED_BOT_REPLY_CHARACTERS)}\n\n(The rest of this reply is in Happy.)`
+                : reply.text;
+        await this.#durableFunctions.invoke(ctx, {
+            function: EXPORTED_BOT_REPLY_FUNCTION,
+            arguments: {
+                kind: conversation.kind,
+                botId: conversation.botId,
+                agentId,
+                userId: conversation.userId,
+                chatId: conversation.chatId,
+                ...(text === undefined ? {} : { text }),
+                ...(reply.attachments === undefined ? {} : { attachments: reply.attachments }),
+            },
+            ...(operationId === undefined ? {} : { operationId }),
+            lockKeys: [
+                `exported-bot-chat:${conversation.kind}:${conversation.botId}:${conversation.chatId}`,
+            ],
+        });
+    }
+
+    /**
+     * Keep showing "typing…" in a working conversation's chat, renewed as often as its service
+     * lets the indicator lapse, until the run settles, the module closes, or `MAX_TYPING_MS`
+     * passes. It belongs to the run rather than to the hook that starts it, so it runs in a
+     * context of its own. Each renewal asks for the export running then, so a paused or
+     * restarted export is followed. Best effort: a failed renewal is tried again next time.
+     */
+    #startTyping(agentId: string, conversation: ExportedBotConversation): void {
+        const typing = this.#adapters.get(conversation.kind)?.typing;
+        if (this.#closed || typing === undefined || this.#typing.has(agentId)) return;
+        const controller = new AbortController();
+        const signal = AbortSignal.any([
+            controller.signal,
+            AbortSignal.timeout(MAX_TYPING_MS),
+            ...(this.#lifetime === undefined ? [] : [this.#lifetime]),
+        ]);
+        const ctx = withLifetime(this.#context(`${conversation.kind}-exported-bot-typing`), signal);
+        const run: TypingRun = { controller, ctx, conversation };
+        this.#typing.set(agentId, run);
+        void (async () => {
+            while (!signal.aborted) {
+                const startedAt = Date.now();
+                await this.#showTyping(ctx, conversation);
+                await delay(ctx, Math.max(0, typing.intervalMs - (Date.now() - startedAt)));
+            }
+        })()
+            .catch(() => undefined)
+            .finally(() => {
+                if (this.#typing.get(agentId) === run) this.#typing.delete(agentId);
+            });
+    }
+
+    #stopTyping(agentId: string): void {
+        this.#typing.get(agentId)?.controller.abort();
+        this.#typing.delete(agentId);
+    }
+
+    /** Show "typing…" once now, in the chat of a conversation that is still working. */
+    async #showTyping(ctx: Context, conversation: ExportedBotConversation): Promise<void> {
         const live = this.#live.get(liveKey(conversation.kind, conversation.botId));
         const typing = live?.adapter.typing;
         if (live === undefined || typing === undefined) return;
-        const now = Date.now();
-        if (now - (live.typingAt.get(conversation.chatId) ?? 0) < typing.intervalMs) return;
-        live.typingAt.set(conversation.chatId, now);
-        void typing
+        await typing
             .show(
-                live.ctx,
+                ctx,
                 { botId: live.botId, account: live.account, settings: live.settings },
                 { userId: conversation.userId, chatId: conversation.chatId },
             )

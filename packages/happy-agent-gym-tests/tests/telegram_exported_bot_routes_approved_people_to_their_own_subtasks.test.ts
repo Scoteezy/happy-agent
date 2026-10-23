@@ -27,6 +27,8 @@ const SAFE_AUTH_FAILURE = "Authentication failed.\n\nRetry this conversation whe
 interface Sent {
     readonly chatId: number;
     readonly text: string;
+    /** How many times the bot had shown "typing…" in this chat before this message arrived. */
+    readonly typedBefore: number;
 }
 
 interface Update {
@@ -132,6 +134,10 @@ class FakeTelegramBot {
         return this.sent.filter((sent) => sent.chatId === chatId).map((sent) => sent.text);
     }
 
+    typedIn(chatId: number): number {
+        return this.typing.filter((typed) => typed === chatId).length;
+    }
+
     async handle(
         method: string,
         body: Record<string, unknown>,
@@ -167,7 +173,12 @@ class FakeTelegramBot {
             this.replayed.push(...replayed.map((update) => update.update_id));
             this.#ok(response, [...replayed, ...ready()]);
         } else if (method === "sendMessage") {
-            this.sent.push({ chatId: body["chat_id"] as number, text: body["text"] as string });
+            const chatId = body["chat_id"] as number;
+            this.sent.push({
+                chatId,
+                text: body["text"] as string,
+                typedBefore: this.typedIn(chatId),
+            });
             this.#ok(response, { message_id: this.#nextMessageId++ });
         } else if (method === "sendChatAction") {
             this.typing.push(body["chat_id"] as number);
@@ -220,8 +231,9 @@ function lastUserText(request: GymInferenceRequest): string {
 
 /**
  * A gym whose Chief of Staff runs exactly the tool calls a scenario asks of it, with Scout, a bot
- * of its own to export. Every Telegram conversation answers by repeating what it was told, and
- * tries to run a command outside the sandbox when a message starts with "ESCALATE:". The Auto
+ * of its own to export. Every Telegram conversation answers by repeating what it was told, says it
+ * is on it and runs a command for as many seconds as a message starting with "WORK <seconds>:"
+ * asks, and tries to run a command outside the sandbox when a message starts with "ESCALATE:". The Auto
  * reviewer keeps what it was shown and allows every action, except such a command that no
  * trusted user message asked for.
  */
@@ -233,6 +245,7 @@ async function telegramGym() {
     const commands = new Map<string, { callId: string; turn: GymTurn }>();
     const reviews: string[] = [];
     let escalations = 0;
+    let works = 0;
     const gym = await createAgentGym({
         timeoutMs: 30_000,
         config: `[telegram]\napi_url = "${apiUrl}"`,
@@ -269,6 +282,20 @@ async function telegramGym() {
                         providerError: { type: "authentication", diagnostics: { status: 401 } },
                     },
                 };
+            const work = /^WORK (\d+):/.exec(lastUserText(request));
+            if (work !== null) {
+                return {
+                    content: [
+                        { type: "text", text: "On it, this takes a moment." },
+                        {
+                            type: "tool_call",
+                            name: "exec_command",
+                            arguments: { cmd: `sleep ${work[1]!}`, yield_time_ms: 30_000 },
+                            callId: `work${String(++works)}`,
+                        },
+                    ],
+                };
+            }
             if (lastUserText(request).startsWith("ESCALATE:")) {
                 return {
                     content: [
@@ -338,6 +365,60 @@ describe("a bot exported to Telegram", () => {
         );
         expect(reply).toBe(`Sorry, I couldn't finish that reply. ${SAFE_AUTH_FAILURE}`);
     }, 30_000);
+
+    it(
+        "sends every text block as it is written and keeps showing typing until the run settles",
+        { timeout: 120_000 },
+        async () => {
+            const { gym, telegram, scout, chiefRuns } = await telegramGym();
+            await chiefRuns("set_telegram_exported_bot", {
+                botId: scout.id,
+                token: TOKEN,
+                allowedUsers: [ADA.id, GRACE.id],
+            });
+            const sentTo = (chatId: number) =>
+                telegram.sent.filter((sent) => sent.chatId === chatId);
+
+            // The note written before the command reaches Ada while the command is still
+            // running, rather than being dropped as working commentary.
+            telegram.write(ADA, "WORK 9: rebuild the report.");
+            const note = await gym.waitUntil(() => sentTo(ADA.id)[0], "Ada's progress note");
+            expect(note.text).toBe("On it, this takes a moment.");
+            const answer = await gym.waitUntil(() => sentTo(ADA.id)[1], "Ada's answer");
+            expect(answer.text).toBe("Done with that command.");
+
+            // Telegram shows "typing…" for about five seconds, so a nine-second command only
+            // looks worked on if it is renewed while the command runs: right after the note,
+            // which hides it, and on its own at least once more.
+            expect(answer.typedBefore - note.typedBefore).toBeGreaterThanOrEqual(2);
+
+            // Once Ada's run settles, nothing renews it. Grace's own nine-second command spans
+            // more than two renewals, all of them in her chat.
+            const ada = (await gym.client.getAgentActivity(scout.agent.id)).subagents.find(
+                (agent) => agent.title === "Ada Lovelace on Telegram",
+            )!;
+            await gym.waitUntil(
+                async () =>
+                    (await gym.sessionEvents(ada.id)).some((event) => event.type === "run.finished")
+                        ? true
+                        : undefined,
+                "Ada's run to settle",
+            );
+            const typedForAda = telegram.typedIn(ADA.id);
+            telegram.write(GRACE, "WORK 9: tidy the archive.");
+            const graceAnswer = await gym.waitUntil(
+                () => sentTo(GRACE.id).find((sent) => sent.text === "Done with that command."),
+                "Grace's answer",
+            );
+            expect(graceAnswer.typedBefore).toBeGreaterThanOrEqual(3);
+            expect(telegram.typedIn(ADA.id)).toBe(typedForAda);
+            expect(telegram.repliesTo(ADA.id)).toEqual([
+                "On it, this takes a moment.",
+                "Done with that command.",
+            ]);
+            expect(gym.errors).toEqual([]);
+        },
+    );
 
     it(
         "is exported by the Chief of Staff, admits people it allows on the fly, and gives each their own durable subtask",

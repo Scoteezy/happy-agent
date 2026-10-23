@@ -99,15 +99,33 @@ the module's own table. The subtask is created without an opening task and does 
 runs to the bot, since its answers belong to the person in the chat. Archiving the subtask ends
 that conversation; the person's next message starts a new one.
 
-## Only the final reply goes to the chat, with the media the run showed
+## Every text block goes to the chat; the media goes with the answer
 
-Text the model writes before a tool call is commentary on its work. Sending it would flood the
-chat, so only the text after the last tool call is delivered, once the run settles. A run that
-ends without that text but with an error sends a short apology instead of silence. `NO_REPLY` lets
-the agent deliberately stay quiet. Images it generated or read and files it showed with
-`present_files` go with the reply, in order and without their layout; the agent is told that
-reading an image shares it. They are found through the run's tool call IDs, noted as each call ends,
-because tool-call hooks see only call-scoped stores that are erased when the call commits.
+Only the text after the last tool call used to be delivered, once the run settled, on the theory
+that earlier text was working commentary that would flood the chat. In practice the person stared
+at silence through every long tool call. The user asked for every text block to be sent, for
+Telegram and bridges alike. Each block is now owed as soon as the next block or a tool call
+follows it, which is before that tool runs, and the conversation is told that everything it writes
+is sent, so it keeps progress notes short and written for the person. The run's last block is its
+answer and waits for settlement, so it can carry the images the run generated or read and the
+files it showed with `present_files`, in order and without their layout: a captioned picture reads
+better than a picture followed by a separate line, and bridges already promise a reply with text
+and attachments together. The agent is told that reading an image shares it. Media is found
+through the run's tool call IDs, noted as each call ends, because tool-call hooks see only
+call-scoped stores that are erased when the call commits. A run that fails without an answer and
+without media sends a short apology instead of silence. A block that is exactly `NO_REPLY` is never
+sent, and an answer of `NO_REPLY` holds back the media too, so the agent can deliberately stay
+quiet.
+
+## "Typing…" lasts as long as the run
+
+Typing was shown only before each inference, so a tool call longer than Telegram's five-second
+indicator left the chat looking idle. The user wanted it kept up the whole time. Each working
+conversation now has a typing loop of its own, started with the run's loop, renewed at the
+adapter's `intervalMs`, renewed again right after each reply because Telegram hides the indicator
+once the bot speaks, and stopped when the run settles or the module closes. It lives in its own
+named context because it belongs to the run, not to the hook that started it, and it gives up
+after an hour so a run whose settlement never arrives cannot keep it alive forever.
 
 ## The cursor and the message move together
 
