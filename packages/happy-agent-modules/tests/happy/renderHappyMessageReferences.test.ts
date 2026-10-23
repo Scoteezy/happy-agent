@@ -204,4 +204,23 @@ describe("resolveHappyReferenceLabel", () => {
             expect([reference, await label(reference)]).toEqual([reference, expected]);
         }
     });
+
+    it("drops the agent's media layout blocks, and a text that held only layout", async () => {
+        const grid = '<div style="display:grid">\n\n<img src="a.png">\n<img src="b.png">\n</div>\n';
+        const rendered = await renderHappyMessageReferences(
+            [
+                message("agent", { t: "text", text: `Side by side:\n${grid}\nB is newer.` }),
+                message("agent", { t: "text", text: grid }),
+                message("agent", { t: "text", text: '```html\n<img src="a.png">\n```' }),
+                message("user", { t: "text", text: grid }),
+            ],
+            async () => undefined,
+        );
+
+        expect(textOf(rendered)).toEqual([
+            "Side by side:\n\nB is newer.",
+            '```html\n<img src="a.png">\n```',
+            grid,
+        ]);
+    });
 });

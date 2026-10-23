@@ -5,6 +5,7 @@ import {
     clientMetadataSchema,
     clientMetadataValueSchema,
     configurationBlockSchema,
+    mediaItemSourceSchema,
     mediaLayoutSchema,
     messageErrorSchema,
     messageFailureSchema,
@@ -284,6 +285,8 @@ const historyMediaItemFields = {
     size: historyFileDiffCountSchema,
     /** Names the daemon-private snapshot the item's bytes are served from; never public. */
     sha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+    /** The file it was read, presented, or generated as; absent on records from before it. */
+    source: Type.Optional(mediaItemSourceSchema),
 };
 
 /** One snapshotted item a call showed inline: a measured image, or any other file. */

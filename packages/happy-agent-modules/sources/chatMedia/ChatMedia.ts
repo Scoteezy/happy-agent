@@ -1,5 +1,5 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { mediaLayoutSchema } from "@slopus/happy-agent-client";
+import { mediaItemSourceSchema, mediaLayoutSchema } from "@slopus/happy-agent-client";
 
 const MIB = 1024 * 1024;
 
@@ -19,6 +19,8 @@ const itemFields = {
     size: Type.Integer({ minimum: 0 }),
     /** Names the private snapshot the bytes are served from. */
     sha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+    /** The file it was read, presented, or generated as, so a layout in the agent's text can name it. */
+    source: Type.Optional(mediaItemSourceSchema),
 };
 
 /** One snapshotted item: a decoded, measured image, or any other file. */

@@ -97,6 +97,7 @@ describe("ChatMediaModule", () => {
                 mimeType: "image/jpeg",
                 size: photo.byteLength,
                 sha256: digest(photo),
+                source: { path: "photo.jpeg", absolutePath: "/workspace/photo.jpeg" },
                 width: 4,
                 height: 8,
                 thumbhash: expect.stringMatching(/^[A-Za-z0-9+/]+=*$/),
@@ -107,6 +108,10 @@ describe("ChatMediaModule", () => {
                 mimeType: "image/png",
                 size: misnamed.byteLength,
                 sha256: digest(misnamed),
+                source: {
+                    path: "/workspace/out/misnamed.jpg",
+                    absolutePath: "/workspace/out/misnamed.jpg",
+                },
                 width: 3,
                 height: 2,
                 thumbhash: expect.any(String),
@@ -117,6 +122,7 @@ describe("ChatMediaModule", () => {
                 mimeType: "application/pdf",
                 size: pdf.byteLength,
                 sha256: digest(pdf),
+                source: { path: "report.pdf", absolutePath: "/workspace/report.pdf" },
             },
             {
                 kind: "video",
@@ -124,6 +130,7 @@ describe("ChatMediaModule", () => {
                 mimeType: "video/mp4",
                 size: video.byteLength,
                 sha256: digest(video),
+                source: { path: "clip.mp4", absolutePath: "/workspace/clip.mp4" },
             },
             {
                 kind: "file",
@@ -131,6 +138,7 @@ describe("ChatMediaModule", () => {
                 mimeType: "image/svg+xml",
                 size: svg.byteLength,
                 sha256: digest(svg),
+                source: { path: "logo.svg", absolutePath: "/workspace/logo.svg" },
             },
             {
                 kind: "file",
@@ -138,6 +146,7 @@ describe("ChatMediaModule", () => {
                 mimeType: "application/octet-stream",
                 size: unknown.byteLength,
                 sha256: digest(unknown),
+                source: { path: "data", absolutePath: "/workspace/data" },
             },
         ]);
         for (const [item, bytes] of [
@@ -209,6 +218,7 @@ describe("ChatMediaModule", () => {
                         mimeType: "text/plain",
                         size: 4,
                         sha256: digest(Buffer.from("note")),
+                        source: { path: "note.txt", absolutePath: "/workspace/note.txt" },
                     },
                 ],
             },

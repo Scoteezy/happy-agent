@@ -124,7 +124,7 @@ function lastUserText(request: GymInferenceRequest): string {
 /**
  * A gym whose Chief of Staff runs exactly the tool calls a scenario asks of it, with Scout, a bot
  * of its own to export. Each guest's conversation repeats what it was told and how many pictures
- * it saw, and shows `chart.png` when asked for the chart.
+ * it saw, and shows `chart.png` when asked for the chart, laid out in its answer.
  */
 async function bridgeGym() {
     const commands = new Map<string, { callId: string; turn: GymTurn }>();
@@ -147,7 +147,16 @@ async function bridgeGym() {
                 return command.turn;
             }
             if (request.messages.at(-1)?.role === "tool") {
-                return { content: [{ type: "text", text: "Here is the chart." }] };
+                // The layout block arranges the chart for chats that show it; a bridge gets the
+                // chart itself as an attachment and none of the HTML.
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: 'Here is the chart.\n\n<figure>\n\n<img src="chart.png" style="width: 100%">\n\n<figcaption>Revenue</figcaption>\n</figure>\n',
+                        },
+                    ],
+                };
             }
             const text = lastUserText(request);
             if (text === "AUTH_FAILURE")

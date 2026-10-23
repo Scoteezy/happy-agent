@@ -28,13 +28,16 @@ durable tool_result block           <agentHome>/media/<sha[0..2]>/<sha256>
 GET /v0/agents/:agentId/tool-calls/:toolCallId/media/:index
 ```
 
-History never holds the bytes. `snapshot(bytes, name)` classifies one file by its name, measures
+History never holds the bytes. `snapshot(bytes, name, source?)` classifies one file by its name, measures
 it, writes it under its SHA-256, and returns the item. A name with an `image/*` type becomes an
 `image` only when the shared image pipeline decodes it to PNG, JPEG, GIF, WebP, or AVIF; the
 item then carries its displayed width and height after EXIF orientation, the decoded format's
 media type, and a base64 ThumbHash. Anything else that claims to be an image is a `file`.
 `video/*` names are videos, PDFs are documents, and everything else is a file. Content already
 held under its digest is not written again; new content is published by rename.
+`source`, `{ path, absolutePath }`, records the file the bytes came from as the agent wrote it and
+as it resolved, so a layout block in the agent's reply can name the item; generated images use the
+generated file's path for both. A path too long for the protocol leaves the item without one.
 
 `presentation(items, layout?)` wraps items as the tool result's `presentation`, which History
 records with the successful call. The API removes `sha256` from the public presentation and serves an item
@@ -50,15 +53,18 @@ its automatic layout. Image generation asks for one column, image reads for two,
 `present_files` for none unless the agent writes one:
 
 ```text
-layout HTML ──parse5──▶ DOM ──lenient walk──▶ { type: "tree", root: MediaLayoutNode[] }
-(agent-written)                │                 element · item(index) · text · break
-                               ├─ style ──mediaLayoutStyleValue per declaration──▶ MediaLayoutStyle
-                               ├─ what it could not use ──▶ ignored[]  (reported to the model)
-                               └─ files it left out ──▶ appended[]     (placed at the end)
+layout HTML ──parseMediaLayoutHtml (client)──▶ { type: "tree", root: MediaLayoutNode[] }
+(agent-written)   │  parse5, lenient walk       element · item(index) · text · break
+                  ├─ img src ──exactly one of filepaths──▶ that item's index
+                  ├─ style ──mediaLayoutStyleValue per declaration──▶ MediaLayoutStyle
+                  ├─ what it could not use ──▶ ignored[]  (reported to the model)
+                  └─ files it left out ──▶ appended[]     (placed at the end)
 ```
 
-`parseLayout(html, filepaths)` parses with parse5, so tags, attributes, and entities mean what a
-browser would make of them, and keeps only what the protocol can carry. A layout never fails the
+`parseLayout(html, filepaths)` uses the client package's `parseMediaLayoutHtml`, the same parser
+desktop runs on layout blocks in an agent's reply, so the daemon and clients cannot disagree on
+what a layout means. It parses with parse5, so tags, attributes, and entities mean what a browser
+would make of them, and keeps only what the protocol can carry. A layout never fails the
 call; whatever is dropped is listed in `ignored` so `present_files` can tell the model in one
 sentence. The kept tags are `div`, `section`, `figure`, `figcaption`, `p`, `span`, `strong`, `em`,
 and `code`, plus `img` as an item and `br` as a break. An unknown tag is unwrapped and its text
@@ -91,4 +97,7 @@ Live pages belong to the Artifacts module. Use `create_artifact` with `type: "ht
 
 Every agent is told, through this module's instructions, that generated images, images it reads,
 artifact cards, and presented files appear inline in its own chat only, not in parent or child
-chats, and that an image it has read is already shown.
+chats, and that an image it has read is already shown. The instructions also give one sentence and one tiny
+example of arranging images already shown with plain HTML in the reply; clients find those blocks
+with the client package's `splitMediaLayoutBlocks` and place each `img src` by the item's
+`source`.

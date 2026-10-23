@@ -150,6 +150,10 @@ lookup that fails falls back to the placeholder and never holds up the sync.
 History keeps the tags exactly as the agent wrote them. Tags in code, user
 messages, and tool output are left as they are.
 
+Media layout blocks, the plain HTML an agent writes to arrange images it already
+showed, are dropped from the agent's text before it is queued, and a text that
+was only a layout is not sent; History keeps the blocks as written.
+
 ## Acting on a conversation
 
 The socket, the encryption and the queue are this module's own. The conversation

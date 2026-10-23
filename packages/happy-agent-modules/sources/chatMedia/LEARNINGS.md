@@ -59,6 +59,19 @@ that the client package's `mediaLayoutStyleValue` accepts, so daemon and clients
 instead of keeping two serializers in step. Image generation presents in one column. Exported bots
 ignore layouts and send the items in order.
 
+## Agents lay out shown media in their reply, without a tool call
+
+Kirill wanted agents to arrange images without spending a `present_files` call: the agent writes
+the layout as ordinary HTML in its Markdown reply, and the client renders that subset inline,
+parsing and checking it itself. An `<img src>` names an image the agent already showed in the
+conversation, by the path it read, presented, or generated it at, so every item records its
+`source` as written and resolved; nothing is ever loaded from `src`. The HTML parser moved into the
+client package so desktop and `present_files` run exactly the same code, and the client also owns
+the block splitter, which unlike CommonMark does not end a block at a blank line, because models
+write blank lines inside their HTML. A block that resolves no image, or loses content to a limit,
+stays Markdown, so a mistake never hides what the agent wrote. Guidance is one sentence and one
+tiny example in the instructions. The `present_files` layout argument stays as it was.
+
 ## A layout is followed leniently, never refused
 
 The first version failed the call on anything outside a narrow allowlist. Kirill found that too

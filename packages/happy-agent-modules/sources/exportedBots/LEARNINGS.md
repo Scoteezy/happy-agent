@@ -117,6 +117,14 @@ without media sends a short apology instead of silence. A block that is exactly 
 sent, and an answer of `NO_REPLY` holds back the media too, so the agent can deliberately stay
 quiet.
 
+## Layout blocks are dropped before a reply leaves
+
+An agent may arrange images it already showed with an HTML layout block in its reply. Chat
+services cannot show those, and the raw HTML would only be noise, so every text block loses its
+complete layout blocks, through the client package's `stripMediaLayoutBlocks`, before it is owed.
+The service still receives the run's media as attachments, as before. A block that was only a
+layout leaves nothing to send, so the text before it stays the answer.
+
 ## "Typing…" lasts as long as the run
 
 Typing was shown only before each inference, so a tool call longer than Telegram's five-second

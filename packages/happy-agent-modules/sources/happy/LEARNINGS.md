@@ -67,6 +67,12 @@ open another workspace's file, and a raw `happy-file` URL means nothing there. T
 package's `renderHappyFileLinksAsText` replaces each link with its label in the same agent text and
 service notices, before tags are named. It needs no lookup, so it can never stall the outbox.
 
+Media layout blocks, the HTML an agent writes in its reply to arrange images it already showed,
+are dropped from agent text in the same pass with the client package's `stripMediaLayoutBlocks`.
+The phone cannot show the layout, and raw HTML there reads worse than nothing; the rows of the
+calls that showed the images already tell the person what was shown. A text that was only a
+layout is left out, as the mapper already leaves out empty text.
+
 ## Mobile tool wire normalization
 
 - Native Windows PowerShell calls retain their real name, command purpose, and background-shell

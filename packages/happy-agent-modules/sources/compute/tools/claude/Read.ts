@@ -183,7 +183,10 @@ function createClaudeReadTool(
                     filePath,
                     { maxDimension: MAX_IMAGE_DIMENSION },
                 );
-                const presentation = await showReadImage(ctx, chatMedia, original, filePath);
+                const presentation = await showReadImage(ctx, chatMedia, original, {
+                    path: file_path,
+                    absolutePath: filePath,
+                });
                 return {
                     outcome: "image" as const,
                     path: filePath,

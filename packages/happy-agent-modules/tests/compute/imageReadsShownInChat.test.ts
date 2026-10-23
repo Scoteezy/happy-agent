@@ -51,7 +51,12 @@ function digest(bytes: Uint8Array): string {
 }
 
 /** The one image item of a two-column media presentation, checked against the original file. */
-async function shownOriginal(presentation: unknown, original: Buffer, name: string) {
+async function shownOriginal(
+    presentation: unknown,
+    original: Buffer,
+    name: string,
+    path: string = name,
+) {
     expect(presentation).toEqual({
         type: "media",
         items: [
@@ -64,6 +69,7 @@ async function shownOriginal(presentation: unknown, original: Buffer, name: stri
                 width: expect.any(Number),
                 height: expect.any(Number),
                 thumbhash: expect.any(String),
+                source: { path, absolutePath: `/workspace/${name}` },
             },
         ],
         layout: { type: "columns", columns: 2 },

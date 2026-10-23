@@ -5,6 +5,7 @@ import {
     renderHappyFileLinksAsText,
     renderHappyReferencesAsMarkdown,
     replaceHappyReferences,
+    stripMediaLayoutBlocks,
     type HappyReference,
 } from "@slopus/happy-agent-client";
 
@@ -13,7 +14,8 @@ import type { HappySessionProtocolMessage } from "./HappyProtocol.js";
 /**
  * Replaces the reference tags and file links in what the agent said with plain words, because the
  * phone cannot open them: each tag becomes its entity's current name, or the shared placeholder
- * when `label` has none, and each `happy-file` link becomes its label. Only the agent's own text,
+ * when `label` has none, and each `happy-file` link becomes its label. Media layout blocks are
+ * dropped, and a text that was only layout is left out. Only the agent's own text,
  * service notices, and the descriptions of its tool calls carry them; user input and tool output
  * are relayed as they are. Each distinct reference is resolved once, one at a time, so the lookups
  * can share the caller's transaction.
@@ -64,7 +66,10 @@ export async function renderHappyMessageReferences(
             rendered.push(message);
             continue;
         }
-        let text = renderHappyFileLinksAsText(ev.text);
+        // Layout blocks arrange media the phone already shows in order; their HTML would show raw.
+        const laidOut = ev.t === "text" ? stripMediaLayoutBlocks(ev.text) : ev.text;
+        if (laidOut.trim() === "") continue;
+        let text = renderHappyFileLinksAsText(laidOut);
         if (await resolve(text)) {
             text = renderHappyReferencesAsMarkdown(text, (reference) =>
                 labels.get(formatHappyReferenceTag(reference)),

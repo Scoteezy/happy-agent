@@ -130,8 +130,12 @@ async function presentComputeFiles(
     filepaths: readonly string[],
 ): Promise<readonly ChatMediaItem[]> {
     const permissions = computePermissionsForContext(ctx);
-    const sources: { readonly path: string; readonly name: string; readonly maxBytes: number }[] =
-        [];
+    const sources: {
+        readonly filepath: string;
+        readonly path: string;
+        readonly name: string;
+        readonly maxBytes: number;
+    }[] = [];
     let total = 0;
     for (const filepath of filepaths) {
         const path = resolveComputePath(filepath, compute.cwd, compute.fs.home);
@@ -151,7 +155,7 @@ async function presentComputeFiles(
                 `One call may present at most ${formatMiB(ChatMediaModule.maxCallBytes)} in all.`,
             );
         }
-        sources.push({ path, name, maxBytes: limit.maxBytes });
+        sources.push({ filepath, path, name, maxBytes: limit.maxBytes });
     }
     const items: ChatMediaItem[] = [];
     for (const source of sources) {
@@ -161,7 +165,12 @@ async function presentComputeFiles(
         if (bytes.byteLength === 0) {
             throw new Error(`${quoteVisibleExact(source.name)} is empty.`);
         }
-        items.push(await chatMedia.snapshot(bytes, source.name));
+        items.push(
+            await chatMedia.snapshot(bytes, source.name, {
+                path: source.filepath,
+                absolutePath: source.path,
+            }),
+        );
     }
     return items;
 }

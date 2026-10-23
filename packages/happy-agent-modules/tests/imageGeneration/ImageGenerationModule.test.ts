@@ -126,6 +126,7 @@ describe("ImageGenerationModule", () => {
                     width: 8,
                     height: 8,
                     thumbhash: expect.any(String),
+                    source: { path: result.path, absolutePath: result.path },
                 },
             ],
             layout: { type: "columns", columns: 1 },

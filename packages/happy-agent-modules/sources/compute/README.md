@@ -155,7 +155,8 @@ the agent gets, Claude's, Codex's, Grok's, Kimi's, GLM's, or a foreign agent's e
 showing a file from the machine works the same for every model. It reads the files under the call's
 permissions, asks chat media to snapshot them, and, when the agent passes `layout` HTML, asks chat
 media to check it before any file is read. `showReadImage` is the shared step that shows an image a
-reading tool read.
+reading tool read. Both record each item's `source`, the path as the agent wrote it and as it
+resolved, so a layout block in the agent's reply can place the item later.
 
 A vendor tool's own `impl/` directory holds only what is genuinely that vendor's: parsing Claude's
 shell IDs, Codex's patch format, Grok's task IDs. Nothing there is shared across vendors.

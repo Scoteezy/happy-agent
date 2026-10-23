@@ -165,14 +165,33 @@ describe("tool calls present media and artifacts in the chat", () => {
                     width: 6,
                     height: 4,
                     thumbhash: expect.stringMatching(/^[A-Za-z0-9+/]+=*$/),
+                    // Each item names the file it came from, as written and resolved, so a layout
+                    // block in the agent's reply can place it.
+                    source: {
+                        path: "out/chart.png",
+                        absolutePath: `${gym.workspacePath}/out/chart.png`,
+                    },
                 },
                 {
                     kind: "document",
                     name: "report.pdf",
                     mimeType: "application/pdf",
                     size: REPORT.byteLength,
+                    source: {
+                        path: "out/report.pdf",
+                        absolutePath: `${gym.workspacePath}/out/report.pdf`,
+                    },
                 },
-                { kind: "video", name: "clip.mp4", mimeType: "video/mp4", size: CLIP.byteLength },
+                {
+                    kind: "video",
+                    name: "clip.mp4",
+                    mimeType: "video/mp4",
+                    size: CLIP.byteLength,
+                    source: {
+                        path: "./out/clip.mp4",
+                        absolutePath: `${gym.workspacePath}/out/clip.mp4`,
+                    },
+                },
             ],
         };
         expect(block).toMatchObject({ status: "completed", presentation });
@@ -344,7 +363,18 @@ describe("tool calls present media and artifacts in the chat", () => {
             status: "completed",
             presentation: {
                 type: "media",
-                items: [{ kind: "image", name: "chart.png", width: 6, height: 4 }],
+                items: [
+                    {
+                        kind: "image",
+                        name: "chart.png",
+                        width: 6,
+                        height: 4,
+                        source: {
+                            path: "out/chart.png",
+                            absolutePath: `${gym.workspacePath}/out/chart.png`,
+                        },
+                    },
+                ],
                 layout: { type: "columns", columns: 2 },
             },
         });

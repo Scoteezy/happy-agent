@@ -78,7 +78,10 @@ export function codexViewImageTool(
                 permissions,
                 filePath,
             );
-            const presentation = await showReadImage(ctx, chatMedia, original, filePath);
+            const presentation = await showReadImage(ctx, chatMedia, original, {
+                path,
+                absolutePath: filePath,
+            });
             return {
                 path: filePath,
                 detail: detail ?? "high",

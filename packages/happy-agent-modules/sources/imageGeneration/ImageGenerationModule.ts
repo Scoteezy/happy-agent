@@ -123,7 +123,7 @@ export class ImageGenerationModule implements AgentModule {
         // Showing the image in the chat is not worth losing an image that was already paid for,
         // so a snapshot that fails leaves the result without a presentation.
         const presentation = await this.#chatMedia
-            .snapshot(bytes, fileName)
+            .snapshot(bytes, fileName, { path, absolutePath: path })
             .then((item) => this.#chatMedia.presentation([item], { type: "columns", columns: 1 }))
             .catch((error: unknown) => {
                 ctx.log.warn("A generated image could not be shown in the chat.", {}, error);

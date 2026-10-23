@@ -121,7 +121,10 @@ export function kimiReadMediaFileTool(
             if ((await compute.fs.stat(permissions, path)).mtimeMs !== stat.mtimeMs)
                 throw new Error("The image changed while it was being read. Read it again.");
             await reads.record(ctx, path, stat.mtimeMs);
-            const presentation = await showReadImage(ctx, chatMedia, bytes, path);
+            const presentation = await showReadImage(ctx, chatMedia, bytes, {
+                path: args.path,
+                absolutePath: path,
+            });
             return {
                 path,
                 image: {
