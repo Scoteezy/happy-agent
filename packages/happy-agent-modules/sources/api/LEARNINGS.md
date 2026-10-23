@@ -380,3 +380,10 @@ request's `Accept-Encoding` allows it: about a sixth of the bytes for roughly a 
 megabyte. A client that does not ask, such as the SDK's socket fetch, gets the body exactly as
 before. Desktop's proxy forwards Chromium's `Accept-Encoding` and pipes the response through
 unchanged, so the renderer decodes it natively.
+
+## A compaction measurement is not a status change
+
+A manual compaction set the agent idle on every compaction event that was not running, including
+the late `tokensAfter` measurement recorded during the next run. That run then flickered idle
+between working updates. A manual compaction now moves the agent status only when it is created
+or its own status changes; the measurement updates the message alone.

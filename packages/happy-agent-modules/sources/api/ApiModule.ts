@@ -3395,8 +3395,13 @@ export class ApiModule implements AgentModule {
                 compaction as Compaction,
                 Value.Check(compactionSchema, previous) ? (previous as Compaction) : undefined,
             );
+            // Only a manual compaction's own transition moves the agent. Its later tokensAfter
+            // measurement arrives during the next run and must not report that run idle.
+            const transitioned =
+                event.type === "compaction.message-created" ||
+                (previous as Compaction).status !== (compaction as Compaction).status;
             const status =
-                (compaction as Compaction).trigger !== "manual"
+                (compaction as Compaction).trigger !== "manual" || !transitioned
                     ? undefined
                     : (compaction as Compaction).status === "running"
                       ? "working"
