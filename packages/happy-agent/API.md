@@ -381,7 +381,8 @@ separator returns `400`, and separators created earlier are no longer listed.
 
 Reference tags in agent text, described under "Message content", are additive and do not
 increment the protocol version. Request and response schemas are unchanged; a client that does not
-render them shows the tag text as written. File links, described in the same section, are additive
+render them shows the tag text as written. The `surface` kind is additive on the same terms: a
+client that does not know it shows such a reference as inert text. File links, described in the same section, are additive
 on the same terms; a client that does not know them treats them as Markdown links with an unknown
 scheme.
 
@@ -6529,8 +6530,10 @@ agent shows the syntax itself.
 | `workspace` | a workspace                                                   | `GET /v0/workspaces/:workspaceId`                                       | `name`                                                           | `initialization.status` is `"initializing"`, or `status` is `"archiving"` |
 | `project`   | a project                                                     | `GET /v0/projects/:projectId`                                           | `name`                                                           | `initialization.status` is `"initializing"`                               |
 | `service`   | a service; `workspace` optionally names its workspace         | `GET /v0/workspaces/:workspaceId/services/:serviceId`                   | `name`                                                           | `status` is `"starting"`, `"running"`, or `"stopping"`                    |
+| `surface`   | a Surface of any type, such as a todo list, document, or chat | `GET /v0/surfaces`, the instance whose `id` matches                     | `name`, following `surface.updated`                              | never                                                                     |
 
-A service is addressed only under its workspace. Without a `workspace` attribute, the workspace is
+A service is addressed only under its workspace. A Surface has no route of its own, so it resolves
+from the catalog, and it is inert when the catalog has no instance with its `id`. Without a `workspace` attribute, the workspace is
 the one the message's agent works in. Other attributes have no meaning for kinds that do not list
 them and are ignored. Files have no tag: agents keep referring to them as `path:line`. The kind set
 may grow.

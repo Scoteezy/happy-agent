@@ -16,8 +16,9 @@ const ID = "rg799k2m9q4w1e5t8y3u6i0o";
 
 describe("parseHappyReferenceTag", () => {
     it("parses the canonical tag of every kind", () => {
-        for (const kind of ["artifact", "agent", "workspace", "project", "service"]) {
+        for (const kind of ["artifact", "agent", "workspace", "project", "service", "surface"]) {
             expect(parseHappyReferenceTag(`<happy-${kind} id="${ID}"/>`)).toEqual({ kind, id: ID });
+            expect(isKnownHappyReferenceKind(kind)).toBe(true);
         }
     });
 
@@ -194,6 +195,9 @@ describe("fallback rendering", () => {
         expect(escapeMarkdownText("a\n\n b_c")).toBe("a b\\_c");
         expect(happyReferencePlaceholder({ kind: "service", id: "s" })).toBe(
             "an unavailable service",
+        );
+        expect(happyReferencePlaceholder({ kind: "surface", id: "s" })).toBe(
+            "an unavailable surface",
         );
     });
 });

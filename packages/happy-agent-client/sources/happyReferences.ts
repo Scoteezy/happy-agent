@@ -20,6 +20,7 @@ export const HAPPY_REFERENCE_KINDS = [
     "workspace",
     "project",
     "service",
+    "surface",
 ] as const;
 export type HappyReferenceKind = (typeof HAPPY_REFERENCE_KINDS)[number];
 
