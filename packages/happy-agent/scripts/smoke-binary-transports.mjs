@@ -160,6 +160,7 @@ async function main() {
             HAPPY_GYM_INFERENCE_URL: `http://127.0.0.1:${String(inferencePort)}/inference`,
             HAPPY_GYM_TOKEN: inferenceToken,
             HAPPY_HOME_DIR: happyHome,
+            HAPPY_OBSERVATION_LOGS: "1",
             HOME: root,
             TMPDIR: nativeCacheTmp,
         },
@@ -229,13 +230,29 @@ async function main() {
         if (process.argv.includes("--keepalive-only")) return;
 
         const registered = await client.registerProject({ path: workspacePath });
-        const project = await waitFor(async () => {
-            const current = (await client.getProject(registered.project.id)).project;
-            if (current.initialization.status === "failed") {
-                throw new Error(current.initialization.error ?? "Project initialization failed.");
-            }
-            return current.initialization.status === "ready" ? current : undefined;
-        }, daemon);
+        let lastProject;
+        // Project setup probes the folder with sandboxed Git reads. On a freshly booted Windows
+        // runner each of the first reads can take over ten seconds, so setup alone has used more
+        // than thirty; later daemons on the same machine finish it in about a second.
+        const project = await waitFor(
+            async () => {
+                const current = (await client.getProject(registered.project.id)).project;
+                lastProject = current;
+                if (current.initialization.status === "failed") {
+                    throw new Error(
+                        current.initialization.error ?? "Project initialization failed.",
+                    );
+                }
+                return current.initialization.status === "ready" ? current : undefined;
+            },
+            daemon,
+            120_000,
+        ).catch((error) => {
+            throw new Error(
+                `The standalone project never became ready: ${JSON.stringify(lastProject?.initialization)}.`,
+                { cause: error },
+            );
+        });
 
         process.stdout.write("Checking standalone image processing.\n");
         const currentProfile = await client.getProfile();
@@ -406,6 +423,10 @@ async function main() {
     } catch (error) {
         const output = daemonOutput.join("").trim();
         if (output.length > 0) process.stderr.write(`Standalone daemon output:\n${output}\n`);
+        const log = await readFile(`${happyHome}/agent/observation/agent.log`, "utf8")
+            .then((text) => text.slice(-200_000).trim())
+            .catch(() => "");
+        if (log.length > 0) process.stderr.write(`Standalone daemon log:\n${log}\n`);
         throw error;
     } finally {
         process.stdout.write("Stopping standalone transport smoke resources.\n");

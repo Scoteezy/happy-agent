@@ -28,7 +28,6 @@ assert.equal(
 );
 const fixture = await mkdtemp(join(tmpdir(), "happy-native-fff-"));
 let finder;
-let closeLibrary;
 try {
     // Keep the actual installed SDK; adapt only its native resolver just as the
     // standalone builder does. No node_modules or running daemon is modified.
@@ -53,8 +52,7 @@ try {
             `from ${JSON.stringify(pathToFileURL(sdkRequire.resolve("ffi-rs")).href)}`,
         ),
     );
-    let FileFinder;
-    ({ FileFinder, closeLibrary } = await import(pathToFileURL(entry).href));
+    const { FileFinder } = await import(pathToFileURL(entry).href);
     const workspace = join(fixture, "workspace");
     await mkdir(join(workspace, "src"), { recursive: true });
     execFileSync("git", ["init", "--quiet", workspace], { windowsHide: true });
@@ -105,8 +103,9 @@ try {
         assert.equal(finder.isDestroyed, true);
         finder = undefined;
     }
-    closeLibrary();
-    closeLibrary = undefined;
+    // The library stays loaded until the process exits, as it does in the daemon, which never
+    // unloads it. Unloading fff_c.dll before exit makes Bun 1.4.4 on Windows crash during exit
+    // with an access violation about once in twelve runs, after every check has passed.
     await rename(workspace, workspace + "-closed");
     console.log(
         JSON.stringify({
@@ -131,7 +130,6 @@ try {
     );
 } finally {
     finder?.destroy();
-    closeLibrary?.();
     assert.equal(dirname(resolve(fixture)), resolve(tmpdir()));
     assert.ok(fixture.includes("happy-native-fff-"));
     await rm(fixture, { recursive: true, force: true });
