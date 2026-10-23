@@ -74,4 +74,6 @@ runner, then creates the parentless agent, writes the agent and workspace indexe
 agent on the Surface in one transaction. The HTTP caller only waits, at most 20 seconds, for that
 commit. Tasks, bots, files, terminals, services, bridges, and the API ask this module whether an
 agent or workspace belongs to a chat; the Surface, not those catalogs, owns its lifetime. The chat
-agent's context names the Surface and receives the ordinary, non-admin Surface tools.
+agent receives the ordinary, non-admin Surface tools. Its context names the Surface, tells it to
+read the Surface's current state with that type's tools before every answer or change, keeps it on
+that Surface, and gives each type its own working rules.

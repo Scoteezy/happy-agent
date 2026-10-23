@@ -199,7 +199,8 @@ describe("Surface chats are shared lazy conversations", () => {
         const chatRequest = gym.inference.requests.find((request) => request.sessionId === chatId)!;
         expect(chatRequest.instructions).toContain("# Surface chat");
         expect(chatRequest.instructions).toContain(surface.id);
-        expect(chatRequest.instructions).toContain('"Errands"');
+        expect(chatRequest.instructions).toContain('side chat of the todo list "Errands"');
+        expect(chatRequest.instructions).toContain("Call list_todos with this Surface ID");
         const tools = gym.inference.lastTools();
         expect(tools).toEqual(expect.arrayContaining(["create_todo", "list_todos"]));
         expect(tools).not.toContain("create_todo_surface");

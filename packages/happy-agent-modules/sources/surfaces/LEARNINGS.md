@@ -87,6 +87,20 @@ agents. The Surface owns the chat's lifetime, so agent
 and workspace archive, reorder, rename, child creation, and attaching another agent all conflict.
 The agent works for each message's sender, holds no admin role, and never joins anyone.
 
+## A Surface chat works from the Surface's current state
+
+The first chat context only named the Surface and listed tools, with nothing for chat Surfaces,
+and nothing told the agent to reread concurrent edits or stay on the Surface. Steve asked that it know
+it is the side chat of one specific Surface, how to read that Surface's current state, that it
+stays focused on it, and that it acts differently per type. The context now names the Surface,
+requires a fresh read with that type's exact calls in every turn that depends on its contents,
+keeps replies short and away from the repository, and gives every chat-enabled type its own
+rules: todos are acted on and completed rather than deleted, documents get minimal co-author
+edits against the read `seq`, calendars confirm ambiguous times and whole-series edits, chat
+Surfaces are read but never posted to, System Monitors are read-only, and references inspect
+their live target. A unit test checks that every tool the context names exists and none is an
+admin tool.
+
 ## Attribution is explicit and remains separate from audit actors
 
 Todo records and Surfaces did not retain their author or creator. Todos now carry immutable
