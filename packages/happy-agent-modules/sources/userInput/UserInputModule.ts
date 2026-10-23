@@ -40,10 +40,12 @@ import {
     userInputRequestIdSchema,
     userInputPresenceStateSchema,
     userInputTimestampSchema,
+    userInputPermissionRequestSchema,
     userInputToolInputSchema,
     type UserInputAnswer,
     type UserInputAnswerInput,
     type UserInputAskInput,
+    type UserInputPermissionRequest,
     type UserInputCancelInput,
     type UserInputCompleteInput,
     type UserInputDetailPage,
@@ -176,7 +178,39 @@ export class UserInputModule implements AgentModule {
         const id = requestId ?? newIdentity();
         this.#assertValue(userInputRequestIdSchema, id, "request identity");
         const request = await ctx.inTx((txCtx) =>
-            this.#createOrResume(txCtx, agentId, id, structuredClone(input)),
+            this.#createOrResume(txCtx, agentId, id, structuredClone(input), undefined),
+        );
+        return structuredClone(request);
+    }
+
+    /**
+     * Asks on the agent's behalf for something outside it, such as an MCP server that wants the
+     * person's approval. The request carries `permissionRequest` so every client can tell it from
+     * the agent's own questions. This is the only way to set it; `request_user_input` cannot.
+     */
+    async askForPermission(
+        ctx: Context,
+        agentId: string,
+        input: UserInputAskInput,
+        permissionRequest: UserInputPermissionRequest,
+    ): Promise<UserInputRequest> {
+        this.#assertAgentId(agentId);
+        this.#assertInput(userInputToolInputSchema, input, "user input request");
+        this.#assertAskBounds(input);
+        this.#assertInput(
+            userInputPermissionRequestSchema,
+            permissionRequest,
+            "user input permission request",
+        );
+        const id = newIdentity();
+        const request = await ctx.inTx((txCtx) =>
+            this.#createOrResume(
+                txCtx,
+                agentId,
+                id,
+                structuredClone(input),
+                structuredClone(permissionRequest),
+            ),
         );
         return structuredClone(request);
     }
@@ -441,10 +475,11 @@ export class UserInputModule implements AgentModule {
         agentId: string,
         requestId: string,
         input: UserInputAskInput,
+        permissionRequest: UserInputPermissionRequest | undefined,
     ): Promise<UserInputRequest> {
         const current = await this.#readRequest(ctx, requestId);
         if (current !== undefined) {
-            this.#assertSameRequest(current, input, requestId, agentId);
+            this.#assertSameRequest(current, input, requestId, agentId, permissionRequest);
             return current;
         }
         const at = now();
@@ -459,6 +494,7 @@ export class UserInputModule implements AgentModule {
             context: input.context,
             ...(first.options === undefined ? {} : { options: structuredClone(first.options) }),
             ...(isBatch ? { questions: structuredClone(questions) } : {}),
+            ...(permissionRequest === undefined ? {} : { permissionRequest }),
             ...(input.autoResolutionMs === undefined
                 ? {}
                 : { autoResolutionMs: input.autoResolutionMs }),
@@ -881,6 +917,7 @@ export class UserInputModule implements AgentModule {
         input: UserInputAskInput,
         requestId: string,
         agentId: string,
+        permissionRequest: UserInputPermissionRequest | undefined,
     ): void {
         const questions = normalizeQuestions(input);
         const currentQuestions = current.questions ?? [
@@ -896,6 +933,7 @@ export class UserInputModule implements AgentModule {
             current.askingAgentId !== agentId ||
             current.context !== input.context ||
             !sameValue(currentQuestions, questions) ||
+            !sameValue(current.permissionRequest, permissionRequest) ||
             current.autoResolutionMs !== input.autoResolutionMs ||
             !(
                 current.deadlineAt === input.deadlineAt ||

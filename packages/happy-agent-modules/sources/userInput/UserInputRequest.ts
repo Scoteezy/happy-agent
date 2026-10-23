@@ -26,6 +26,7 @@ export const MAX_USER_INPUT_DETAIL_TOTAL_CHARACTERS = 200_000;
 export const MAX_USER_INPUT_PRESENCE_TITLE_CHARACTERS = 128;
 export const MAX_USER_INPUT_PRESENCE_EMOJI_CHARACTERS = 32;
 export const MAX_USER_INPUT_PRESENCE_PROMPT_CHARACTERS = 2_000;
+export const MAX_USER_INPUT_PERMISSION_SERVER_CHARACTERS = 128;
 
 export const userInputTimestampSchema = Type.Integer({
     minimum: 0,
@@ -203,6 +204,26 @@ const userInputBatchAnswersSchema = Type.Record(userInputQuestionIdSchema, userI
     maxProperties: MAX_USER_INPUT_BATCH_QUESTION_COUNT,
 });
 
+/**
+ * Marks a question that something outside the agent is asking: today, an MCP server's elicitation
+ * during one of the agent's tool calls. Only the module's own `askForPermission` sets it, so no
+ * agent tool can present its own question as one.
+ */
+export const userInputPermissionRequestSchema = Type.Object(
+    {
+        source: Type.Literal("mcp_elicitation"),
+        server: Type.String({
+            minLength: 1,
+            maxLength: MAX_USER_INPUT_PERMISSION_SERVER_CHARACTERS,
+        }),
+        serverTitle: Type.String({
+            minLength: 1,
+            maxLength: MAX_USER_INPUT_PERMISSION_SERVER_CHARACTERS,
+        }),
+    },
+    { additionalProperties: false },
+);
+
 export const userInputRequestCommonProperties = {
     id: userInputRequestIdSchema,
     askingAgentId: userInputAgentIdSchema,
@@ -211,6 +232,7 @@ export const userInputRequestCommonProperties = {
     context: userInputContextSchema,
     options: Type.Optional(userInputOptionsSchema),
     questions: Type.Optional(userInputBatchQuestionsSchema),
+    permissionRequest: Type.Optional(userInputPermissionRequestSchema),
     autoResolutionMs: Type.Optional(
         Type.Integer({
             minimum: MIN_USER_INPUT_AUTO_RESOLUTION_MS,
@@ -510,6 +532,7 @@ export type UserInputQuestion = Static<typeof userInputQuestionSchema>;
 export type UserInputQuestionId = Static<typeof userInputQuestionIdSchema>;
 export type UserInputHeader = Static<typeof userInputHeaderSchema>;
 export type UserInputPresenceState = Static<typeof userInputPresenceStateSchema>;
+export type UserInputPermissionRequest = Static<typeof userInputPermissionRequestSchema>;
 export type UserInputBatchQuestion = Static<typeof userInputBatchQuestionSchema>;
 export type UserInputBatchQuestionInput = Static<typeof userInputBatchQuestionInputSchema>;
 export type UserInputBatchQuestions = Static<typeof userInputBatchQuestionsSchema>;

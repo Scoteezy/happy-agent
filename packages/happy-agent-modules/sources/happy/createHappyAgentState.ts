@@ -196,6 +196,10 @@ export function toHappyCommunication(
                 question: question.question,
                 required: true,
             })),
+            // Tells a phone this is a party outside the agent asking, not the agent itself.
+            ...(request.permissionRequest === undefined
+                ? {}
+                : { permissionRequest: { ...request.permissionRequest } }),
         },
         kind: HAPPY_FORM_KIND,
         // Shown by a phone that cannot render this kind, so the person still

@@ -35,8 +35,11 @@ import {
     MAX_USER_INPUT_PAGE_SIZE,
     userInputRequestSchema,
     userInputTerminalRequestSchema,
+    userInputMigrations,
     type UserInputRequest,
 } from "../../sources/userInput/index.js";
+import { presenceMigrations } from "../../sources/presence/PresenceDatabase.js";
+import { moduleDatabase } from "../support/moduleDatabase.js";
 import { createPresenceModule, createUserInputModule } from "./userInputTestSupport.js";
 
 const agentId = "agent-one";
@@ -379,6 +382,64 @@ describe("UserInput runtime schemas and contracts", () => {
         expect(
             Value.Check(userInputAnswerSchema, "x".repeat(MAX_USER_INPUT_ANSWER_CHARACTERS + 1)),
         ).toBe(false);
+    });
+
+    it("lets only askForPermission mark a question as a permission request", async () => {
+        const database = moduleDatabase(
+            [...presenceMigrations, ...userInputMigrations],
+            "user-input-permission-request",
+        );
+        await database.ready;
+        try {
+            const module = createUserInputModule();
+            const permissionRequest = {
+                source: "mcp_elicitation" as const,
+                server: "bambu_printer",
+                serverTitle: "Bambu Printer",
+            };
+            const asked = await module.askForPermission(
+                database.context,
+                agentId,
+                { context: "Context", questions: [{ id: "approval", question: "Start?" }] },
+                permissionRequest,
+            );
+            expect(asked.permissionRequest).toEqual(permissionRequest);
+            await expect(module.get(database.context, agentId, asked.id)).resolves.toMatchObject({
+                permissionRequest,
+            });
+
+            const own = await module.ask(database.context, agentId, {
+                context: "Context",
+                questions: [{ question: "Which one?" }],
+            });
+            expect(own).not.toHaveProperty("permissionRequest");
+            await expect(
+                module.ask(database.context, agentId, {
+                    context: "Context",
+                    questions: [{ question: "Start?" }],
+                    permissionRequest,
+                } as never),
+            ).rejects.toThrow("Invalid user input request.");
+            await expect(
+                module.askForPermission(
+                    database.context,
+                    agentId,
+                    { context: "Context", questions: [{ question: "Start?" }] },
+                    { ...permissionRequest, source: "agent" } as never,
+                ),
+            ).rejects.toThrow("Invalid user input permission request.");
+
+            const tool = requestUserInputTool(module, agentId);
+            expect(
+                Value.Check(tool.parameters!, {
+                    context: "Context",
+                    questions: [{ question: "Start?" }],
+                    permissionRequest,
+                }),
+            ).toBe(false);
+        } finally {
+            database.close();
+        }
     });
 
     it("exposes flat request and read tools with closed parameters and no Auto review", () => {

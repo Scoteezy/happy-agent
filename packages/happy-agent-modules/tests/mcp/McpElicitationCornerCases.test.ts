@@ -1,4 +1,3 @@
-import { createRootContext, type Context } from "@steve.kite/stdlib";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -6,18 +5,20 @@ import {
     type McpElicitationRequest,
     type McpUserInputRequest,
     type McpUserInputResponse,
+    type McpUserInputService,
 } from "../../sources/mcp/index.js";
 
-const ctx = createRootContext().named("mcp-elicitation-corner-case-test");
+const SERVER = "bambu_printer";
 
 function request(
     properties: Record<string, Record<string, unknown>>,
     required?: string[],
+    message = "Please configure the server.",
 ): McpElicitationRequest {
     return {
         method: "elicitation/create",
         params: {
-            message: "Please configure the server.",
+            message,
             requestedSchema: {
                 type: "object",
                 properties,
@@ -27,103 +28,135 @@ function request(
     } as McpElicitationRequest;
 }
 
-function oneArgInput(response: McpUserInputResponse): {
-    request: (input: McpUserInputRequest) => Promise<McpUserInputResponse>;
+function answering(response: McpUserInputResponse): McpUserInputService & {
+    readonly asked: McpUserInputRequest[];
 } {
+    const asked: McpUserInputRequest[] = [];
     return {
+        asked,
         request: async (input) => {
-            expect(input.requestId).toMatch(/^mcp:/u);
+            asked.push(input);
             return response;
         },
     };
 }
 
-describe("MCP elicitation host adapter", () => {
-    it("declines malformed requests and malformed callback responses safely", async () => {
+describe("MCP elicitation adapter", () => {
+    it("declines without asking when there is nobody to ask or the request is malformed", async () => {
+        await expect(
+            handleMcpElicitation(SERVER, request({ name: { type: "string" } }), undefined),
+        ).resolves.toEqual({ action: "decline" });
+
+        const callback = vi.fn();
+        await expect(
+            handleMcpElicitation(SERVER, { nope: true }, { request: callback } as never),
+        ).resolves.toEqual({ action: "decline" });
+        expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("accepts the 2025-11-25 form mode and declines URL mode", async () => {
+        const formMode = request({ name: { type: "string" } });
+        await expect(
+            handleMcpElicitation(
+                SERVER,
+                { ...formMode, params: { ...formMode.params, mode: "form" } },
+                answering({ status: "answered", answers: { name: ["Ada"] } }),
+            ),
+        ).resolves.toEqual({ action: "accept", content: { name: "Ada" } });
+
         const callback = vi.fn();
         await expect(
             handleMcpElicitation(
-                { nope: true } as never,
+                SERVER,
                 {
-                    request: callback,
-                } as never,
+                    method: "elicitation/create",
+                    params: {
+                        mode: "url",
+                        message: "Sign in.",
+                        elicitationId: "e1",
+                        url: "https://example.com",
+                    },
+                },
+                { request: callback } as never,
             ),
         ).resolves.toEqual({ action: "decline" });
         expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("names the server in the context and in the first question", async () => {
+        const service = answering({ status: "cancelled" });
+        await handleMcpElicitation(
+            SERVER,
+            request(
+                {
+                    nozzle: { type: "number", title: "Nozzle", description: "Nozzle temperature." },
+                    bed: { type: "number" },
+                },
+                undefined,
+                "Set print temperatures.",
+            ),
+            service,
+        );
+        const asked = service.asked[0]!;
+        expect(asked.context).toContain("**Bambu Printer** is an MCP server");
+        expect(asked.context).toContain("the agent cannot answer for you");
+        expect(asked.questions.map((question) => question.question)).toEqual([
+            "Bambu Printer asks: Set print temperatures.\n\nNozzle temperature.",
+            "Bed",
+        ]);
+        expect(asked.questions.map((question) => question.header)).toEqual(["Nozzle", "Bed"]);
+    });
+
+    it("maps a dismissed, timed-out, or unreadable answer to cancel, never accept", async () => {
+        const input = request({ confirm: { type: "boolean" } }, ["confirm"]);
+        await expect(
+            handleMcpElicitation(SERVER, input, answering({ status: "cancelled" })),
+        ).resolves.toEqual({ action: "cancel" });
+        await expect(
+            handleMcpElicitation(SERVER, input, {
+                request: async () => ({
+                    status: "answered",
+                    answers: { confirm: ["Yes"] },
+                    extra: 1,
+                }),
+            } as never),
+        ).resolves.toEqual({ action: "cancel" });
+        await expect(
+            handleMcpElicitation(SERVER, request({}), answering({ status: "cancelled" })),
+        ).resolves.toEqual({ action: "cancel" });
+    });
+
+    it("asks for approval when the requested object has no properties", async () => {
+        const approve = answering({ status: "answered", answers: { approval: ["Approve"] } });
+        await expect(
+            handleMcpElicitation(SERVER, request({}, [], "Start printing benchy.3mf?"), approve),
+        ).resolves.toEqual({ action: "accept", content: {} });
+        expect(approve.asked[0]?.questions).toEqual([
+            {
+                header: "Approval",
+                id: "approval",
+                multiSelect: false,
+                options: [
+                    { label: "Approve", description: "Let Bambu Printer go ahead." },
+                    { label: "Decline", description: "Tell Bambu Printer no." },
+                ],
+                question: "Bambu Printer asks: Start printing benchy.3mf?",
+            },
+        ]);
 
         await expect(
             handleMcpElicitation(
-                ctx,
-                request({ environment: { type: "string" } }),
-                oneArgInput({
-                    status: "answered",
-                    answers: { environment: ["staging"] },
-                    extra: true,
-                } as never),
+                SERVER,
+                request({}),
+                answering({ status: "answered", answers: { approval: ["Decline"] } }),
             ),
         ).resolves.toEqual({ action: "decline" });
-    });
-
-    it("supports one-argument and context-aware two-argument services while preserving this", async () => {
-        const oneArgService = {
-            prefix: "one",
-            async request(input: McpUserInputRequest): Promise<McpUserInputResponse> {
-                expect(this.prefix).toBe("one");
-                expect(input.questions[0]?.id).toBe("environment");
-                return { status: "answered", answers: { environment: ["staging"] } };
-            },
-        };
-        await expect(
-            handleMcpElicitation(request({ environment: { type: "string" } }), oneArgService),
-        ).resolves.toEqual({
-            action: "accept",
-            content: { environment: "staging" },
-        });
-
-        const twoArgService = {
-            prefix: "two",
-            async request(
-                receivedContext: Context,
-                input: McpUserInputRequest,
-            ): Promise<McpUserInputResponse> {
-                expect(this.prefix).toBe("two");
-                expect(receivedContext).toBe(ctx);
-                expect(input.questions[0]?.id).toBe("environment");
-                return { status: "answered", answers: { environment: ["production"] } };
-            },
-        };
-        await expect(
-            handleMcpElicitation(ctx, request({ environment: { type: "string" } }), twoArgService),
-        ).resolves.toEqual({
-            action: "accept",
-            content: { environment: "production" },
-        });
-    });
-
-    it("uses an explicit confirmation question when the requested object has no properties", async () => {
-        const requestInput = vi.fn(async (input: McpUserInputRequest) => {
-            expect(input.questions).toEqual([
-                expect.objectContaining({
-                    id: "confirmation",
-                    options: [
-                        expect.objectContaining({ label: "Continue" }),
-                        expect.objectContaining({ label: "Decline" }),
-                    ],
-                }),
-            ]);
-            return {
-                status: "answered" as const,
-                answers: { confirmation: ["Continue"] },
-            };
-        });
-        await expect(
-            handleMcpElicitation(request({}, []), { request: requestInput }),
-        ).resolves.toEqual({ action: "accept", content: {} });
-
+        // Anything a person writes instead of choosing is not an approval.
         await expect(
             handleMcpElicitation(
-                request({}, []),
-                oneArgInput({ status: "answered", answers: { confirmation: ["Decline"] } }),
+                SERVER,
+                request({}),
+                answering({ status: "answered", answers: { approval: ["sure, go ahead"] } }),
             ),
         ).resolves.toEqual({ action: "decline" });
     });
@@ -138,26 +171,34 @@ describe("MCP elicitation host adapter", () => {
             },
             ["environment", "replicas", "enabled"],
         );
-        const response = {
-            status: "answered" as const,
-            answers: {
-                environment: ["staging"],
-                replicas: ["3.5"],
-                enabled: ["true"],
-            },
-        };
-        await expect(handleMcpElicitation(ctx, input, oneArgInput(response))).resolves.toEqual({
-            action: "accept",
-            content: {
-                environment: "staging",
-                replicas: 3.5,
-                enabled: true,
-            },
+        const service = answering({
+            status: "answered",
+            answers: { environment: ["staging"], replicas: ["3.5"], enabled: ["Yes"] },
         });
+        await expect(handleMcpElicitation(SERVER, input, service)).resolves.toEqual({
+            action: "accept",
+            content: { environment: "staging", replicas: 3.5, enabled: true },
+        });
+        expect(service.asked[0]?.questions).toMatchObject([
+            { id: "environment", required: true, options: [] },
+            { id: "replicas", required: true, options: [] },
+            {
+                id: "enabled",
+                required: true,
+                options: [
+                    { label: "Yes", description: "Answer yes." },
+                    { label: "No", description: "Answer no." },
+                ],
+            },
+            { id: "optional", options: [] },
+        ]);
+        expect(service.asked[0]?.questions[3]).not.toHaveProperty("required");
+
         await expect(
             handleMcpElicitation(
+                SERVER,
                 input,
-                oneArgInput({
+                answering({
                     status: "answered",
                     answers: { environment: ["staging"], replicas: ["3.5"] },
                 }),
@@ -183,113 +224,127 @@ describe("MCP elicitation host adapter", () => {
                     ],
                 },
             },
+            plate: { type: "string", enum: ["textured", "smooth"], enumNames: ["Textured"] },
         });
-        const callback = vi.fn(async (inputRequest: McpUserInputRequest) => {
-            expect(inputRequest.questions[0]).toMatchObject({
-                id: "environment",
-                options: [{ label: "Staging" }, { label: "Production" }],
-            });
-            expect(inputRequest.questions[1]).toMatchObject({
+        const service = answering({
+            status: "answered",
+            answers: {
+                environment: ["Production"],
+                regions: ["US East", "EU West"],
+                plate: ["smooth"],
+            },
+        });
+        await expect(handleMcpElicitation(SERVER, input, service)).resolves.toEqual({
+            action: "accept",
+            content: {
+                environment: "production",
+                regions: ["us-east", "eu-west"],
+                plate: "smooth",
+            },
+        });
+        expect(service.asked[0]?.questions).toMatchObject([
+            { id: "environment", options: [{ label: "Staging" }, { label: "Production" }] },
+            {
                 id: "regions",
                 multiSelect: true,
                 options: [{ label: "US East" }, { label: "EU West" }],
-            });
-            return {
-                status: "answered" as const,
-                answers: {
-                    environment: ["Production"],
-                    regions: ["US East", "EU West"],
-                },
-            };
-        });
-        await expect(handleMcpElicitation(ctx, input, { request: callback })).resolves.toEqual({
-            action: "accept",
-            content: { environment: "production", regions: ["us-east", "eu-west"] },
-        });
+            },
+            { id: "plate", options: [{ label: "Textured" }, { label: "smooth" }] },
+        ]);
     });
 
     it("preserves numeric enum values selected in multi-select arrays", async () => {
         await expect(
             handleMcpElicitation(
-                request({
-                    ports: {
-                        type: "array",
-                        items: { enum: [80, 443] },
-                    },
-                }),
-                oneArgInput({
-                    status: "answered",
-                    answers: { ports: ["80", "443"] },
-                }),
+                SERVER,
+                request({ ports: { type: "array", items: { enum: [80, 443] } } }),
+                answering({ status: "answered", answers: { ports: ["80", "443"] } }),
             ),
-        ).resolves.toEqual({
-            action: "accept",
-            content: { ports: [80, 443] },
-        });
+        ).resolves.toEqual({ action: "accept", content: { ports: [80, 443] } });
     });
 
     it("does not accept answers outside a declared enum", async () => {
         await expect(
             handleMcpElicitation(
+                SERVER,
                 request({ environment: { type: "string", enum: ["staging", "production"] } }),
-                oneArgInput({
-                    status: "answered",
-                    answers: { environment: ["delete everything"] },
-                }),
+                answering({ status: "answered", answers: { environment: ["delete everything"] } }),
             ),
         ).resolves.toEqual({ action: "decline" });
     });
 
-    it("rejects non-integral values for integer properties", async () => {
-        await expect(
-            handleMcpElicitation(
-                request({ replicas: { type: "integer" } }),
-                oneArgInput({ status: "answered", answers: { replicas: ["1.5"] } }),
-            ),
-        ).resolves.toEqual({ action: "decline" });
+    it("declines invalid booleans, blank or non-finite numbers, and fractional integers", async () => {
+        for (const [property, answer] of [
+            [{ type: "boolean" }, "maybe"],
+            [{ type: "number" }, "Infinity"],
+            [{ type: "number" }, "NaN"],
+            [{ type: "number" }, " "],
+            [{ type: "integer" }, "1.5"],
+        ] as const) {
+            await expect(
+                handleMcpElicitation(
+                    SERVER,
+                    request({ value: { ...property } }),
+                    answering({ status: "answered", answers: { value: [answer] } }),
+                ),
+            ).resolves.toEqual({ action: "decline" });
+        }
     });
 
-    it("declines invalid booleans and non-finite numbers", async () => {
+    it("declines without asking when the form cannot be shown faithfully", async () => {
+        const callback = vi.fn();
+        const service = { request: callback } as never;
+        // More fields than one question may hold.
         await expect(
             handleMcpElicitation(
-                request({ enabled: { type: "boolean" } }),
-                oneArgInput({ status: "answered", answers: { enabled: ["maybe"] } }),
+                SERVER,
+                request(
+                    Object.fromEntries(
+                        ["a", "b", "c", "d", "e"].map((id) => [id, { type: "string" }]),
+                    ),
+                ),
+                service,
             ),
         ).resolves.toEqual({ action: "decline" });
+        // Two choices the person could not tell apart.
         await expect(
             handleMcpElicitation(
-                request({ replicas: { type: "number" } }),
-                oneArgInput({ status: "answered", answers: { replicas: ["Infinity"] } }),
-            ),
-        ).resolves.toEqual({ action: "decline" });
-        await expect(
-            handleMcpElicitation(
-                request({ replicas: { type: "number" } }),
-                oneArgInput({ status: "answered", answers: { replicas: ["NaN"] } }),
-            ),
-        ).resolves.toEqual({ action: "decline" });
-    });
-
-    it("truncates long headers and falls back when a title is empty", async () => {
-        const callback = vi.fn(async (input: McpUserInputRequest) => {
-            expect(input.questions[0]).toMatchObject({
-                id: "long",
-                header: "A very long…",
-            });
-            expect(input.questions[1]).toMatchObject({
-                id: "empty",
-                header: "MCP request",
-            });
-            return { status: "cancelled" as const };
-        });
-        await expect(
-            handleMcpElicitation(
+                SERVER,
                 request({
-                    long: { type: "string", title: "A very long title" },
-                    empty: { type: "string", title: "   " },
+                    plate: { type: "string", enum: ["a", "b"], enumNames: ["Same", "Same"] },
                 }),
-                { request: callback },
+                service,
             ),
         ).resolves.toEqual({ action: "decline" });
+        // More choices than a question may offer.
+        await expect(
+            handleMcpElicitation(
+                SERVER,
+                request({
+                    filament: {
+                        type: "string",
+                        enum: Array.from({ length: 33 }, (_, index) => `slot-${String(index)}`),
+                    },
+                }),
+                service,
+            ),
+        ).resolves.toEqual({ action: "decline" });
+        expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("bounds long titles and falls back to the property name when a title is blank", async () => {
+        const service = answering({ status: "cancelled" });
+        await handleMcpElicitation(
+            SERVER,
+            request({
+                long: { type: "string", title: "A".repeat(80) },
+                print_speed: { type: "string", title: "   " },
+            }),
+            service,
+        );
+        expect(service.asked[0]?.questions.map((question) => question.header)).toEqual([
+            `${"A".repeat(63)}…`,
+            "Print Speed",
+        ]);
     });
 });

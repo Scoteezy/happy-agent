@@ -155,6 +155,20 @@ describe("publishing what a session is waiting on", () => {
         });
     });
 
+    it("tells the phone when a question is a permission request rather than the agent asking", () => {
+        const permissionRequest = {
+            source: "mcp_elicitation" as const,
+            server: "bambu_printer",
+            serverTitle: "Bambu Printer",
+        };
+        expect(
+            toHappyCommunication(request("req-1", { permissionRequest }), 1_000).form,
+        ).toMatchObject({ permissionRequest });
+        expect(toHappyCommunication(request("req-2"), 1_000).form).not.toHaveProperty(
+            "permissionRequest",
+        );
+    });
+
     it("forgets the oldest settled question rather than growing forever", () => {
         const completed = new Map<string, HappyResolvedCommunication>();
         for (let index = 0; index < 150; index += 1) {

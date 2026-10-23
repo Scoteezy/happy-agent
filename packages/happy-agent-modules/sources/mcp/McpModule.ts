@@ -47,7 +47,7 @@ import {
     mcpToolSchema,
     mcpToolResultSchema,
     mcpAgentIdSchema,
-    mcpElicitationRequestSchema,
+    MAX_MCP_SERVER_NAME_LENGTH,
     type McpCallToolInput,
     type McpGetPromptInput,
     type McpGetPromptResult,
@@ -76,6 +76,7 @@ import { createMcpConfigurationTools } from "./createMcpConfigurationTools.js";
 import { createMcpProtocolTools } from "./createMcpProtocolTools.js";
 import { createMcpTool } from "./createMcpTool.js";
 import { handleMcpElicitation, type McpUserInputService } from "./handleMcpElicitation.js";
+import { humanizeMcpName } from "./humanizeMcpName.js";
 import {
     assertPromptPage,
     assertResourcePage,
@@ -809,15 +810,12 @@ export class McpModule implements AgentModule {
         const raw = await this.#connection(agentId, input.server).callTool(
             ctx,
             input,
-            async (request) => {
-                if (!Value.Check(mcpElicitationRequestSchema, request))
-                    return { action: "decline" };
-                return await handleMcpElicitation(
-                    ctx,
+            async (request, signal) =>
+                await handleMcpElicitation(
+                    input.server,
                     request,
-                    this.#mcpUserInputService(ctx, agentId),
-                );
-            },
+                    this.#mcpUserInputService(ctx, agentId, input.server, signal),
+                ),
         );
         if (!Value.Check(mcpToolResultSchema, raw)) {
             throw new Error("MCP server returned an invalid tool result.");
@@ -1578,32 +1576,69 @@ export class McpModule implements AgentModule {
         }));
     }
 
-    #mcpUserInputService(ctx: Context, agentId: string): McpUserInputService {
+    /**
+     * Puts an elicitation in front of the person as an ordinary question on the asking agent.
+     *
+     * The question is the person's alone: no agent tool answers a question, and nothing here
+     * answers one. When the server withdraws its request, the connection ends, or the turn stops,
+     * the question is withdrawn too, so it never waits on an answer nobody will read.
+     */
+    #mcpUserInputService(
+        ctx: Context,
+        agentId: string,
+        server: string,
+        serverSignal: AbortSignal,
+    ): McpUserInputService {
+        const signal =
+            ctx.lifetime === undefined
+                ? serverSignal
+                : AbortSignal.any([serverSignal, ctx.lifetime]);
         return {
             request: async (request: McpUserInputRequest): Promise<McpUserInputResponse> => {
-                const pending = await this.#userInput.ask(
+                if (signal.aborted) return { status: "cancelled" };
+                const pending = await this.#userInput.askForPermission(
                     ctx,
                     agentId,
                     {
-                        context: "An MCP server is asking for additional input.",
+                        context: request.context,
                         questions: request.questions.map((question) => ({
                             id: question.id,
                             header: question.header,
-                            question: question.question.slice(0, 4_000),
+                            question: question.question,
                             ...(question.options.length === 0
                                 ? {}
                                 : {
                                       options: question.options.map((option) => ({
                                           label: option.label,
-                                          description: option.description.slice(0, 2_000),
+                                          description: option.description,
                                       })),
                                       multiSelect: question.multiSelect,
                                   }),
                         })),
                     },
-                    request.requestId,
+                    {
+                        source: "mcp_elicitation",
+                        server,
+                        serverTitle: boundServerTitle(humanizeMcpName(server)),
+                    },
                 );
-                const settled = await this.#userInput.wait(ctx, agentId, pending.id);
+                const withdraw = (): void => {
+                    this.#userInput
+                        .cancel(ctx, agentId, {
+                            requestId: pending.id,
+                            reason: `${humanizeMcpName(server)} no longer needs an answer.`,
+                        })
+                        .catch((error: unknown) => {
+                            ctx.log.warn(
+                                `Could not withdraw the question from MCP server ${server}: ${errorMessage(error)}`,
+                            );
+                        });
+                };
+                signal.addEventListener("abort", withdraw, { once: true });
+                if (signal.aborted) withdraw();
+                const settled = await this.#userInput
+                    .wait(ctx, agentId, pending.id)
+                    .finally(() => signal.removeEventListener("abort", withdraw));
                 if (settled.status !== "answered") return { status: "cancelled" };
                 return {
                     status: "answered",
@@ -1727,6 +1762,13 @@ function catalogServerConfigs(catalog: McpCatalog): HappyAgentConfigValues["mcpS
     return Object.fromEntries(
         [...catalog.servers.entries()].map(([name, server]) => [name, server.config]),
     );
+}
+
+/** A display name kept within the bound a permission request allows. */
+function boundServerTitle(title: string): string {
+    return title.length <= MAX_MCP_SERVER_NAME_LENGTH
+        ? title
+        : `${title.slice(0, MAX_MCP_SERVER_NAME_LENGTH - 1).trimEnd()}…`;
 }
 
 function errorMessage(error: unknown): string {

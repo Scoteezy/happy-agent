@@ -33,6 +33,11 @@ export const MAX_MCP_JSON_ARRAY_ITEMS = 2_048;
 export const MAX_MCP_JSON_OBJECT_PROPERTIES = 2_048;
 export const MAX_MCP_JSON_KEY_LENGTH = 256;
 export const MAX_MCP_OUTPUT_CHARACTERS = 100_000;
+/** The most fields one elicitation may ask for: as many questions as one person is asked at once. */
+export const MAX_MCP_QUESTIONS_PER_REQUEST = 4;
+/** The most choices one elicitation field may offer. */
+export const MAX_MCP_QUESTION_CHOICES = 32;
+export const MAX_MCP_QUESTION_HEADER_LENGTH = 64;
 export const MIN_MCP_OUTPUT_CHARACTERS = 256;
 
 const noLineBreaks = "^[^\\u0000\\r\\n]+$";
@@ -649,6 +654,9 @@ export const mcpElicitationRequestSchema = Type.Object(
         method: Type.Literal("elicitation/create"),
         params: Type.Object(
             {
+                _meta: Type.Optional(mcpJsonObjectSchema),
+                // Servers on the 2025-11-25 protocol always name the mode; older ones leave it out.
+                mode: Type.Optional(Type.Literal("form")),
                 message: Type.String({ maxLength: MAX_MCP_DESCRIPTION_LENGTH }),
                 requestedSchema: Type.Object(
                     {
@@ -685,6 +693,7 @@ export const mcpElicitationResultSchema = Type.Union([
         { additionalProperties: false },
     ),
     Type.Object({ action: Type.Literal("decline") }, { additionalProperties: false }),
+    Type.Object({ action: Type.Literal("cancel") }, { additionalProperties: false }),
 ]);
 export type McpElicitationResult = Static<typeof mcpElicitationResultSchema>;
 
@@ -697,19 +706,22 @@ export const mcpUserInputOptionSchema = Type.Object(
 );
 export const mcpUserInputQuestionSchema = Type.Object(
     {
-        header: Type.String({ minLength: 1, maxLength: 12 }),
+        header: Type.String({ minLength: 1, maxLength: MAX_MCP_QUESTION_HEADER_LENGTH }),
         id: Type.String({ minLength: 1, maxLength: MAX_MCP_JSON_KEY_LENGTH }),
         multiSelect: Type.Boolean(),
-        options: Type.Array(mcpUserInputOptionSchema, { maxItems: MAX_MCP_PAGE_SIZE }),
-        question: Type.String({ maxLength: MAX_MCP_DESCRIPTION_LENGTH }),
+        options: Type.Array(mcpUserInputOptionSchema, { maxItems: MAX_MCP_QUESTION_CHOICES }),
+        question: Type.String({ minLength: 1, maxLength: MAX_MCP_DESCRIPTION_LENGTH }),
         required: Type.Optional(Type.Boolean()),
     },
     { additionalProperties: false },
 );
 export const mcpUserInputRequestSchema = Type.Object(
     {
-        requestId: Type.String({ minLength: 1, maxLength: MAX_MCP_URI_LENGTH }),
-        questions: Type.Array(mcpUserInputQuestionSchema, { maxItems: MAX_MCP_PAGE_SIZE }),
+        context: Type.String({ minLength: 1, maxLength: MAX_MCP_DESCRIPTION_LENGTH }),
+        questions: Type.Array(mcpUserInputQuestionSchema, {
+            minItems: 1,
+            maxItems: MAX_MCP_QUESTIONS_PER_REQUEST,
+        }),
     },
     { additionalProperties: false },
 );

@@ -1,7 +1,12 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ElicitRequestSchema, type ElicitRequest } from "@modelcontextprotocol/sdk/types.js";
+import {
+    CancelledNotificationSchema,
+    ElicitRequestSchema,
+    type ElicitRequest,
+    type RequestId,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { Compute } from "@slopus/happy-agent-compute";
 import { asyncLock, type AsyncLock, type Context } from "@steve.kite/stdlib";
@@ -9,12 +14,19 @@ import { asyncLock, type AsyncLock, type Context } from "@steve.kite/stdlib";
 import type { HappyAgentConfigValues } from "../config/index.js";
 import type { McpElicitationResult } from "./Mcp.js";
 import { MachineStdioTransport } from "./impl/MachineStdioTransport.js";
+import { McpToolDeadline } from "./impl/McpToolDeadline.js";
 
 type ServerConfig = HappyAgentConfigValues["mcpServers"][string];
-type ElicitationHandler = (request: ElicitRequest) => Promise<McpElicitationResult>;
+/** `signal` aborts when the server withdraws its request or the connection ends. */
+type ElicitationHandler = (
+    request: ElicitRequest,
+    signal: AbortSignal,
+) => Promise<McpElicitationResult>;
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+/** The longest delay a timer takes; a tool call's own deadline ends it long before. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** One live MCP SDK client and the transport/process it owns. */
 export class McpClientConnection {
@@ -23,14 +35,39 @@ export class McpClientConnection {
     readonly name: string;
     readonly #callLock: AsyncLock = asyncLock({ reentry: "block" });
     #elicitation: ElicitationHandler | undefined;
+    /** Elicitations still waiting on a person, by the server's request ID. */
+    readonly #withdrawals = new Map<RequestId, AbortController>();
 
     private constructor(name: string, config: ServerConfig, client: Client) {
         this.name = name;
         this.config = config;
         this.client = client;
-        client.setRequestHandler(ElicitRequestSchema, async (request) => {
-            const result = await this.#elicitation?.(request);
-            return result ?? { action: "decline" };
+        // A request that arrives outside a tool call belongs to no agent, so no person can be
+        // asked about it.
+        client.setRequestHandler(ElicitRequestSchema, async (request, extra) => {
+            const elicitation = this.#elicitation;
+            if (elicitation === undefined) return { action: "decline" };
+            const withdrawn = new AbortController();
+            this.#withdrawals.set(extra.requestId, withdrawn);
+            try {
+                return await elicitation(
+                    request,
+                    AbortSignal.any([extra.signal, withdrawn.signal]),
+                );
+            } finally {
+                this.#withdrawals.delete(extra.requestId);
+            }
+        });
+        /*
+         * Replaces the SDK's own handler, which ignores a cancellation of request 0: the first
+         * request a server sends, and so usually its first elicitation. Left alone, a person could
+         * approve a request the server had already given up on. Elicitation is the only request
+         * this client serves for long enough to be cancelled.
+         */
+        client.setNotificationHandler(CancelledNotificationSchema, (notification) => {
+            const requestId = notification.params.requestId;
+            if (requestId === undefined) return;
+            this.#withdrawals.get(requestId)?.abort(notification.params.reason);
         });
     }
 
@@ -55,7 +92,7 @@ export class McpClientConnection {
         }
         const client = new Client(
             { name: "happy-agent", version: "1.0.0" },
-            { capabilities: { elicitation: {} } },
+            { capabilities: { elicitation: { form: {} } } },
         );
         const connection = new McpClientConnection(name, config, client);
         const transport =
@@ -99,7 +136,11 @@ export class McpClientConnection {
         elicitation: ElicitationHandler,
     ): Promise<unknown> {
         return await this.#callLock.runInLock(ctx, async () => {
-            this.#elicitation = elicitation;
+            const deadline = new McpToolDeadline(
+                this.config.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+            );
+            this.#elicitation = async (request, signal) =>
+                await deadline.pausedWhile(async () => await elicitation(request, signal));
             try {
                 return await this.client.callTool(
                     {
@@ -107,9 +148,16 @@ export class McpClientConnection {
                         ...(input.arguments === undefined ? {} : { arguments: input.arguments }),
                     },
                     undefined,
-                    requestOptions(ctx, this.config.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS),
+                    {
+                        timeout: MAX_TIMER_DELAY_MS,
+                        signal:
+                            ctx.lifetime === undefined
+                                ? deadline.signal
+                                : AbortSignal.any([ctx.lifetime, deadline.signal]),
+                    },
                 );
             } finally {
+                deadline.dispose();
                 this.#elicitation = undefined;
             }
         });
@@ -118,14 +166,6 @@ export class McpClientConnection {
     async close(): Promise<void> {
         await this.client.close();
     }
-}
-
-function requestOptions(ctx: Context, timeout: number) {
-    return {
-        timeout,
-        maxTotalTimeout: timeout,
-        ...(ctx.lifetime === undefined ? {} : { signal: ctx.lifetime }),
-    };
 }
 
 function httpHeaders(config: Extract<ServerConfig, { transport: "http" }>): Headers {

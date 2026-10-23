@@ -442,9 +442,6 @@ url = "https://example.com/mcp"
 transport = "http"
 http_headers = { "X-Client" = "Happy Agent" }
 bearer_token_env_var = "ISSUES_MCP_TOKEN"
-oauth_client_id_env_var = "MCP_CLIENT_ID"
-oauth_client_secret_env_var = "MCP_CLIENT_SECRET"
-oauth_scopes = ["tools:read"]
 enabled = true
 startup_timeout_sec = 10
 tool_timeout_sec = 30
@@ -456,9 +453,46 @@ Exactly one of `command` and `url` must be present. `transport` is only accepted
 as `"http"`; a `command` entry is stdio implicitly. Unknown keys in an
 `[mcp_servers.*]` table are a configuration error, so do not guess names.
 
-MCP tools, resources, resource templates, prompts, pagination, form elicitation,
-bearer tokens, and OAuth client credentials are supported, and live tool
-discovery lets a session use tools added after startup.
+MCP tools, resources, resource templates, prompts, pagination, and form
+elicitation are supported, and live tool discovery lets a session use tools
+added after startup. HTTP servers authenticate with `http_headers` or
+`bearer_token_env_var`. The `oauth_client_id_env_var`,
+`oauth_client_secret_env_var`, and `oauth_scopes` keys are accepted, but
+interactive OAuth is not implemented, so a server that sets them fails to
+connect.
+
+### Elicitation
+
+Happy Agent advertises form elicitation (`elicitation.form`, MCP 2025-11-25) on
+every stdio and HTTP connection. URL elicitation is not advertised. When a
+server sends `elicitation/create` during a tool call, the person sees it as an
+question on the agent that called the tool, in Happy Desktop and on the phone.
+The question carries a `permissionRequest` flag naming the server, so clients
+can show it as the server's permission request rather than the agent's own
+question. Its text names the server as well, and its context says the agent
+cannot answer for the person.
+
+- A request with no fields becomes one Approve/Decline question.
+- A boolean field offers Yes and No. An `enum`, titled `oneOf`, or multi-select
+  array field offers its choices and only returns one of them. A string,
+  number, or integer field takes the person's own text, parsed by its type.
+- Choosing Approve or answering every required field returns `accept` with the
+  values. Choosing Decline, or an answer the field cannot hold, returns
+  `decline`. A dismissed question, a stopped run, an away status, or an
+  answer-wait timeout returns `cancel`. Nothing resolves to `accept` without a
+  person's answer.
+- A request that arrives outside a tool call, asks for more than four fields,
+  offers more than 32 choices for one field, or offers two choices with the
+  same label is declined without asking.
+
+No agent tool can answer an elicitation. An agent can only withdraw it with
+`cancel_ask`, which returns `cancel`. Answers come from Happy Desktop or the
+phone.
+
+`tool_timeout_sec` does not count the time a person spends answering. The
+server bounds that wait itself (60 seconds by default in the MCP TypeScript
+SDK); when it gives up, Happy Agent withdraws the question so nobody answers a
+request that no longer exists.
 
 ### Boundary rules
 

@@ -50,7 +50,12 @@ outside a transaction. `read_user_input` reads bounded detail pages by request I
 long answers remain available to the model. `cancel_ask` accepts `requestId` (and the legacy
 `ask_id` spelling) plus an optional reason.
 
-Host callers can use `ask`, `wait`, `listPage`/`list`, `get`/`getPage`, `answer`, `cancel`, and
+`askForPermission` asks on behalf of something outside the agent, such as an MCP server, and
+stores a `permissionRequest` naming it. The API question object and the phone form carry it so
+clients can show a permission request apart from the agent's own questions. No agent tool can set
+it.
+
+Host callers can use `ask`, `askForPermission`, `wait`, `listPage`/`list`, `get`/`getPage`, `answer`, `cancel`, and
 `complete`. `formatForModel`, `formatPageForModel`, `formatDetailPageForModel`, and
 `formatUserInputForModel` provide the same bounded model-facing rendering for host reuse.
 List pages carry the absolute source `cursor` of their first returned row; `nextCursor` is always

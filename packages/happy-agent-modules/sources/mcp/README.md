@@ -24,6 +24,21 @@ reviewed in Auto mode regardless of untrusted server annotations. Configuration 
 reloads are reviewed and request temporary Full access because they update global configuration
 and start external processes or network connections.
 
+## Elicitation
+
+Every connection advertises form elicitation. A server's `elicitation/create` during a tool call
+becomes a question on the calling agent through `UserInputModule.askForPermission`, so every
+client that shows questions shows it, and its `permissionRequest` marks it as the server's request
+rather than the agent's. The context and the first question also name the server, for clients that
+ignore the flag. A request with no fields is an Approve/Decline question; boolean, enum,
+string, and number fields become one question each, at most four. Only the person's answer is
+returned: choosing Decline or giving an answer the schema cannot hold is `decline`, and anything
+that ends the question without an answer is `cancel`. A request outside a tool call, or one the
+question surface cannot show faithfully, is declined without asking.
+
+A tool call's `tool_timeout_sec` stands still while a person is answering. When the server
+withdraws its request, the connection ends, or the turn stops, the question is withdrawn too.
+
 Direct tools use `mcp__<server>__<tool>`. Protocol tools provide live tool, resource, template, and
 prompt discovery. The tools hook resolves the catalog for every provider request, so a successful
 online reload is visible on the next inference without restarting the daemon.

@@ -1,138 +1,140 @@
-import { randomUUID } from "node:crypto";
-
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
-import type { Context } from "@steve.kite/stdlib";
 
 import {
-    mcpContextSchema,
+    MAX_MCP_QUESTION_CHOICES,
+    MAX_MCP_QUESTION_HEADER_LENGTH,
+    MAX_MCP_QUESTIONS_PER_REQUEST,
     mcpElicitationRequestSchema,
     mcpElicitationResultSchema,
     mcpUserInputRequestSchema,
     mcpUserInputResponseSchema,
-    type McpElicitationRequest,
     type McpElicitationResult,
     type McpUserInputRequest,
     type McpUserInputResponse,
 } from "./Mcp.js";
+import { humanizeMcpName } from "./humanizeMcpName.js";
 
 export const mcpUserInputServiceSchema = Type.Object(
     {
-        request: Type.Union([
-            Type.Function([mcpUserInputRequestSchema], Type.Promise(mcpUserInputResponseSchema)),
-            Type.Function(
-                [mcpContextSchema, mcpUserInputRequestSchema],
-                Type.Promise(mcpUserInputResponseSchema),
-            ),
-        ]),
+        request: Type.Function(
+            [mcpUserInputRequestSchema],
+            Type.Promise(mcpUserInputResponseSchema),
+        ),
     },
     { additionalProperties: false },
 );
+/** Asks the person one question and settles with what they did. Nothing else may answer it. */
 export type McpUserInputService = Static<typeof mcpUserInputServiceSchema>;
 
+const APPROVE = "Approve";
+const DECLINE = "Decline";
+const MAX_QUESTION_CHARACTERS = 4_000;
+const MAX_OPTION_LABEL_CHARACTERS = 256;
+const MAX_OPTION_DESCRIPTION_CHARACTERS = 2_000;
+
 /**
- * Adapt MCP's schema-shaped elicitation request to the ordinary user-input surface. If no
- * user-input service is supplied, the safe MCP response is decline.
+ * Asks the person what an MCP server's `elicitation/create` wants to know, and turns what they did
+ * into the server's answer.
+ *
+ * Only the person's own answer is ever accepted. Dismissing the question, stopping the run, being
+ * away, or letting it time out is `cancel`; choosing Decline, or an answer the requested schema
+ * cannot hold, is `decline`. A request this surface cannot show, or no one to show it to, is
+ * declined without asking.
  */
-export function handleMcpElicitation(
-    request: McpElicitationRequest,
-    userInput: McpUserInputService | undefined,
-): Promise<McpElicitationResult>;
-export function handleMcpElicitation(
-    ctx: Context,
-    request: McpElicitationRequest,
-    userInput: McpUserInputService | undefined,
-): Promise<McpElicitationResult>;
 export async function handleMcpElicitation(
-    first: Context | McpElicitationRequest,
-    second: McpElicitationRequest | McpUserInputService | undefined,
-    third?: McpUserInputService,
+    server: string,
+    request: unknown,
+    userInput: McpUserInputService | undefined,
 ): Promise<McpElicitationResult> {
-    const request = Value.Check(mcpElicitationRequestSchema, first)
-        ? first
-        : (second as McpElicitationRequest);
-    const ctx = Value.Check(mcpElicitationRequestSchema, first) ? undefined : first;
-    const userInput = Value.Check(mcpElicitationRequestSchema, first)
-        ? (second as McpUserInputService | undefined)
-        : third;
     if (!Value.Check(mcpElicitationRequestSchema, request)) return { action: "decline" };
     if (userInput === undefined) return { action: "decline" };
 
-    const { message, requestedSchema } = request.params;
+    const { requestedSchema } = request.params;
+    const label = humanizeMcpName(server);
+    const message = request.params.message.trim();
+    // Clients that show no context still show the first question, so it names who is asking.
+    const intro =
+        message.length === 0 ? `${label} is asking for your input.` : `${label} asks: ${message}`;
+    const context = `**${label}** is an MCP server asking you directly. Only your own answer is sent back to it; the agent cannot answer for you.`;
     const entries = Object.entries(requestedSchema.properties);
-    const valuesByLabel = new Map<string, Map<string, string | number | boolean>>();
-    /** Properties whose allowed values the server declared, and which no other answer satisfies. */
-    const declaredChoiceIds = new Set<string>();
-    const questions: McpUserInputRequest["questions"][number][] = entries.map(([id, property]) => {
-        const record = asRecord(property);
-        const declaredChoices = declaredChoicesFor(record);
-        if (declaredChoices !== undefined) declaredChoiceIds.add(id);
-        const enumValues = declaredChoices ?? booleanChoicesFor(record);
-        const enumNames = enumNamesFor(record, enumValues);
-        valuesByLabel.set(
-            id,
-            new Map(enumValues.map((value, index) => [String(enumNames[index] ?? value), value])),
-        );
-        const required = requestedSchema.required?.includes(id) === true;
-        const rawTitle = typeof record?.title === "string" ? record.title.trim() : id;
-        const header = rawTitle.length > 12 ? `${rawTitle.slice(0, 11).trimEnd()}…` : rawTitle;
-        const propertyDescription =
-            typeof record?.description === "string" ? record.description : undefined;
-        const propertyType = typeof record?.type === "string" ? record.type : undefined;
-        return {
-            header: header.length === 0 ? "MCP request" : header,
-            id,
-            multiSelect: propertyType === "array",
-            options: enumValues.map((value, index) => ({
-                label: String(enumNames[index] ?? value),
-                description:
-                    propertyDescription ??
-                    (propertyType === "boolean"
-                        ? `Answer ${String(enumNames[index] ?? value)}.`
-                        : `Use ${String(value)}.`),
-            })),
-            question: propertyDescription ?? message,
-            ...(required ? { required: true } : {}),
-        };
-    });
 
-    let response: McpUserInputResponse;
-    if (questions.length === 0) {
-        response = await requestUserInput(userInput, ctx, {
-            requestId: `mcp:${randomUUID()}`,
+    if (entries.length === 0) {
+        const response = await ask(userInput, {
+            context,
             questions: [
                 {
-                    header: "MCP request",
-                    id: "confirmation",
+                    header: "Approval",
+                    id: "approval",
                     multiSelect: false,
                     options: [
-                        {
-                            label: "Continue",
-                            description: "Accept this request without providing additional values.",
-                        },
-                        { label: "Decline", description: "Reject this request." },
+                        { label: APPROVE, description: `Let ${label} go ahead.` },
+                        { label: DECLINE, description: `Tell ${label} no.` },
                     ],
-                    question: message,
+                    question: boundText(intro, MAX_QUESTION_CHARACTERS),
                 },
             ],
         });
+        if (response.status !== "answered") return { action: "cancel" };
+        return response.answers?.approval?.includes(APPROVE) === true
+            ? { action: "accept", content: {} }
+            : { action: "decline" };
+    }
+    if (entries.length > MAX_MCP_QUESTIONS_PER_REQUEST) return { action: "decline" };
+
+    const valuesByLabel = new Map<string, Map<string, string | number | boolean>>();
+    /** Properties whose allowed values the server declared, and which no other answer satisfies. */
+    const declaredChoiceIds = new Set<string>();
+    const questions: McpUserInputRequest["questions"][number][] = [];
+    for (const [index, [id, property]] of entries.entries()) {
+        const record = asRecord(property);
+        const declaredChoices = declaredChoicesFor(record);
+        if (declaredChoices !== undefined) declaredChoiceIds.add(id);
+        const values = declaredChoices ?? booleanChoicesFor(record);
+        const enumNames = enumNamesFor(record, values);
+        const names = values.map((value, position) => String(enumNames[position] ?? value));
+        // A choice the person cannot tell apart from another, or cannot be shown, cannot be asked.
         if (
-            !Value.Check(mcpUserInputResponseSchema, response) ||
-            response.status !== "answered" ||
-            response.answers?.confirmation?.includes("Continue") !== true
+            values.length > MAX_MCP_QUESTION_CHOICES ||
+            new Set(names).size !== names.length ||
+            names.some((name) => name.length === 0 || name.length > MAX_OPTION_LABEL_CHARACTERS)
         ) {
             return { action: "decline" };
         }
-        return { action: "accept", content: {} };
+        valuesByLabel.set(id, new Map(values.map((value, position) => [names[position]!, value])));
+        const title =
+            typeof record?.title === "string" && record.title.trim().length > 0
+                ? record.title.trim()
+                : humanizeMcpName(id, "Answer");
+        const description =
+            typeof record?.description === "string" && record.description.trim().length > 0
+                ? record.description.trim()
+                : undefined;
+        const propertyType = typeof record?.type === "string" ? record.type : undefined;
+        const fieldText = description ?? title;
+        questions.push({
+            header: boundText(title, MAX_MCP_QUESTION_HEADER_LENGTH),
+            id,
+            multiSelect: propertyType === "array",
+            options: values.map((value, position) => ({
+                label: names[position]!,
+                description: boundText(
+                    propertyType === "boolean"
+                        ? `Answer ${names[position]!.toLowerCase()}.`
+                        : `Use ${String(value)}.`,
+                    MAX_OPTION_DESCRIPTION_CHARACTERS,
+                ),
+            })),
+            question: boundText(
+                index === 0 ? `${intro}\n\n${fieldText}` : fieldText,
+                MAX_QUESTION_CHARACTERS,
+            ),
+            ...(requestedSchema.required?.includes(id) === true ? { required: true } : {}),
+        });
     }
 
-    response = await requestUserInput(userInput, ctx, {
-        requestId: `mcp:${randomUUID()}`,
-        questions,
-    });
-    if (!Value.Check(mcpUserInputResponseSchema, response) || response.status !== "answered") {
-        return { action: "decline" };
-    }
+    const response = await ask(userInput, { context, questions });
+    if (response.status !== "answered") return { action: "cancel" };
 
     const content: Record<string, string | number | boolean | Array<string | number | boolean>> =
         {};
@@ -163,7 +165,7 @@ export async function handleMcpElicitation(
             typeof raw === "string"
         ) {
             const number = Number(raw);
-            if (!Number.isFinite(number)) return { action: "decline" };
+            if (raw.trim().length === 0 || !Number.isFinite(number)) return { action: "decline" };
             // An integer property means a whole number; 1.5 replicas is not a value to hand back.
             if (propertyType === "integer" && !Number.isInteger(number)) {
                 return { action: "decline" };
@@ -184,24 +186,18 @@ export async function handleMcpElicitation(
     return result;
 }
 
-async function requestUserInput(
+/** A response this module cannot read is not an answer, so it counts as no answer at all. */
+async function ask(
     userInput: McpUserInputService,
-    ctx: Context | undefined,
     request: McpUserInputRequest,
 ): Promise<McpUserInputResponse> {
-    /*
-     * A service may bind itself to an agent context (one-argument request) or expose a
-     * context-aware adapter (two-argument request).
-     */
-    const raw = await Reflect.apply(
-        userInput.request,
-        userInput,
-        userInput.request.length <= 1 || ctx === undefined ? [request] : [ctx, request],
-    );
-    if (!Value.Check(mcpUserInputResponseSchema, raw)) {
-        return { status: "cancelled" };
-    }
-    return raw;
+    if (!Value.Check(mcpUserInputRequestSchema, request)) return { status: "cancelled" };
+    const response: unknown = await userInput.request(request);
+    return Value.Check(mcpUserInputResponseSchema, response) ? response : { status: "cancelled" };
+}
+
+function boundText(value: string, maximum: number): string {
+    return value.length <= maximum ? value : `${value.slice(0, maximum - 1).trimEnd()}…`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

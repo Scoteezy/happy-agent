@@ -541,6 +541,9 @@ export function questionResource(
                   : "canceled",
         context: request.context,
         questions,
+        ...(request.permissionRequest === undefined
+            ? {}
+            : { permissionRequest: { ...request.permissionRequest } }),
         autoResolveAt: request.deadlineAt ?? null,
         answers: questionAnswers(request),
         version: apiResourceVersion(request.updatedAt, statusVersion(request.status), request.id),

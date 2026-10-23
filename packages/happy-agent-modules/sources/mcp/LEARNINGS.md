@@ -74,6 +74,31 @@ used. A reload that got there first, a released catalog, or shutdown closes the 
 instead. The retry is in-memory, like the connections it restores: after a restart, the initial
 reload starts every server again, so durable execution would add nothing.
 
+## Elicitation must reach a person and nothing else
+
+A printer server that will not start a print without a person's approval never got one: every
+elicitation was declined. The request schema forbade fields outside `message` and
+`requestedSchema`, and servers on the 2025-11-25 protocol always send `mode: "form"`. Even past
+that, the question's ID started with `mcp:`, which the API's answer route rejects, so Desktop could
+not have answered it. Only hand-built requests had been tested. Tests now drive a real SDK server's
+`elicitInput` end to end, and the question takes its ID from `UserInputModule`.
+
+What the server receives depends only on what the person did. Their answer is `accept`, Decline or
+an answer the schema cannot hold is `decline`, and dismissal, a stopped turn, away, or timeout is
+`cancel`. No agent tool answers a question, so the agent cannot approve its own action.
+
+A person must know who is asking. The question carries `permissionRequest`
+(`source: "mcp_elicitation"`, the server, and its display name) in the API and on the phone form,
+so clients can show it as a permission request rather than the agent's own question. Only
+`UserInputModule.askForPermission` sets it, so an agent cannot dress up its own question as a
+server's. The server name is also in the first question's text, for clients that predate the flag.
+
+Time a person spends answering is not charged to `tool_timeout_sec`: the SDK's timer cannot pause,
+so the connection gives the SDK an unreachable timeout and keeps its own pausable deadline. The
+server bounds the wait itself. When it gives up, the question is withdrawn so nobody approves a
+request that no longer exists. The SDK drops a cancellation of request ID 0, which is usually a
+server's first elicitation, so the connection handles `notifications/cancelled` itself.
+
 ## A bot with its own Linux user gets no shared stdio servers
 
 Stdio servers are pooled per machine, and with `[execution]` the machine is the default workload

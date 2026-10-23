@@ -195,15 +195,21 @@ published on Happy's agent-to-user communication channel, as `communications`
 in the encrypted agent state, keyed by the question's request id. Happy Agent publishes
 the `form` kind: a title for clients that cannot render the payload, and one
 entry per question with its options, `multiSelect`, and `allowCustom`, since
-Happy Agent accepts any answer text and not only the labels it offered. Answering a
+Happy Agent accepts any answer text and not only the labels it offered. A question
+that something outside the agent is asking, such as an MCP server's elicitation,
+also carries `permissionRequest` on the form, `{ source: "mcp_elicitation",
+server, serverTitle }`, so a phone can show it as a permission request from that
+server rather than as the agent's own question. Answering a
 question anywhere moves it into `completedCommunications` with the answers, so
 another device settles the card it is still showing.
 
 Happy replies with the session RPC method `{happySessionId}:communication`,
 carrying the request id and either `status: "answered"` with answers keyed by
-question id, or `status: "cancelled"`. Happy Agent cannot decline a single question, so
-a dismissal — including one from a client that could not render the kind —
-aborts the run that asked it, which is what makes the waiting tool throw.
+question id, or `status: "cancelled"`. A dismissal, including one from a client
+that could not render the kind, cancels that question; the waiting tool reports
+it as unanswered, and an MCP elicitation returns `cancel` to its server. The
+form carries no request context, so an MCP elicitation names its server in the
+first question's text.
 
 Happy invokes abort through the standard encrypted session RPC method
 `{happySessionId}:abort`. Happy Agent registers that method on every socket connection

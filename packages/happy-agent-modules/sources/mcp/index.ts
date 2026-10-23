@@ -21,6 +21,9 @@ export {
     MAX_MCP_JSON_OBJECT_PROPERTIES,
     MAX_MCP_JSON_STRING_LENGTH,
     MAX_MCP_OUTPUT_CHARACTERS,
+    MAX_MCP_QUESTION_CHOICES,
+    MAX_MCP_QUESTION_HEADER_LENGTH,
+    MAX_MCP_QUESTIONS_PER_REQUEST,
     MAX_MCP_PAGE_SIZE,
     MAX_MCP_RESOURCE_CONTENTS,
     MAX_MCP_SERVER_NAME_LENGTH,
@@ -145,10 +148,6 @@ export {
 export { createMcpProtocolTools } from "./createMcpProtocolTools.js";
 export { createMcpConfigurationTools } from "./createMcpConfigurationTools.js";
 export { createMcpTool } from "./createMcpTool.js";
-export {
-    createMcpTrustUserInputRequest,
-    MCP_TRUST_ANSWER,
-} from "./createMcpTrustUserInputRequest.js";
 export { createProjectMcpSecurityNotice } from "./createProjectMcpSecurityNotice.js";
 export { describeMcpAutoPermissionAction } from "./describeMcpAutoPermissionAction.js";
 export { fingerprintMcpServer } from "./fingerprintMcpServer.js";

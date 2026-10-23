@@ -825,8 +825,15 @@ bearer_token_env_var = "ISSUES_MCP_TOKEN"
 ```
 
 MCP tools, resources, resource templates, prompts, pagination, form elicitation,
-bearer tokens, and OAuth client credentials are supported. Live tool discovery
-lets a session use tools added after startup.
+and bearer tokens are supported. Live tool discovery lets a session use tools
+added after startup. The OAuth keys are accepted but interactive OAuth is not
+implemented, so a server that sets them fails to connect.
+
+When a server asks for input during a tool call, the request appears as a
+question on the agent that called the tool. It names the server, and only a
+person can answer it. `tool_timeout_sec` does not count time spent waiting for
+that answer. See [Elicitation](extending.md#elicitation) for how fields map to
+questions and what the server receives.
 
 Put user-wide servers in `~/Happy/Config/mcp.toml`, or workspace servers in a root
 `mcp.toml`. Matching configurations share one live process across workspaces. Reload reconciles
