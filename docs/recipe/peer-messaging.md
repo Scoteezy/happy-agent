@@ -3,7 +3,8 @@
 Use this recipe when a desktop or private machine should initiate one outbound
 connection to a reachable Happy Agent, then exchange messages in both directions.
 The desktop needs no incoming port, public address, or reverse URL. The contract
-is [API_P2P.md](../API_P2P.md).
+is `API_P2P.md`, installed beside the Happy Agent docs; in a source checkout it lives at
+[`packages/happy-agent/API_P2P.md`](../../packages/happy-agent/API_P2P.md).
 
 ## Reach both installations for administration
 

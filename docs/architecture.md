@@ -7,7 +7,7 @@ for developers changing it.
 
 It describes the behavior that is actually implemented. Where Happy Agent's stated
 direction runs ahead of what ships today, that is called out explicitly in
-[Where the product runs ahead of the code](#where-the-product-runs-ahead-of-the-code).
+[Where the product runs ahead of the code](#10-where-the-product-runs-ahead-of-the-code).
 
 ## 1. The core idea
 

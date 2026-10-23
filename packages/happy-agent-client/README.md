@@ -295,40 +295,6 @@ contains only bounded visible names, IDs, public user/assistant text, structured
 presence. A control disconnect ends voice; already-running coding work continues. There is no
 automatic controller reconnect or mutation replay, and no older Realtime fallback.
 
-## Sandboxed workspace services
-
-Services are started by an agent's separate `service_start` tool. This client manages and observes
-the same execution; it does not expose another command-launch route or a global services catalog.
-
-```text
-Workspace client → list/get service → shared process input/output
-                                  → stop and observe confirmed teardown
-                                  → scoped credential + fixed-endpoint CONNECT
-```
-
-Use `listWorkspaceServices(workspaceId)` and `getWorkspaceService(workspaceId, serviceId)` for
-discovery. Follow the list's journal `cursor` through `updates()` and reconcile `service.created`
-and version-chained `service.updated` events. Refetch on gaps or daemon replacement. Services are
-an on-demand surface; `HappyReducer` does not materialize a second service store automatically.
-For a known workspace, `404` or `501` means the feature is unavailable, not an empty catalog.
-
-`inputWorkspaceService(workspaceId, serviceId, { readerId, chars, waitMs })` reads when `chars` is
-empty and otherwise writes stdin then reads. Give every UI reader its own stable `readerId` so
-views do not consume each other's output. This ID grants no permission. Neither reads nor writes
-are retried automatically: a lost write response may already have delivered input. The response
-includes bounded output, an explicit truncation flag, and the current service snapshot.
-
-`stopWorkspaceService()` records a stop decision. A response with `status: "stopping"` does not
-prove the process tree is gone. Workspace `serviceCleanup` progress reports the mandatory barrier
-before deleting files; a blocked cleanup keeps the files intact.
-
-Trusted desktop hosts use `issueWorkspaceServiceAccessToken()` and `workspaceServiceProxyUrl()`.
-The latter returns an address only: supply normal API authorization and the separately scoped
-`WORKSPACE_SERVICE_AUTHORIZATION_HEADER` on CONNECT. Keep these credentials out of URLs, page
-JavaScript, ordinary application requests, and unrelated origins. The same methods work through
-`client.connection(id)`, preserving that connection's authenticated route. No public sharing or
-invitation is created by issuing a token.
-
 ## Local bridges
 
 A bridge brings a USB device, a USB Bluetooth adapter, or a local TCP service from the client's
@@ -563,7 +529,7 @@ catalog. `invokeSlashCommand` executes one through its owning module, while
 ## Reference tags
 
 Agent text may mention Happy entities as `<happy-artifact id="…"/>`, `<happy-agent id="…"/>`,
-`<happy-workspace id="…"/>`, `<happy-project id="…"/>`, or `<happy-service id="…"/>`, as API.md
+`<happy-workspace id="…"/>`, or `<happy-project id="…"/>`, as API.md
 specifies under "Reference tags". This package holds the one shared parser, so every client and
 the daemon agree on what is a tag:
 

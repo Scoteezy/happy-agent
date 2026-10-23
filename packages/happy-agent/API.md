@@ -306,10 +306,6 @@ fragment, and the `redirectUri` and `state` parameters of `GET /v0/authenticatio
 as a one-off exception to additive compatibility. No daemon release served them. Daemons advertise
 the `oauth` method instead and ignore any query string on discovery.
 
-Sandboxed workspace services are additive and do not increment the protocol version. For a known
-workspace, `404` or `501` from `GET /v0/workspaces/:workspaceId/services` means the feature is
-unavailable. Existing terminals, background commands, and workspace proxies remain unchanged.
-
 Workspace bridges are additive and do not increment the protocol version. A daemon that serves
 them reports `capabilities.workspaceBridges: true` from health. Older daemons omit it and answer
 `GET /v0/workspaces/:workspaceId/bridges` with `404`; clients then offer no USB, Bluetooth, or
@@ -566,7 +562,7 @@ event cursors (defined in the events chapter) and resource versions (next sectio
 ### Resource versions and `If-Match`
 
 Every resource that appears in version-chained `*.updated` events — projects, workspaces,
-terminals, services, agents, bots, tasks, artifacts, secrets, surfaces, todos, questions, processes, and the profile — carries a `version`
+terminals, agents, bots, tasks, artifacts, secrets, surfaces, todos, questions, processes, and the profile — carries a `version`
 field: a **UUIDv7** minted at the moment of the change. Because versions are time-ordered, a
 client holding two copies of the same resource compares their versions and keeps the greater
 one; this is how a REST snapshot and the event stream reconcile without bookkeeping. Versions
@@ -598,7 +594,7 @@ resource, so the client can catch up without another request:
 }
 ```
 
-The other versioned resources (agents, terminals, services, questions, processes) change mostly
+The other versioned resources (agents, terminals, questions, processes) change mostly
 on the daemon's own initiative, so their mutations do not use `If-Match`; their versions exist for
 event chaining and newer-copy comparison.
 
@@ -844,11 +840,6 @@ It does not follow redirects, buffer complete streams, replay requests, or
 merge remote events into the main daemon's journal. Remote identifiers and cursors remain opaque
 and belong to the selected client instance.
 
-Service `CONNECT` attachments additionally preserve `X-Happy-Service-Authorization`. The
-destination daemon validates that credential in addition to the normal, replaced API
-`Authorization` header. Neither credential reaches the application behind a service. Service
-credentials must never be logged or included in errors.
-
 Every request first authenticates to the main daemon normally. Team callers must have completed
 local profile onboarding. The main daemon replaces that request's authorization with the configured
 remote bearer credential for a standalone secondary. For a team remote reached through a standalone
@@ -894,7 +885,7 @@ is checked against the remote's health response, independently of the main daemo
 
 A runner is a separate machine that does this installation's work. It holds project folders and
 runs everything that touches them — agent file tools and commands, Git, workspace checkouts,
-terminals, services, and the workspace proxy — while the daemon keeps the database, provider
+terminals, and the workspace proxy — while the daemon keeps the database, provider
 credentials, and inference. A runner holds no provider credentials, no Happy data, and no API
 token; it reaches the daemon only through `GET /v0/runners/connect`. Runners are optional. Once any
 runner is configured, the daemon runs nothing on its own machine.
@@ -1935,11 +1926,6 @@ Drain completion waits only for admitted HTTP mutations, the main agent system, 
 review agent system. It does not cancel or wait for terminal processes, background shell commands,
 existing proxy streams, workspace setup, or other long-lived runtime services; ordinary graceful
 shutdown owns those lifetimes after the drain is complete.
-
-Workspace services follow the same distinction: drain does not stop them, but admits no new
-service input calls, access-token issuance, or attachments. Existing service attachments may
-continue. Shutdown revokes them and awaits confirmed termination of every owned service sandbox;
-`waitingFor` includes `workspace-services` while that teardown is unfinished.
 
 A daemon started without drain support answers `403` with
 `{ "error": "Daemon draining is not enabled." }`.
@@ -3965,11 +3951,12 @@ Request:
 - `projectId` — optional client-supplied ID, for callers that need to know the ID before the
   daemon answers. Omitted, the daemon mints one.
 
-Response — `200`: `{ "project": { ... } }`. Registering a path that is already an active
-project is rejected with `400`; registering a path whose project was archived revives that
-project instead of creating a duplicate. Setup (Git inspection, name derivation) runs in the
-background — the project may answer with `initialization.status` `"initializing"` and settle
-via events.
+Response — `200`: `{ "project": { ... } }`. Registering a path that is already a project returns
+that existing project with `200` instead of creating a duplicate; an archived one is revived
+first. The existing project keeps its ID, so a supplied `projectId` takes effect only for a new
+folder, and a `projectId` that already names a different folder is `400 invalid_request`. Setup
+(Git inspection, name derivation) runs in the background — the project may answer with
+`initialization.status` `"initializing"` and settle via events.
 
 ### `POST /v0/projects/clone`
 
@@ -4200,13 +4187,6 @@ Fields:
 - `orderKey`, `version`, timestamps — as on the project. `orderKey` orders a workspace among
   its siblings under the same parent.
 
-- `serviceCleanup` — optional additive cleanup progress, omitted or `null` outside service-aware
-  archival. When present it is `{ "phase": "stopping_services", "serviceIds": [ ... ],
-"error": null }`. `phase` is `"stopping_services"`, `"removing_files"`, or `"blocked"`;
-  `serviceIds` contains the at most 32 service IDs whose sandbox teardown remains unconfirmed.
-  `error` is `null` or `{ "code": "...", "message": "Human-readable explanation." }`.
-  Progress is authoritative workspace state and changes through `workspace.updated`.
-
 ### `GET /v0/workspaces`
 
 Lists workspaces as a flat array; clients build the tree from `parentId`.
@@ -4296,16 +4276,6 @@ A workspace whose `subtaskAgentId` names a resident subtask archives that subtas
 transaction, as `POST /v0/agents/:agentId/archive` would; this applies to each archived
 descendant too. The subtask emits `agent.updated` with `archivedAt` set alongside the workspace's
 `workspace.updated`. An already archived subtask is left as it is.
-
-Service-aware archival remains asynchronous and may be presented optimistically by clients.
-The archival transaction closes service admission and durably records responsibility for stopping
-all services in the workspace and its descendants. Service access is revoked after commit.
-Physical workspace cleanup must wait until the supervisor confirms that every service process
-tree has terminated, every endpoint bridge is closed, and the sandbox's mounts are released.
-An exit event or a sent signal is not termination proof. Failure or timeout leaves cleanup
-blocked, preserves the workspace files, and reports `serviceCleanup.phase: "blocked"`.
-Recovery continues the same cleanup intent; it never skips this barrier or restarts a service.
-Project and bot archival apply this barrier to their owned workspaces as well.
 
 ### `POST /v0/workspaces/:workspaceId/reorder`
 
@@ -4787,211 +4757,6 @@ codes, works unchanged through `/v0/connections/:id/api/*`.
 `HappyAgentClient.listWorkspaceBridges(workspaceId)` reads the snapshot and
 `closeWorkspaceBridge(workspaceId, bridgeId, request)` closes one. `workspaceUsbBridgeUrl`,
 `workspacePortBridgeUrl`, and `workspaceBridgeConnectionUrl` build the WebSocket URLs.
-
-### Sandboxed workspace services
-
-A service is an agent-owned background command running in a mandatory, more restricted sandbox,
-with one registered HTTP endpoint. Its owning workspace is the management boundary: authorized
-agents in that exact workspace can discover, read, write to, and stop any of its services.
-The creating agent remains the lifecycle owner. A bot's dedicated workspace behaves identically.
-There is no global services endpoint, public audience, invitation, or cross-workspace grant.
-
-Creation is through the common `service_start` agent tool, not an HTTP command-execution route.
-The runtime derives the agent and workspace from the authenticated tool context; the command
-cannot choose another owner. The separate service tools do not modify vendor shell tools.
-
-The runtime owns one command process tree and one bounded output capture. Service metadata and
-the ordinary agent process record refer to that same execution, not two independent processes.
-The service ID is a CUID2 and is never rebound to another execution. The command survives normal
-tool and turn completion; explicit command stop, owning-agent abort or runtime disposal, agent
-archival, workspace/project/bot archival, and daemon shutdown stop the service too. A restart
-does not rerun service commands. Durable metadata survives, with unfinished executions reconciled
-as failed only after their sandbox teardown is confirmed.
-
-#### Mandatory sandbox and tool contract
-
-The common tools, identical for every provider, are:
-
-- `service_start({ name, cmd, port, workdir?, tty?, sandbox, yield_time_ms?, max_output_tokens? })`.
-  `name` is 1–128 printable characters; `cmd` is 1–32,768 characters without NUL; `port` is an
-  integer from 1024 through 65535. `workdir` defaults to `"."`; `tty` defaults to `false`.
-  `yield_time_ms` defaults to 1000 and accepts 0–30,000. The wait is on the call, not the process.
-  `sandbox` is `{ inputs: string[], scratch?: string[], outbound?: { hostname: string,
-port: number }[], limits?: { memory_mib?: number, processes?: number } }`.
-  Inputs are required (1–128 paths); scratch and outbound default to empty arrays, each capped
-  at 32 entries. Limits default to 1024 MiB and 64 processes and may only be narrowed, to at
-  least 128 MiB and 1 process. A workspace has at most 32 active or stopping services; exceeding
-  the limit refuses the new start rather than evicting a running service.
-- `list_services({ include_stopped?: boolean, service_id?: string })` lists the caller's exact
-  workspace. Stopped services are omitted by default. The tool returns every active service and,
-  when requested, at most the newest 256 stopped services; omitted history is explicitly reported.
-  A supplied service ID inspects just that service and cannot select a different workspace.
-- `service_input({ service_id, chars?, yield_time_ms?, max_output_tokens? })` reads new output
-  when `chars` is absent or empty. Non-empty `chars` writes stdin and then reads. Empty-input
-  waits default to 5000 ms and cap at 300,000; writes default to 250 ms and cap at 30,000.
-  Every agent has its own output position, keyed by its trusted identity; no cursor or reader ID
-  is model-facing. Non-empty input is reviewed using the caller's current permissions but never
-  widens the existing sandbox. Writes are serialized per service and are not automatically replayed.
-- `service_stop({ service_id })` revokes attachments and stops the whole process tree,
-  gracefully first and forcibly after two seconds. It returns `{ service, stopped }`, where
-  `stopped` is false if already terminal. It does not report success until termination and
-  sandbox cleanup are confirmed. Failure to confirm is an error, not a successful stop.
-
-Start and input return `{ service, output, truncated, wall_time_seconds }`. Their model-facing
-service snapshot uses `service_id`, `workspace_id`, `agent_id`, `name`, `cmd`, `port`, `tty`,
-`status`, `endpoint_status`, `exit_code`, and `error`, projected from the HTTP resource below.
-Output is new text for that agent, bounded by `max_output_tokens` (default 10,000) and the
-model's output policy. Truncation or capture loss must be disclosed. Input after process exit is
-refused, but remaining output can still be read. PTY control characters have terminal semantics
-only when `tty` was selected; pipe input does not impersonate a signal.
-
-All input and scratch paths are relative to the workspace root, even with a different workdir.
-Paths are normalized, at most 4096 characters, and may not be absolute, contain `..`, escape
-through symlinks, or expose protected control or credential paths. The runtime exposes only the
-selected read-only inputs and the runtime files needed to execute the command. Scratch paths are
-private disposable writable storage, never writable aliases of host project directories. The
-runtime supplies a private home and temporary storage and a clean environment; no Happy daemon,
-provider, SSH, Docker, or other ambient credentials or control sockets are inherited. User data
-explicitly selected as an input remains readable by the service; input selection is not a claim
-that arbitrary project content contains no secrets.
-
-Network isolation confines listeners to the service sandbox. Only the supervisor can attach
-to the declared loopback endpoint. Outbound traffic is denied by default; requested hostname/port
-pairs must be permitted by the user's existing network policy, with private/local destinations
-and DNS-rebinding bypasses refused. An allowance grants no direct-network bypass. Memory and
-process limits apply to the entire tree. These restrictions remain mandatory in Full access.
-If a compute provider cannot enforce any required restriction or confirmed tree cleanup, startup
-fails with a readable error; there is no unsandboxed fallback.
-
-#### The service object
-
-```json
-{
-    "id": "s5f6g7h8",
-    "workspaceId": "k2h4j5l6",
-    "agentId": "a1b2c3d4",
-    "processId": "p5f6g7h8",
-    "name": "Web preview",
-    "command": "pnpm dev --host 127.0.0.1 --port 4187",
-    "cwd": ".",
-    "port": 4187,
-    "tty": false,
-    "protocol": "http",
-    "access": "workspace",
-    "status": "running",
-    "endpointStatus": "reachable",
-    "exitCode": null,
-    "error": null,
-    "sandbox": {
-        "inputs": ["package.json", "node_modules", "src", "public"],
-        "scratch": [".cache", "dist"],
-        "outbound": [],
-        "limits": { "memoryMiB": 1024, "processes": 64 }
-    },
-    "version": "01991f3a-6161-7000-8000-8f5061920314",
-    "createdAt": 1755400000000,
-    "updatedAt": 1755400001000,
-    "startedAt": 1755400001000,
-    "endedAt": null
-}
-```
-
-`processId` is null until the backing command exists. `status` is `starting`, `running`,
-`stopping`, `completed`, `killed`, or `failed`. Completed, killed, and failed are terminal;
-failed means the service could not be established or its runtime was lost, not an application
-HTTP error. `endpointStatus` is `waiting`, `reachable`, or `unavailable`. Reachable means a
-bounded supervisor probe can connect to the declared endpoint, not that the application is
-healthy. A stopped service is unavailable. `error` is null or `{ code, message }`, with
-human-readable, credential-free text. `startedAt` and `endedAt` are nullable timestamps.
-The sandbox object describes the effective enforced policy, never a rejected request.
-Internal namespace handles, raw host paths, browser credentials, and public URLs are absent.
-
-#### `GET /v0/workspaces/:workspaceId/services`
-
-Lists this workspace's services, newest-created first, with ID as the stable tie-breaker.
-Optional query: `includeStopped` (default false), `pageCursor` (opaque, at most 512 characters),
-`limit` (1–100, default 50). A cursor is bound to the workspace and includeStopped selection.
-Response — `200`: `{ "services": [ ... ], "nextPageCursor": null, "cursor": "..." }`.
-`cursor` is an event-journal position captured before the read, not the pagination cursor.
-Bot workspaces are addressable here despite being absent from the ordinary workspace catalog.
-
-#### `GET /v0/workspaces/:workspaceId/services/:serviceId`
-
-Response — `200`: `{ "service": { ... } }`. A service not owned by the path's workspace is
-`404 not_found`, exactly like an unknown service. Discovery alone grants no additional access.
-
-#### `POST /v0/workspaces/:workspaceId/services/:serviceId/input`
-
-Types into the process, then reads new output; absent or empty `chars` reads without typing.
-The body is `{ "readerId": "opaque-client-reader", "chars": "", "waitMs": 1000,
-"maxOutputBytes": 65536 }`. Only `readerId` is required: a client-chosen, non-secret opaque
-identifier of 1–128 characters. It selects an output position, not an authority. The position
-is scoped to the authenticated principal, workspace, service, and reader ID, and is separate
-from every agent's internal output position. Each desktop view chooses its own reader ID.
-
-`chars` is at most 64 KiB of UTF-8 input. `waitMs` accepts 0–20,000 ms, default 1000 for reads
-or 250 for writes; HTTP waits are bounded below the remote connection's header deadline.
-Agent tools may wait longer by directly calling the same module. `maxOutputBytes` accepts
-1–262,144, default 65,536. Response — `200`: `{ "service": { ... }, "output": "...",
-"truncated": false, "wallTimeSeconds": 1 }`. Capture is bounded to 1 MiB per output stream;
-the result discloses data lost to capture or response limits. Completed-service buffers and
-reader positions are runtime state, retained for at most one hour after termination, with
-at most 256 completed buffers per workspace and 4096 per daemon. Reads consume only that reader's
-position. A new reader begins at the oldest retained output. A reader position discarded after
-30 minutes idle resumes at retained output with `truncated: true`; at most 64 concurrent reader
-positions are admitted per service, otherwise `409 reader_limit`. After a completed buffer is
-retired, input returns `410 output_unavailable`; metadata remains.
-
-Non-empty input is an execution mutation, checked against the caller's authorization, and never
-automatically replayed. A connection loss after accepting input is an ambiguous write; clients
-must not resend it automatically. Read-only calls may be repeated but consume a delta, so a
-lost response is not a guarantee of replayable output. Application input and output are not
-copied into global events. Sending input to a non-running process is `409 service_not_running`.
-
-#### `DELETE /v0/workspaces/:workspaceId/services/:serviceId`
-
-Stops runtime work without deleting metadata. Optional body: `{ "mutationId": "..." }`.
-The stop decision revokes access and closes bridges immediately. Response — `202` with
-`{ "service": { ... } }` while teardown is pending; `200` when already terminal. Repeated
-stops are idempotent. No `If-Match` is required. `service.updated` reports actual completion;
-the status cannot become terminal before confirmed process-tree and sandbox teardown.
-
-#### `POST /v0/workspaces/:workspaceId/services/:serviceId/access-token`
-
-Issues an ephemeral credential for existing service-viewing permission, not a grant or invitation.
-Body: `{}`. Response — `200`: `{ "accessToken": "...", "expiresAt": 1755400300000 }`.
-The credential is unpredictable and scoped to the authenticated principal, workspace, exact
-service execution, and five-minute establishment expiry. No service event is emitted. Tokens
-are returned only to authenticated API clients with access to that workspace, never in tool
-results, URLs, snapshots, events, or application content. Issuance for a non-running service is
-`409 service_not_running`. Credentials are invalidated by service stop and daemon restart.
-
-#### `CONNECT /v0/workspaces/:workspaceId/services/:serviceId/proxy`
-
-Requires both normal API authentication and `X-Happy-Service-Authorization: Bearer <accessToken>`.
-The service credential is insufficient for any other route or without normal API authentication.
-Missing or invalid service credentials return `401 unauthorized`; a credential bound to another
-principal, workspace, or service returns `403 forbidden`. The gateway validates the target and
-credential before attaching to the supervisor's endpoint. A non-running service is
-`409 service_not_running`; a temporarily unreachable endpoint is `503 service_unavailable`.
-
-After `200`, the connection speaks origin-form HTTP/1.1 to that one application endpoint.
-Streaming requests/responses, SSE, and WebSocket upgrades are forwarded with backpressure and
-bounded buffers. Arbitrary destination selection, absolute-form request targets, nested CONNECT,
-raw TCP forwarding, and UDP are not supported. The gateway consumes only its own credentials;
-application Authorization and cookies remain unchanged. Redirects are returned, not followed,
-and HTTP mutations are never replayed. Establishment expiry forbids new attachments; an existing
-stream lives until normal close, service revocation, transport loss, or daemon shutdown.
-
-The desktop binds service credentials to its trusted owning-workspace browser profile and exact
-registered service origin. Page JavaScript cannot issue credentials, change bindings, or select
-another workspace. Other origins and cross-origin redirects receive no service credential;
-cross-origin subresource requests and unsolicited cross-site navigations must not turn the
-browser into an authenticated request relay. Ordinary external internet traffic remains direct.
-The private service origin is desktop-resolved and creates no public listener, DNS entry, or URL
-grant. The daemon validates credential scope; it cannot infer which desktop tab made a request.
-A client already holding full daemon API authority is not restricted by a caller-supplied
-workspace label. This feature isolates service pages, not trusted daemon administrators.
 
 ### Files
 
@@ -6636,12 +6401,10 @@ agent shows the syntax itself.
 | `agent`     | an agent: a task's, a bot's, a subtask, or another root agent | `GET /v0/agents/:agentId`                                               | the agent's `title`, or the owning bot's `name` or task's `name` | `status` is not `"idle"`                                                  |
 | `workspace` | a workspace                                                   | `GET /v0/workspaces/:workspaceId`                                       | `name`                                                           | `initialization.status` is `"initializing"`, or `status` is `"archiving"` |
 | `project`   | a project                                                     | `GET /v0/projects/:projectId`                                           | `name`                                                           | `initialization.status` is `"initializing"`                               |
-| `service`   | a service; `workspace` optionally names its workspace         | `GET /v0/workspaces/:workspaceId/services/:serviceId`                   | `name`                                                           | `status` is `"starting"`, `"running"`, or `"stopping"`                    |
 | `surface`   | a Surface of any type, such as a todo list, document, or chat | `GET /v0/surfaces`, the instance whose `id` matches                     | `name`, following `surface.updated`                              | never                                                                     |
 
-A service is addressed only under its workspace. A Surface has no route of its own, so it resolves
-from the catalog, and it is inert when the catalog has no instance with its `id`. Without a `workspace` attribute, the workspace is
-the one the message's agent works in. Other attributes have no meaning for kinds that do not list
+A Surface has no route of its own, so it resolves
+from the catalog, and it is inert when the catalog has no instance with its `id`. Other attributes have no meaning for kinds that do not list
 them and are ignored. Files have no tag: agents keep referring to them as `path:line`. The kind set
 may grow.
 
@@ -9409,7 +9172,7 @@ Happy folder. Configuration owns path resolution. The folder and all three IDs s
 Its dedicated workspace has `kind: "surface"`, optional additive `surfaceId`, `botId: null`,
 no `taskId`, `parentId: null`, `projectId: null`, `base: null`, and exactly this primary agent.
 It is discovered through the chat agent's `workspaceId`, not project/workspace listings or
-bootstrap workspace arrays. Its normal file, terminal, service, and proxy operations work by
+bootstrap workspace arrays. Its normal file, terminal, and proxy operations work by
 workspace ID under the same permission model as task workspaces.
 
 The Surface owns the lifetime. Agent archive, unarchive, and reorder; workspace rename,
@@ -9492,7 +9255,7 @@ mode `ownerUserId` is `null`; the installation's one person is the profile, whos
 **Mapping to workspaces and agents.** A task is one dedicated workspace plus one agent in it, all
 with distinct IDs. The workspace is a real workspace, exactly like a bot's: it is fetched from
 `GET /v0/workspaces/:workspaceId`, and its files, file tree, file revisions, terminals, Git state,
-Git watch, proxy, services, and secret attachments all work by its workspace ID. Its `kind` is
+Git watch, proxy, and secret attachments all work by its workspace ID. Its `kind` is
 `"task"`, its `taskId` names the task, its `botId`, `projectId`, and `parentId` are `null`, and its
 `agents` array always contains exactly the task's agent. It is not a Git worktree; it is a plain
 folder created empty, so its `base` is `null`. Its lifecycle belongs to the task — renaming,
@@ -13277,20 +13040,6 @@ agent's change carries none.
 - `terminal.updated` — a resize, a new backing process (`epoch` change), or exit. Screen
   contents never appear in events; they travel over the attachment WebSocket.
     - `terminalId` (ID string), `previousVersion`, `version`, `changes`.
-
-**Workspace services**
-
-- `service.created` — a service execution was reserved, before its process starts.
-    - `service` (full service object), optional `mutationId`.
-- `service.updated` — process/readiness progress or confirmed shutdown.
-    - `serviceId`, `workspaceId`, `previousVersion`, `version`, `changes`, optional `mutationId`.
-    - `changes` contains only `processId`, `status`, `endpointStatus`, `exitCode`, `error`,
-      `startedAt`, `endedAt`, and `updatedAt`; `updatedAt` is always present.
-
-Events are emitted after the corresponding state commit and contain no process output, input,
-or access credentials. Clients obtain the workspace list and follow its event cursor, then
-merge version-chained updates or refetch on a gap. Existing bootstrap shapes are unchanged;
-services are an on-demand workspace surface.
 
 **Workspace bridges**
 
