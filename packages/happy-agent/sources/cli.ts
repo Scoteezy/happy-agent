@@ -34,6 +34,8 @@ Commands:
                                  [execution] user starts this itself through sudo.
   sandbox setup [--retry]  Set up the Windows sandbox, or explicitly retry setup.
   sandbox status          Report Windows sandbox configuration without changing it.
+  bun <arguments>         Run the Bun runtime built into the standalone binary, as bun would,
+                          such as happy-agent bun run script.ts.
   artifact dev <folder>   Serve an HTML artifact's folder with a local artifact data API,
                           made-up people, and network faults, for building artifact apps.
   artifact snapshot <id>  Print a dump of an artifact's data, for artifact dev --seed.
@@ -62,6 +64,11 @@ async function main(): Promise<void> {
         const { runRunner } = await import("./runner/runRunner.js");
         await runRunner(rest);
         return;
+    }
+    if (command === "bun") {
+        // Everything after "bun" belongs to Bun, including --help and --version.
+        const { runBunCommand } = await import("./binary/runBunCommand.js");
+        process.exit(await runBunCommand(rest));
     }
     if (command === "artifact") {
         // Only the artifact tools load; they never start or need the daemon runtime.
