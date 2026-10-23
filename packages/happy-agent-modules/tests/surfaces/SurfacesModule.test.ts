@@ -18,6 +18,7 @@ import type { TeamModule } from "../../sources/team/index.js";
 import { DurableFunctionsModule } from "../../sources/durableFunctions/index.js";
 import { SurfacesModule, type SurfaceEvent } from "../../sources/surfaces/index.js";
 import { SurfacesPersistence } from "../../sources/surfaces/persistence/SurfacesPersistence.js";
+import { SURFACE_REFERENCE_INSTRUCTIONS } from "../../sources/surfaces/impl/surfaceReferenceInstructions.js";
 import { moduleDatabase } from "../support/moduleDatabase.js";
 
 const close: (() => void)[] = [];
@@ -150,6 +151,14 @@ describe("installation-owned Surface state", () => {
         expect(await f.surfaces.get(ctx, list.id)).toEqual(list);
         expect(await f.surfaces.get(ctx, "missingsurface0000000001")).toBeUndefined();
         expect(await f.surfaces.get(ctx, "not a surface id")).toBeUndefined();
+    });
+
+    it("tells every agent how to mention a Surface", async () => {
+        const f = await fixture();
+        const scope = { agent: { id: "ordinary" } } as AgentModuleScope;
+        expect(await f.hooks.instructions!(f.db.context, scope)).toBe(
+            SURFACE_REFERENCE_INSTRUCTIONS,
+        );
     });
 
     it("keeps each person's ordering independent and validates administrative targets", async () => {

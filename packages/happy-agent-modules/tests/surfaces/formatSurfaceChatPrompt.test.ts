@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatSurfaceChatPrompt } from "../../sources/surfaces/impl/formatSurfaceChatPrompt.js";
+import { SURFACE_REFERENCE_INSTRUCTIONS } from "../../sources/surfaces/impl/surfaceReferenceInstructions.js";
 import { surfaceTools } from "../../sources/surfaces/tools/surfaceTools.js";
 
 const id = "s4k8m2q9w1e5r7y3u6i0o2p4";
@@ -85,5 +86,27 @@ describe("Surface chat prompt", () => {
         expect(text).toContain('side chat of the whiteboard Surface "Ideas"');
         expect(text).toContain("Page through list_surfaces until you find this Surface ID");
         expect(text).not.toContain("## Working");
+    });
+});
+
+describe("Surface reference instructions", () => {
+    it("tell agents to mention a Surface by tag, with the ID its tools take", () => {
+        expect(SURFACE_REFERENCE_INSTRUCTIONS).toContain('<happy-surface id="…"/>');
+        expect(SURFACE_REFERENCE_INSTRUCTIONS).toContain("surfaceId");
+        const names = new Set(
+            surfaceTools({} as never, { agent: { id: "any" } } as never, false).map(
+                (tool) => tool.name,
+            ),
+        );
+        const named = [...SURFACE_REFERENCE_INSTRUCTIONS.matchAll(/\b[a-z]+(?:_[a-z]+)+\b/g)].map(
+            ([token]) => token,
+        );
+        expect(named).toEqual([
+            "list_surfaces",
+            "list_todos",
+            "read_document",
+            "list_calendar_events",
+        ]);
+        for (const token of named) expect(names.has(token), token).toBe(true);
     });
 });

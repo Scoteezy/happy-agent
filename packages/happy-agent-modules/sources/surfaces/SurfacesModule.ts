@@ -80,6 +80,7 @@ import { surfaceImageAssetSchema, type SurfaceImageAsset } from "./SurfaceImageA
 import { surfaceReferenceSchema, type SurfaceReference } from "./SurfaceReference.js";
 import { surfaceChatSchema, type SurfaceChat } from "./SurfaceChat.js";
 import { formatSurfaceChatPrompt } from "./impl/formatSurfaceChatPrompt.js";
+import { SURFACE_REFERENCE_INSTRUCTIONS } from "./impl/surfaceReferenceInstructions.js";
 import { surfaceTools } from "./tools/surfaceTools.js";
 import {
     SurfaceDocumentLive,
@@ -203,8 +204,9 @@ export class SurfacesModule implements AgentModule {
         return {
             instructions: async (hookCtx, scope) => {
                 const chat = await this.chatForAgent(hookCtx, scope.agent.id);
-                if (chat === undefined) return "";
-                return formatSurfaceChatPrompt(await this.#surface(hookCtx, chat.surfaceId));
+                if (chat === undefined) return SURFACE_REFERENCE_INSTRUCTIONS;
+                const surface = await this.#surface(hookCtx, chat.surfaceId);
+                return `${formatSurfaceChatPrompt(surface)}\n\n${SURFACE_REFERENCE_INSTRUCTIONS}`;
             },
             tools: async (toolCtx, scope) =>
                 surfaceTools(this, scope, await this.isAdmin(toolCtx, scope.agent.id)),
