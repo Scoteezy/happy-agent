@@ -218,6 +218,17 @@ an existing one.
 
 ## Development
 
+Python workflows and Monty Code Mode use the module's native worker. Build it once on this
+computer before their tests or source-mode execution; the standalone Agent embeds this same worker:
+
+```sh
+pnpm --filter @slopus/happy-agent build:native:monty
+```
+
+The [native worker README](../happy-agent/native/monty/README.md) explains the pinned Rust build
+prerequisites and ownership checks. A missing worker reports this prerequisite rather than using
+an upstream worker that can outlive a killed test harness.
+
 ```sh
 pnpm --filter @slopus/happy-agent-modules check   # typecheck
 pnpm --filter @slopus/happy-agent-modules test    # vitest

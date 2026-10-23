@@ -1,0 +1,55 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 00243cb..3e186cc 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2552,6 +2552,7 @@ dependencies = [
+  "anstream 0.6.21",
+  "anstyle",
+  "clap",
++ "libc",
+  "logfire",
+  "monty",
+  "monty-alloc",
+diff --git a/crates/monty-runtime/Cargo.toml b/crates/monty-runtime/Cargo.toml
+index 836733e..2ecff9e 100644
+--- a/crates/monty-runtime/Cargo.toml
++++ b/crates/monty-runtime/Cargo.toml
+@@ -44,6 +44,9 @@ rustyline = { version = "15", optional = true }
+ # Only the `run monty` span's deferred field; goes with `logfire`.
+ tracing = { version = "0.1", optional = true }
+ 
++[target.'cfg(unix)'.dependencies]
++libc = "0.2"
++
+ [dev-dependencies]
+ tempfile = "3"
+ 
+diff --git a/crates/monty-runtime/src/main.rs b/crates/monty-runtime/src/main.rs
+index 643ffa7..fe206e4 100644
+--- a/crates/monty-runtime/src/main.rs
++++ b/crates/monty-runtime/src/main.rs
+@@ -8,6 +8,8 @@ use monty_types::TypeCheckingFormat;
+ #[cfg(feature = "standalone")]
+ mod run;
+ mod subprocess;
++#[cfg(unix)]
++mod owner;
+ 
+ /// Bounds worker memory and classifies allocation failure as an exit code
+ /// rather than an abort, so the pool can report `MemoryError`. Declared here
+diff --git a/crates/monty-runtime/src/subprocess.rs b/crates/monty-runtime/src/subprocess.rs
+index cefd942..143b618 100644
+--- a/crates/monty-runtime/src/subprocess.rs
++++ b/crates/monty-runtime/src/subprocess.rs
+@@ -27,6 +27,11 @@ const EX_PROTOCOL: u8 = 76;
+ 
+ /// Runs the subprocess child loop until EOF, `Shutdown`, or a fatal error.
+ pub(crate) fn run() -> ExitCode {
++    #[cfg(unix)]
++    if let Err(error) = crate::owner::watch() {
++        eprintln!("could not watch the worker's IPC owner: {error}");
++        return ExitCode::FAILURE;
++    }
+     install_panic_hook();
+     let mut reader = FrameReader::new(io::stdin().lock());
+     let mut child = Child::default();

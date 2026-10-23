@@ -141,6 +141,9 @@ jobs:
                   pnpm --filter @slopus/happy-agent-modules build
                   pnpm --filter @slopus/happy-agent build
 
+            - name: Build and verify the owned native Python worker
+              uses: ./.github/actions/build-monty
+
             - name: Run type checks
               run: |
                   pnpm --filter @slopus/happy-agent-modules check
@@ -338,6 +341,9 @@ jobs:
               with:
                   path: packages/happy-agent/native/target/${{ matrix.target }}/libsql.node
                   key: ${{ steps.libsql-inputs.outputs.key }}
+
+            - name: Build and verify the owned native Python worker
+              uses: ./.github/actions/build-monty
 
             - name: Verify patched Parcel callback lifetimes under Node and Bun
               run: pnpm --filter @slopus/happy-agent test:native:watcher

@@ -10,6 +10,7 @@
     },
     "files": [
         "dist",
+        "native/target",
         "README.md"
     ],
     "type": "module",

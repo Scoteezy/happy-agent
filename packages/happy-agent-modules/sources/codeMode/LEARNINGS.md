@@ -62,7 +62,7 @@ agents to use the shared pool concurrently.
 Monty's execution-duration counter is cumulative and is part of a restored dump. A session-wide
 `maxDurationSecs` therefore turns into a shrinking lifetime budget across calls rather than a
 per-call limit. Code Mode keeps memory and recursion limits and relies on the pool's
-`requestTimeout` as the per-call crash watchdog.
+`requestTimeout` as the crash watchdog for each native protocol request.
 
 The shared pool starts with no prewarmed workers and grows on the first checkout. Warming a worker
 inside the module startup hook can take longer than the daemon launcher's readiness window even
@@ -76,6 +76,14 @@ can make many OS callbacks and legitimately accumulate more CPU time than that w
 A fixed worker-wide CPU limit therefore changes valid execution behavior, even when workers are
 recycled after every checkout. Keep the caller's pool recycling policy and execution limits intact.
 Cleanup when the harness dies must follow worker ownership rather than introducing a CPU budget.
+
+The native worker now observes its existing IPC input independently of Python execution. Closing
+the pool's writer ends the worker even during an infinite loop; normal callbacks and worker reuse
+keep their original limits. On macOS the observer must use kqueue with `EV_CLEAR` and `EV_EOF`:
+plain `poll` without input interest misses hang-up there, while input interest spins on unread
+protocol bytes. Linux can block in `poll` with no input interest and observe hang-up. Source and
+dist resolve the module-owned built worker; standalone builds embed it. A missing source worker
+must report the build prerequisite instead of silently selecting the unprotected upstream binary.
 
 ## The tool result and Python state need one write-ahead order
 

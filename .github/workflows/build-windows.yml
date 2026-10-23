@@ -22,7 +22,7 @@ jobs:
                     - component: monty
                       script: packages/happy-agent/scripts/build-native-monty.mjs
                       source: packages/happy-agent/native/monty/**
-                      output: packages/happy-agent/native/target/win32-x64
+                      output: packages/happy-agent-modules/native/target/win32-x64
                     - component: fff
                       script: packages/happy-agent/scripts/build-native-fff.mjs
                       source: packages/happy-agent/native/fff/**

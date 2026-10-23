@@ -28,6 +28,7 @@ deterministic chaos seeds; each seed runs in its own process.
 The gym consumes three built packages, so build them first:
 
 ```sh
+pnpm --filter @slopus/happy-agent build:native:monty
 pnpm --filter @slopus/happy-agent-modules build
 pnpm --filter @slopus/happy-agent-compute build
 pnpm --filter @slopus/happy-agent build

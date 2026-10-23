@@ -1,0 +1,32 @@
+name: Build the owned Python worker
+description: Cache, build, and verify the pinned worker with IPC owner cleanup on macOS and Linux.
+runs:
+    using: composite
+    steps:
+        - name: Identify the native worker build inputs
+          id: inputs
+          shell: bash
+          run: |
+              echo "image=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+              echo "toolchain=$(node -p 'JSON.parse(require("node:fs").readFileSync("packages/happy-agent/native/monty/source.json")).toolchain')" >> "$GITHUB_OUTPUT"
+        - name: Restore the unsigned native Python worker
+          id: cache
+          uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+          with:
+              path: packages/happy-agent-modules/native/target
+              key: native-monty-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.image }}-${{ hashFiles('packages/happy-agent/native/monty/**', 'packages/happy-agent/scripts/build-native-monty.mjs', '.github/actions/build-monty/action.yml') }}
+        - name: Install the pinned Rust toolchain
+          if: steps.cache.outputs.cache-hit != 'true'
+          shell: bash
+          env:
+              TOOLCHAIN: ${{ steps.inputs.outputs.toolchain }}
+          run: rustup toolchain install "$TOOLCHAIN" --profile minimal
+        - name: Build the pinned native Python worker
+          if: steps.cache.outputs.cache-hit != 'true'
+          shell: bash
+          run: pnpm --filter @slopus/happy-agent build:native:monty
+        - name: Verify native Python ownership and IPC under Node and Bun
+          shell: bash
+          run: |
+              pnpm --filter @slopus/happy-agent test:native:monty
+              pnpm --filter @slopus/happy-agent exec pnpm dlx bun@1.4.4 scripts/verify-native-monty.mjs

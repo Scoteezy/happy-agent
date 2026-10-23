@@ -38,6 +38,7 @@ test starts and fails under Node or another Bun, unless `HAPPY_GYM_RUNTIME=node`
 deliberate Node run. The gym consumes three built packages:
 
 ```sh
+pnpm --filter @slopus/happy-agent build:native:monty
 pnpm --filter @slopus/happy-agent-modules build
 pnpm --filter @slopus/happy-agent-compute build
 pnpm --filter @slopus/happy-agent build

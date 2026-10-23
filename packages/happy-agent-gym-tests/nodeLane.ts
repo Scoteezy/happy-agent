@@ -16,6 +16,7 @@ export const nodeLaneScenarios: readonly string[] = [
     // Run lifecycle.
     "run_lifecycle_uses_durable_history.test.ts",
     "happy_api_transcript_runs.test.ts",
+    "monty_workers_end_with_their_daemon.test.ts",
     // A representative core sample.
     "happy_api_platform.test.ts",
     "happy_api_workspaces.test.ts",

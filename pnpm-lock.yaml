@@ -280,6 +280,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
+      '@sinclair/typebox':
+        specifier: ^0.34.49
+        version: 0.34.49
       '@slopus/happy-agent-client':
         specifier: 0.0.118
         version: 0.0.118

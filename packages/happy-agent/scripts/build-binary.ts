@@ -337,10 +337,18 @@ function resolveBinaryAssets(target: BinaryTarget, tailcatSource: string): Binar
         );
     }
     const montySource = resolveRequired(montyRequire, montyPackage);
-    const montyWorkerSource =
-        target.platform === "win32"
-            ? join(happyAgentRoot, "native", "target", "win32-x64", "monty.exe")
-            : resolveRequired(montyRequire, `${montyPackage}/monty${executableSuffix}`);
+    const montyWorkerSource = join(
+        modulesRoot,
+        "native",
+        "target",
+        target.key,
+        `monty${executableSuffix}`,
+    );
+    if (!existsSync(montyWorkerSource)) {
+        throw new Error(
+            `Build the native Python worker on ${target.key} first (pnpm --filter @slopus/happy-agent build:native:monty).`,
+        );
+    }
     const ffiSource = resolveRequired(fffRequire, ffiPackage);
     const fffSource =
         target.platform === "win32"
@@ -444,19 +452,19 @@ export const { getQuickJS } = QJS;
         ),
     ];
 
+    assets.push(
+        asset(
+            "montyLicenseAsset",
+            join(happyAgentRoot, "native", "monty", "LICENSE"),
+            "LICENSE.monty",
+        ),
+    );
     if (target.platform === "win32") {
         assets.push(
             asset(
                 "fffLicenseAsset",
                 join(happyAgentRoot, "native", "fff", "LICENSE"),
                 "LICENSE.fff",
-            ),
-        );
-        assets.push(
-            asset(
-                "montyLicenseAsset",
-                join(happyAgentRoot, "native", "monty", "LICENSE"),
-                "LICENSE.monty",
             ),
         );
     }
@@ -552,10 +560,7 @@ export const { getQuickJS } = QJS;
         ...(menuBarApp === undefined ? {} : { menuBarRelativePath }),
         montyNativeRelativePath: basename(montySource),
         montyWorkerRelativePath: `monty${executableSuffix}`,
-        montyWorkerVariables:
-            target.platform === "win32"
-                ? ["montyWorkerAsset", "montyLicenseAsset"]
-                : ["montyWorkerAsset"],
+        montyWorkerVariables: ["montyWorkerAsset", "montyLicenseAsset"],
         parcelWatcherRelativePath: "watcher.node",
         supervisorGroups,
         tailcatRelativePath: `tailcat${executableSuffix}`,
@@ -605,6 +610,7 @@ export function resolveSourceAdapters(target: BinaryTarget): Map<string, SourceA
     );
     const supervisorRoot = packageDependencyRoot(computeRoot, "@slopus/happy-agent-supervisor");
     const providersRoot = directPackageRoot("@slopus/happy-providers");
+    const montyRoot = dependencyRoot("@slopus/happy-agent-modules", "@pydantic/monty");
     const justBashRoot = packageDependencyRoot(computeRoot, "just-bash");
     const justBashChunks = join(justBashRoot, "dist", "bundle", "chunks");
 
@@ -664,25 +670,18 @@ export async function getImageProcessor() { return imageProcessor; }
         adapt: () =>
             `export { loadChiefOfStaffAvatar } from ${JSON.stringify(VIRTUAL_ASSETS_MODULE)};\n`,
     });
-    addAdapter(
-        adapters,
-        join(dependencyRoot("@slopus/happy-agent-modules", "@pydantic/monty"), "native-addon.js"),
-        {
-            name: "Monty native loader",
-            required: true,
-            adapt: () => `import { loadMontyNative } from ${JSON.stringify(VIRTUAL_ASSETS_MODULE)};
+    addAdapter(adapters, join(montyRoot, "native-addon.js"), {
+        name: "Monty native loader",
+        required: true,
+        adapt: () => `import { loadMontyNative } from ${JSON.stringify(VIRTUAL_ASSETS_MODULE)};
 const { MontyException, JsMontyException, NativeMountDir, NativePool, NativeSession, _installTelemetryAdapter, MAX_VALUE_DEPTH } = loadMontyNative();
 export { MontyException, JsMontyException, NativeMountDir, NativePool, NativeSession, _installTelemetryAdapter, MAX_VALUE_DEPTH };
 `,
-        },
-    );
-    addAdapter(
-        adapters,
-        join(dependencyRoot("@slopus/happy-agent-modules", "@pydantic/monty"), "dist", "binary.js"),
-        {
-            name: "Monty subprocess resolver",
-            required: true,
-            adapt: () => `import { existsSync } from "node:fs";
+    });
+    addAdapter(adapters, join(montyRoot, "dist", "binary.js"), {
+        name: "Monty subprocess resolver",
+        required: true,
+        adapt: () => `import { existsSync } from "node:fs";
 import { getMontyBinary } from ${JSON.stringify(VIRTUAL_ASSETS_MODULE)};
 export function platformTriple() { return null; }
 export function findMontyBinary(explicit) {
@@ -694,8 +693,13 @@ export function findMontyBinary(explicit) {
     return getMontyBinary();
 }
 `,
-        },
-    );
+    });
+    addAdapter(adapters, join(modulesRoot, "dist", "monty", "resolveMontyBinary.js"), {
+        name: "Owned Python worker resolver",
+        required: true,
+        adapt: () =>
+            `export { findMontyBinary as resolveMontyBinary } from ${JSON.stringify(join(montyRoot, "dist", "binary.js"))};\n`,
+    });
     addAdapter(adapters, join(ffiRoot, "index.js"), {
         name: "ffi-rs native loader",
         required: true,

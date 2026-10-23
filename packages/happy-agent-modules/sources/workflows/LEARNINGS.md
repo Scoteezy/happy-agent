@@ -22,6 +22,11 @@ the same native interpreter also serves Code Mode, whose OS callbacks can span m
 one Python call. Cancellation is checked before executing Python and after external awaits;
 in-flight requests settle under their existing execution/request budgets.
 
+macOS and Linux worker cleanup watches the native pool's IPC input from a separate native thread,
+so losing the harness closes the pipe and ends busy Python without changing execution allowances
+or checkout reuse. The module-owned worker must be built before source execution and is embedded
+into standalone Agent binaries. No background agent-call waiting is turned into a wall deadline.
+
 ## Agents a run starts answer the mutation of the run that launched it
 
 A workflow's agents were created through Collaboration, which read the owner's current run when

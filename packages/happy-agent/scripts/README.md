@@ -95,6 +95,18 @@ No real WorkOS account or external WorkOS request is used.
 
 ## Native Windows 11 x64
 
+All platforms build the pinned Python worker before source workflows, Monty Code Mode tests, or
+standalone compilation:
+
+```sh
+pnpm --filter @slopus/happy-agent build:native:monty
+pnpm --filter @slopus/happy-agent test:native:monty
+```
+
+The [native worker README](../native/monty/README.md) describes IPC ownership cleanup on macOS and
+Linux, the unchanged execution limits, and source-mode artifact resolution. The release and API
+verification workflows build and verify this worker once per host and cache identical native inputs.
+
 The Windows standalone artifact includes the Bun runtime, Happy's supervisor,
 matching sandbox runner and setup helper, native database binding, Python worker,
 and provider assets. These files are embedded in one `happy-agent-win32-x64.exe`

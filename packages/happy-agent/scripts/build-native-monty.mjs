@@ -5,23 +5,39 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const metadata = JSON.parse(readFileSync(join(packageRoot, "native/monty/source.json"), "utf8"));
-if (process.platform !== "win32" || process.arch !== "x64")
-    throw new Error("This builder targets Windows x64.");
+const key = `${process.platform}-${process.arch}`;
+const target = {
+    "darwin-arm64": "aarch64-apple-darwin",
+    "darwin-x64": "x86_64-apple-darwin",
+    "linux-arm64": "aarch64-unknown-linux-gnu",
+    "linux-x64": "x86_64-unknown-linux-gnu",
+    "win32-x64": metadata.target,
+}[key];
+if (target === undefined) throw new Error(`Unsupported native Python worker target: ${key}`);
+const windows = process.platform === "win32";
+const toolchain = windows ? metadata.windowsToolchain : metadata.toolchain;
 const source = resolve(
-    process.env.HAPPY_MONTY_SOURCE_DIR ?? join(packageRoot, "../../.local/native-monty"),
+    process.env.HAPPY_MONTY_SOURCE_DIR ?? join(packageRoot, "../../.local/native-monty", key),
 );
-function run(command, args, cwd = source, capture = false) {
+function run(command, args, cwd = source, capture = false, environment = {}) {
     const result = spawnSync(command, args, {
         cwd,
         windowsHide: true,
         encoding: "utf8",
         stdio: capture ? "pipe" : "inherit",
-        env: { ...process.env, CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "2" },
+        env: {
+            ...process.env,
+            CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "2",
+            ...environment,
+        },
     });
     if (result.error) throw result.error;
     if (result.status !== 0)
         throw new Error(`${command} failed (${result.status}): ${result.stderr ?? ""}`);
     return result.stdout?.trim();
+}
+function copyIfChanged(from, to) {
+    if (!existsSync(to) || !readFileSync(from).equals(readFileSync(to))) copyFileSync(from, to);
 }
 if (!existsSync(join(source, ".git"))) {
     if (existsSync(source)) throw new Error(`Expected an empty source destination: ${source}`);
@@ -34,20 +50,67 @@ if (!existsSync(join(source, ".git"))) {
 }
 if (run("git", ["rev-parse", "HEAD"], source, true) !== metadata.commit)
     throw new Error("Monty source commit does not match its pin.");
-if (run("git", ["status", "--porcelain", "--untracked-files=no"], source, true))
+const patch = join(packageRoot, "native/monty/owner.patch");
+if (!windows) {
+    const diff = run(
+        "git",
+        [
+            "-c",
+            "core.abbrev=7",
+            "diff",
+            "HEAD",
+            "--binary",
+            "--no-ext-diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+        ],
+        source,
+        true,
+    );
+    if (diff !== readFileSync(patch, "utf8").trim()) {
+        if (diff) throw new Error("Monty source has unexpected local modifications.");
+        run("git", ["apply", "--check", patch]);
+        run("git", ["apply", patch]);
+    }
+    copyIfChanged(
+        join(packageRoot, "native/monty/owner.rs"),
+        join(source, "crates/monty-runtime/src/owner.rs"),
+    );
+} else if (run("git", ["status", "--porcelain", "--untracked-files=no"], source, true)) {
     throw new Error("Monty source has local modifications.");
-run("cargo", [
-    "+" + metadata.toolchain,
-    "build",
-    "--locked",
-    "--release",
-    "--target",
-    metadata.target,
-    "-p",
-    "monty-runtime",
-    "--no-default-features",
-]);
-const binary = join(source, "target", metadata.target, "release", "monty.exe");
+}
+const compiler = run("rustup", ["which", "--toolchain", toolchain, "rustc"], source, true);
+run(
+    "rustup",
+    [
+        "run",
+        toolchain,
+        "cargo",
+        "build",
+        "--locked",
+        "--release",
+        "--target",
+        target,
+        "-p",
+        "monty-runtime",
+        "--no-default-features",
+    ],
+    source,
+    false,
+    { RUSTC: compiler },
+);
+const filename = windows ? "monty.exe" : "monty";
+const binary = join(source, "target", target, "release", filename);
+const output = join(packageRoot, "../happy-agent-modules/native/target", key);
+mkdirSync(output, { recursive: true });
+copyIfChanged(join(packageRoot, "native/monty/LICENSE"), join(output, "LICENSE.monty"));
+if (!windows) {
+    copyIfChanged(binary, join(output, filename));
+    console.log(
+        JSON.stringify({ binary: join(output, filename), bytes: readFileSync(binary).length }),
+    );
+    process.exit(0);
+}
 const pe = readFileSync(binary);
 const signature = pe.readUInt32LE(0x3c);
 if (pe.toString("ascii", signature, signature + 4) !== "PE\0\0")
@@ -97,7 +160,5 @@ const external = imports.filter(
     (name) => !system.has(name.toLowerCase()) && !/^(api-ms-win-|ext-ms-win-)/i.test(name),
 );
 if (external.length) throw new Error(`Monty still needs external DLLs: ${external.join(", ")}`);
-const output = join(packageRoot, "native/target/win32-x64");
-mkdirSync(output, { recursive: true });
-copyFileSync(binary, join(output, "monty.exe"));
+copyIfChanged(binary, join(output, "monty.exe"));
 console.log(JSON.stringify({ binary: join(output, "monty.exe"), bytes: pe.length, imports }));
