@@ -44,23 +44,25 @@ naming. Names supplied by the workspace-creation agent tool are deliberate. Elig
 again by the workspaces catalog when the generated slug is applied, so a user rename that races
 naming still wins.
 
-## Generated titles are three words at most
+## Subject names are for work started in the sidebar, not for everyone
 
-Six-word, 80-character titles such as "Sidebar UI fixes and draggable spaces" were too long for
-the sidebar. Naming now asks for one to three words naming the subject, never a list of its parts,
-and the parser keeps at most three words and 32 characters, dropping a trailing joining word such
-as "and" or "&" so a cut never reads as unfinished.
+For the Spaces sidebar, naming was changed for every chat: one to three words naming the subject,
+at most 32 characters, written by the chat's own model at its default effort with a one-minute
+bound. Six-word titles such as "Sidebar UI fixes and draggable spaces" were too long for a sidebar
+row, and a cheap model at the lowest effort misread what the work was. That regressed everyone who
+never opened the sidebar: Kirill asked that tasks, bots and workspaces outside it keep naming
+themselves exactly as before.
 
-## Names come from the chat's own model, not a cheap one
+There are now two naming styles. `standard` is the original naming and the default for every
+chat: two to six words (six words and 80 characters kept), bot names of three words and 40
+characters, written by the cheapest model of the chat's account at the least effort it accepts,
+with a ten-second bound. `subject` is the Spaces naming above, with a trailing joining word such
+as "and" or "&" dropped so a cut never reads as unfinished.
 
-Naming ran on a hardcoded list of inexpensive models at the lowest effort, and the names misread
-what the work was. Kirill asked for the default model from Settings at its default effort, as
-Prioritizing uses. Titles cannot read Settings: `UserSettingsModule` takes `TeamModule`, which
-takes `TasksModule`, which takes `TitlesModule`, so the dependency would be a construction cycle,
-and the module rules forbid setters or host objects to break it. Names are therefore written by
-the model the chat itself runs on (`scope.agent.model`, passed by Titles, Tasks, and Bots) at that
-model's default effort. A new chat starts on the Settings default, so at the first message this is
-that model unless the person picked another for the chat, which is then the better choice anyway.
-When the chat's model is not served, the first model of the chat's account answers, then the
-configured default. A stronger model at its default effort is slower, so one request may take up
-to a minute instead of ten seconds; naming is detached and the row stays a stem cell meanwhile.
+Only Spaces decides who gets subject names, and it does so without Titles reading Spaces or
+Settings, which would be a construction cycle (`SpacesModule` and `UserSettingsModule` both sit
+above `TasksModule`, which takes `TitlesModule`). When Spaces makes a stem cell, the only way a
+person who opted in starts new work in the sidebar, it calls `nameBySubject` for the stem cell's
+agent in the same transaction. `namingStyle` answers `subject` for that agent and every chat under
+it, and `standard` for everything else, including a person's other tasks and bots. Tasks and
+Titles both ask `namingStyle` before naming, so the task name and the chat title agree.

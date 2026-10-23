@@ -21,7 +21,7 @@ describe("first-message naming", () => {
                     return {
                         content: [
                             {
-                                text: "<title>File list investigation</title>",
+                                text: "<title>Project file list investigation</title>",
                                 type: "text",
                             },
                         ],
@@ -86,7 +86,7 @@ describe("first-message naming", () => {
             const agent = (await gym.client.getAgent(gym.defaultSessionId)).agent;
             return agent.title === null ? undefined : agent;
         }, "the first message to name its session");
-        expect(named.title).toBe("File list investigation");
+        expect(named.title).toBe("Project file list investigation");
 
         const requests = gym.inference.requests;
         const naming = requests.find((request) =>
@@ -141,7 +141,9 @@ describe("first-message naming", () => {
         }, "the first generated session name to propagate to its workspace");
         expect(renamed.nameSource).toBe("generated");
         expect(renamed.git?.branch).toBe("worktree/project-file-list");
-        expect((await gym.client.getAgent(agent.id)).agent.title).toBe("File list investigation");
+        expect((await gym.client.getAgent(agent.id)).agent.title).toBe(
+            "Project file list investigation",
+        );
     }, 30_000);
 
     it("refines once from history including the second user message", async () => {
@@ -151,7 +153,7 @@ describe("first-message naming", () => {
                     return {
                         content: [
                             {
-                                text: "<title>File list investigation</title>",
+                                text: "<title>Project file list investigation</title>",
                                 type: "text",
                             },
                         ],
@@ -161,7 +163,7 @@ describe("first-message naming", () => {
                     return {
                         content: [
                             {
-                                text: "<title>File list repair</title>",
+                                text: "<title>Project file list repair</title>",
                                 type: "text",
                             },
                         ],
@@ -186,13 +188,13 @@ describe("first-message naming", () => {
         await gym.send("Investigate why the project file list is empty.");
         await gym.waitUntil(async () => {
             const agent = (await gym.client.getAgent(gym.defaultSessionId)).agent;
-            return agent.title === "File list investigation" ? true : undefined;
+            return agent.title === "Project file list investigation" ? true : undefined;
         }, "the first user message to set the initial title");
 
         await gym.send("Actually fix the project file list instead.");
         await gym.waitUntil(async () => {
             const agent = (await gym.client.getAgent(gym.defaultSessionId)).agent;
-            return agent.title === "File list repair" ? true : undefined;
+            return agent.title === "Project file list repair" ? true : undefined;
         }, "the second user message to refine the title");
 
         const refinement = gym.inference.requests.find((request) =>
@@ -222,7 +224,7 @@ async function startGym(): Promise<AgentGym> {
                     content: [
                         {
                             text: [
-                                "<title>File list investigation</title>",
+                                "<title>Project file list investigation</title>",
                                 "<slug>project-file-list</slug>",
                             ].join("\n"),
                             type: "text",

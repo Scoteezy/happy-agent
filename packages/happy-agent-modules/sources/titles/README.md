@@ -25,15 +25,22 @@ The request runs on its own provider session, outside the agent loop, so nothing
 history a person reads or the context the agent works from. Each of the first two user-message
 positions can launch at most one request.
 
-The model is the one the chat itself runs on, at that model's default effort. A new chat starts on
-the default model from Settings, so names come from the person's chosen model rather than a cheap
-one. When that model is no longer served, the first model of the chat's account answers, since only
-that account is known to be signed in; then the configured default. A request may take up to a
-minute; the row stays a stem cell meanwhile.
+A chat is named in one of two styles. Every chat is named the `standard` way: the cheapest model
+served by the account the chat already runs on — that account is the only one known to be signed in
+and paid for — at the least reasoning effort the model accepts, within ten seconds. Writing a title
+does not deserve a reasoning budget.
+
+Work a person starts in the Spaces sidebar is named the `subject` way. Spaces marks a stem cell's
+agent with `nameBySubject` when it makes the stem cell, and that chat and every chat under it are
+then named by the model the chat itself runs on, at that model's default effort, within a minute:
+a sidebar row has room for a few words, and those words need judgement about what the work is.
+When that model is no longer served, the first model of the chat's account answers, then the
+configured default. Bots are always named the standard way.
 
 Each name is asked for as its own tag, `<title>…</title>` and `<slug>…</slug>`, because that is the
 shape models answer most reliably, and only the names still wanted are asked for. A greeting, a code fence or a closing remark around it is ignored; an answer with no tag at
-all is read as the name itself. A chat title is bounded to three words and 32 characters, without a trailing joining word; a workspace
+all is read as the name itself. A standard title is bounded to six words and 80 characters, a
+subject title to three words and 32 characters without a trailing joining word; a workspace
 or branch name is reduced to lower-case kebab-case and bounded to 48 characters. Text that is merely
 too long is shortened rather than rejected — a slightly long name beats no name.
 
@@ -44,7 +51,7 @@ that became a rewrite, the bug report that became a design. The second user mess
 where the module looks again. By then committed history includes the opening request, any work
 recorded between the two messages, and the new request itself.
 
-The second look is the same model on the same account, reading the conversation instead of the
+The second look is the model and style that named the chat, on the same account, reading the conversation instead of the
 opening message, and asked a different question: not "name this" but "is this still what it is
 called". The title it was given is the answer unless the conversation plainly contradicts it, because
 a title that keeps moving is worse than one that was slightly wrong — a person looking for the chat
@@ -73,29 +80,33 @@ because renaming either would move it out from under agents already working ther
 | [`HistoryModule`](../history/README.md)       | The committed conversation read after the second accepted user message.             |
 | [`WorkspacesModule`](../workspaces/README.md) | Agent placement and the catalog that applies a generated workspace and branch name. |
 
-Nothing else is passed in. One name may take ten seconds, and that is a constant here rather than
-a setting: it bounds detached naming work and is the module's own. The message and agent do not
+Nothing else is passed in. One standard name may take ten seconds and one subject name a minute,
+and those are constants here rather than settings: it bounds detached naming work and is the module's own. The message and agent do not
 wait on this clock.
 
 ## Public methods
 
-- `nameFromFirstMessage(ctx, { firstMessage, providerId?, sessionNamed?, workspace? })` —
+- `nameFromFirstMessage(ctx, { firstMessage, providerId?, modelId?, style?, sessionNamed?, workspace? })` —
   the combined operation used by automatic initial naming. It settles what is still wanted, hands
   the folder name to the workspaces catalog itself, and answers with the chat title. It never
   throws: the message and turn it is naming are already on their way.
-- `suggestNames(ctx, { firstMessage, wanted, providerId? }, { signal? })` — the names alone, without
-  writing any of them anywhere.
-- `refineChat(ctx, { transcript, currentTitle?, providerId? }, { signal? })` — the second look, given
+- `suggestNames(ctx, { firstMessage, wanted, providerId?, modelId?, style? }, { signal? })` — the
+  names alone, without writing any of them anywhere. `style` defaults to `standard`.
+- `refineChat(ctx, { transcript, currentTitle?, providerId?, modelId?, style? }, { signal? })` — the second look, given
   the conversation as plain text. It answers with the title to use, which is usually the one it was
   given.
 - `workspaceWasNamed(ctx, workspaceId)` / `markWorkspaceNamed(ctx, workspaceId)` — the durable fact
   that a workspace has already taken the name of a chat.
+- `nameBySubject(ctx, agentId)` / `namingStyle(ctx, agentId)` — marks a chat started in the Spaces
+  sidebar, and answers how a chat is named: `subject` for a marked chat or one under it, else
+  `standard`.
 
 ## Storage
 
 No tables. The per-agent `title-user-messages` key records whether one or two text-bearing user-role
 messages have committed. It is capped at two because later messages never trigger title work. The
-shared Agent KV store retains generated-title provenance and the workspace naming fact.
+shared Agent KV store retains generated-title provenance, the workspace naming fact, and under
+`subject-named` the chats marked to be named the subject way.
 
 Under `generated-titles` is the exact title automatic naming last wrote for each agent. A different
 current title is deliberate and cannot be refined over.

@@ -47,6 +47,7 @@ it("rejects another owner's existing stem-cell ID inside the creation transactio
             { get: async () => ({ value: null }) } as unknown as ConstructorParameters<
                 typeof SpacesModule
             >[9],
+            {} as ConstructorParameters<typeof SpacesModule>[10],
         );
         await expect(
             spaces.createStemCell(database.context, "ownerbbbbbbbbbbbbbbbbbbb", {

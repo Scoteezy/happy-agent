@@ -693,6 +693,7 @@ export class TasksModule implements AgentModule {
                     wanted: { title: true },
                     providerId,
                     ...(modelId === undefined ? {} : { modelId }),
+                    style: await this.#titles.namingStyle(ctx, initial.agentId),
                 })
             ).title;
             const name = suggested?.split(/\s+/u).slice(0, 6).join(" ").slice(0, 60).trimEnd();

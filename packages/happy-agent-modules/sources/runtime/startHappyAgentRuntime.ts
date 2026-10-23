@@ -712,6 +712,7 @@ export async function startHappyAgentRuntime(
             subtasks,
             team,
             userSettings,
+            titles,
             artifacts,
         );
         registerShutdown("spaces", async () => await spaces.close());

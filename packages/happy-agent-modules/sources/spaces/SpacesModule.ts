@@ -40,6 +40,7 @@ import { SubtasksModule } from "../subtasks/index.js";
 import { SurfacesModule } from "../surfaces/index.js";
 import { TasksModule, type TaskRecord } from "../tasks/index.js";
 import { TeamModule } from "../team/index.js";
+import { TitlesModule } from "../titles/index.js";
 import { UserSettingsModule } from "../userSettings/index.js";
 import { AGENT_MESSAGE_ORIGIN_METADATA, isUserOriginMetadata } from "../impl/messageOrigin.js";
 
@@ -177,6 +178,7 @@ export class SpacesModule implements AgentModule {
     readonly #history: HistoryModule;
     readonly #subtasks: SubtasksModule;
     readonly #team: TeamModule;
+    readonly #titles: TitlesModule;
     readonly #userSettings: UserSettingsModule;
     readonly #surfaces: SurfacesModule;
     readonly #tasks: TasksModule;
@@ -209,6 +211,7 @@ export class SpacesModule implements AgentModule {
         subtasks: SubtasksModule,
         team: TeamModule,
         userSettings: UserSettingsModule,
+        titles: TitlesModule,
         artifacts?: ArtifactsModule,
     ) {
         this.#config = config;
@@ -221,6 +224,7 @@ export class SpacesModule implements AgentModule {
         this.#subtasks = subtasks;
         this.#team = team;
         this.#userSettings = userSettings;
+        this.#titles = titles;
         this.#artifacts = artifacts;
         artifacts?.bindSpaces(this);
         // Telling Prioritizing about new work commits with the work; the message is delivered
@@ -1242,6 +1246,8 @@ export class SpacesModule implements AgentModule {
                 await deletePendingChanges(txCtx, ownerUserId, [`space:${previous.id}`]);
             }
             await insertSpace(txCtx, space);
+            // A sidebar row names its subject in a few words; other work keeps standard names.
+            await this.#titles.nameBySubject(txCtx, input.task.agentId);
             // Prioritizing begins with the person's first new work.
             await this.#ensurePrioritizing(txCtx, ownerUserId);
             if (this.#artifacts !== undefined) {

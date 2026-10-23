@@ -30,7 +30,7 @@ const lifecycleDatabase = moduleDatabase([], "happy-agent-modules-titles-lifecyc
 
 afterAll(() => lifecycleDatabase.close());
 
-/** A catalog served by the one scripted account; the chat's own model is named per test. */
+/** A catalog served by the one scripted account, cheapest model last so preference is visible. */
 function models(
     ids: readonly string[] = ["openai/gpt-5.6-max", "anthropic/sonnet-5"],
 ): AgentModel[] {
@@ -98,29 +98,21 @@ async function started(): Promise<TitlesModule> {
 /** The chat title alone, which is all a chat outside a workspace asks for. */
 async function nameChat(
     module: TitlesModule,
-    request: {
-        readonly firstMessage: string;
-        readonly providerId?: string;
-        readonly modelId?: string;
-    },
+    request: { readonly firstMessage: string; readonly providerId?: string },
 ): Promise<string | undefined> {
     const names = await module.suggestNames(ctx, {
         firstMessage: request.firstMessage,
         wanted: { title: true },
         ...(request.providerId === undefined ? {} : { providerId: request.providerId }),
-        ...(request.modelId === undefined ? {} : { modelId: request.modelId }),
     });
     return names.title;
 }
 
 describe("TitlesModule naming", () => {
-    it("asks for a short functional bot identity on the chat's own model", async () => {
+    it("asks for a short functional bot identity using the cheapest account model", async () => {
         const test = await titles([textTurn("<title>Release Steward</title>")]);
         await expect(
-            test.module.suggestBotName(ctx, "Watch our releases.", {
-                providerId: "scripted",
-                modelId: "anthropic/sonnet-5",
-            }),
+            test.module.suggestBotName(ctx, "Watch our releases.", "scripted"),
         ).resolves.toBe("Release Steward");
         const session = test.provider.sessions[0]!;
         expect(session.options.tools).toEqual([]);
@@ -134,24 +126,18 @@ describe("TitlesModule naming", () => {
 
     it.each([
         ["one two three four five", "one two three"],
-        ["a".repeat(60), `${"a".repeat(31)}…`],
-    ])(
-        "bounds bot names to three words and the chat title length: %s",
-        async (answer, expected) => {
-            const test = await titles([textTurn(`<title>${answer}</title>`)]);
-            await expect(test.module.suggestBotName(ctx, "Track releases.")).resolves.toBe(
-                expected,
-            );
-        },
-    );
+        ["a".repeat(60), "a".repeat(40)],
+    ])("bounds bot names more tightly than chat titles: %s", async (answer, expected) => {
+        const test = await titles([textTurn(`<title>${answer}</title>`)]);
+        await expect(test.module.suggestBotName(ctx, "Track releases.")).resolves.toBe(expected);
+    });
 
-    it("names a chat on its own model at that model's default effort, outside the chat's own session", async () => {
+    it("names a chat on the cheapest model of its own account, outside the chat's own session", async () => {
         const test = await titles([textTurn("<title>Retry policy rewrite</title>")]);
 
         const title = await nameChat(test.module, {
             firstMessage: "Rewrite how the outer loop retries provider requests.",
             providerId: "scripted",
-            modelId: "anthropic/sonnet-5",
         });
 
         expect(title).toBe("Retry policy rewrite");
@@ -161,7 +147,7 @@ describe("TitlesModule naming", () => {
         expect(session.options.inferenceMaxRetries).toBe(0);
         const request = session.requests[0]!;
         expect(request.model).toBe("anthropic/sonnet-5");
-        expect(request.effort).toBe("medium");
+        expect(request.effort).toBe("off");
         expect(JSON.stringify(request.context.messages)).toContain("outer loop retries");
     });
 
@@ -185,13 +171,13 @@ describe("TitlesModule naming", () => {
         );
     });
 
-    it("bounds a chat title to three words", async () => {
+    it("bounds a chat title to six words", async () => {
         const test = await titles([
             textTurn("<title>one two three four five six seven eight</title>"),
         ]);
 
         await expect(nameChat(test.module, { firstMessage: "anything" })).resolves.toBe(
-            "one two three",
+            "one two three four five six",
         );
     });
 
@@ -276,22 +262,7 @@ describe("TitlesModule naming", () => {
         await expect(
             nameChat(test.module, { firstMessage: "rewrite retries", providerId: "gone" }),
         ).resolves.toBe("Retry policy rewrite");
-        expect(test.provider.sessions[0]!.requests[0]!.model).toBe("openai/gpt-5.6-max");
-    });
-
-    it("falls back to its account's first model when the chat's model is no longer served", async () => {
-        const test = await titles([textTurn("<title>Retry policy rewrite</title>")]);
-
-        await expect(
-            nameChat(test.module, {
-                firstMessage: "rewrite retries",
-                providerId: "scripted",
-                modelId: "anthropic/retired",
-            }),
-        ).resolves.toBe("Retry policy rewrite");
-        const request = test.provider.sessions[0]!.requests[0]!;
-        expect(request.model).toBe("openai/gpt-5.6-max");
-        expect(request.effort).toBe("medium");
+        expect(test.provider.sessions[0]!.requests[0]!.model).toBe("anthropic/sonnet-5");
     });
 
     it("names nothing at all when the catalog is empty", async () => {
@@ -468,13 +439,12 @@ describe("TitlesModule naming from a first message", () => {
 });
 
 describe("TitlesModule second look at a title", () => {
-    it("reads the conversation on the chat's own model and answers with a better title", async () => {
+    it("reads the conversation on the cheapest model and answers with a better title", async () => {
         const test = await titles([textTurn("<title>Retry policy rewrite</title>")]);
 
         const title = await test.module.refineChat(ctx, {
             currentTitle: "Flaky provider request",
             providerId: "scripted",
-            modelId: "openai/gpt-5.6-max",
             transcript: "User: this keeps failing\nAssistant: the outer loop retries too eagerly",
         });
 
@@ -483,8 +453,8 @@ describe("TitlesModule second look at a title", () => {
         expect(session.id.startsWith("naming:")).toBe(true);
         expect(session.options.tools).toEqual([]);
         const request = session.requests[0]!;
-        expect(request.model).toBe("openai/gpt-5.6-max");
-        expect(request.effort).toBe("medium");
+        expect(request.model).toBe("anthropic/sonnet-5");
+        expect(request.effort).toBe("off");
         const sent = JSON.stringify(request.context.messages);
         expect(sent).toContain("Flaky provider request");
         expect(sent).toContain("retries too eagerly");
@@ -506,6 +476,120 @@ describe("TitlesModule second look at a title", () => {
 
         await expect(test.module.refineChat(ctx, { transcript: "   " })).resolves.toBeUndefined();
         expect(test.provider.sessions).toHaveLength(0);
+    });
+});
+
+describe("TitlesModule subject naming", () => {
+    it("asks for two to six words on standard naming, and one to three on subject naming", async () => {
+        const test = await titles([
+            textTurn("<title>Retry policy rewrite</title>"),
+            textTurn("<title>Retry policy</title>"),
+        ]);
+
+        await nameChat(test.module, { firstMessage: "rewrite retries" });
+        await test.module.suggestNames(ctx, {
+            firstMessage: "rewrite retries",
+            wanted: { title: true },
+            style: "subject",
+        });
+
+        const [standard, subject] = test.provider.sessions.map((session) =>
+            JSON.stringify(session.requests[0]),
+        );
+        expect(standard).toContain("two to six words");
+        expect(standard).not.toContain("one to three words");
+        expect(subject).toContain("one to three words, at most 32 characters");
+    });
+
+    it("names a subject on the chat's own model at that model's default effort", async () => {
+        const test = await titles([textTurn("<title>Retry policy</title>")]);
+
+        await expect(
+            test.module.suggestNames(ctx, {
+                firstMessage: "Rewrite how the outer loop retries provider requests.",
+                wanted: { title: true },
+                providerId: "scripted",
+                modelId: "openai/gpt-5.6-max",
+                style: "subject",
+            }),
+        ).resolves.toEqual({ title: "Retry policy" });
+        const request = test.provider.sessions[0]!.requests[0]!;
+        expect(request.model).toBe("openai/gpt-5.6-max");
+        expect(request.effort).toBe("medium");
+    });
+
+    it("falls back to its account's first model when the chat's model is no longer served", async () => {
+        const test = await titles([textTurn("<title>Retry policy</title>")]);
+
+        await test.module.suggestNames(ctx, {
+            firstMessage: "rewrite retries",
+            wanted: { title: true },
+            providerId: "scripted",
+            modelId: "anthropic/retired",
+            style: "subject",
+        });
+        const request = test.provider.sessions[0]!.requests[0]!;
+        expect(request.model).toBe("openai/gpt-5.6-max");
+        expect(request.effort).toBe("medium");
+    });
+
+    it.each([
+        ["one two three four five six", "one two three"],
+        ["Sidebar fixes and draggable spaces", "Sidebar fixes"],
+        ["a".repeat(60), `${"a".repeat(31)}…`],
+    ])(
+        "bounds a subject to three words without a trailing joining word: %s",
+        async (answer, expected) => {
+            const test = await titles([textTurn(`<title>${answer}</title>`)]);
+
+            await expect(
+                test.module.suggestNames(ctx, {
+                    firstMessage: "anything",
+                    wanted: { title: true },
+                    style: "subject",
+                }),
+            ).resolves.toEqual({ title: expected });
+        },
+    );
+
+    it("takes a second look at a subject on the chat's own model", async () => {
+        const test = await titles([textTurn("<title>Retry policy</title>")]);
+
+        await expect(
+            test.module.refineChat(ctx, {
+                currentTitle: "Flaky requests",
+                providerId: "scripted",
+                modelId: "openai/gpt-5.6-max",
+                style: "subject",
+                transcript:
+                    "User: this keeps failing\nAssistant: the outer loop retries too eagerly",
+            }),
+        ).resolves.toBe("Retry policy");
+        const request = test.provider.sessions[0]!.requests[0]!;
+        expect(request.model).toBe("openai/gpt-5.6-max");
+        expect(request.effort).toBe("medium");
+        expect(JSON.stringify(request)).toContain("one to three words");
+    });
+
+    it("names a marked chat and the chats under it by subject, and every other chat the standard way", async () => {
+        const { module } = await titles([]);
+        const parents: Record<string, string> = { subtask: "stem-cell", nested: "subtask" };
+        const agents = {
+            parentOf: (_ctx: unknown, agentId: string) => Promise.resolve(parents[agentId] ?? null),
+        } as unknown as AgentSystemRef;
+        const hooks = await resolveModuleHooks(lifecycleDatabase.context, module, agents);
+        await hooks.agentCreatedTransact?.(
+            ctx,
+            { agents, sharedKV: sharedKV() },
+            { id: "stem-cell", metadata: undefined },
+        );
+
+        await expect(module.namingStyle(ctx, "stem-cell")).resolves.toBe("standard");
+        await module.nameBySubject(ctx, "stem-cell");
+
+        await expect(module.namingStyle(ctx, "stem-cell")).resolves.toBe("subject");
+        await expect(module.namingStyle(ctx, "nested")).resolves.toBe("subject");
+        await expect(module.namingStyle(ctx, "elsewhere")).resolves.toBe("standard");
     });
 });
 

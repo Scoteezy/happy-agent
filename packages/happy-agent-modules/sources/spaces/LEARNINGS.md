@@ -165,6 +165,12 @@ state and so does nothing without it. The `request_space_placement` tool is offe
 conversations whose person has a live Prioritizing, and asking for a placement never creates an
 owner.
 
+Naming follows the same line. Short subject names (one to three words from the chat's own model)
+were first made the naming for every chat, and that changed every person's task, bot and workspace
+names. Now only a stem cell is named that way: `createStemCell` marks its agent through
+`TitlesModule.nameBySubject` in the same transaction, and every other chat keeps the standard
+naming it always had.
+
 ## The sidebar format is marked by a migration
 
 `006-sidebar-document-format` changes no data a reader depends on (it drops the old visibility

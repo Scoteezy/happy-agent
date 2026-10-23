@@ -15,8 +15,8 @@ describe("subtask creation tool", () => {
     );
 
     it("guides the model toward sidebar-friendly titles", () => {
-        expect(tool.description).toContain("1–3 words naming the subject");
-        expect(tool.description).toContain("never a list of parts joined by and or &");
+        expect(tool.description).toContain("2–3 words");
+        expect(tool.description).toContain("4 at most, as a last resort");
         expect(tool.description).toContain("Put details in text.");
     });
 

@@ -1,6 +1,7 @@
 import {
     MAX_NAMING_MESSAGE_CHARS,
     MAX_NAMING_TRANSCRIPT_CHARS,
+    type NamingStyle,
     type TitleNamesWanted,
 } from "../Title.js";
 
@@ -17,16 +18,25 @@ const WHAT_IT_IS: Readonly<Record<keyof TitleNamesWanted, string>> = {
     title: "The title is what the saved chat is called in a list a person reads.",
 };
 
-const RULES: Readonly<Record<keyof TitleNamesWanted, string>> = {
-    slug: [
-        "<slug>: two to four words in lower-case kebab-case, letters and digits only, such as",
-        "retry-policy-rewrite. No path, no prefix, no number, no file extension.",
+const SLUG_RULE = [
+    "<slug>: two to four words in lower-case kebab-case, letters and digits only, such as",
+    "retry-policy-rewrite. No path, no prefix, no number, no file extension.",
+].join(" ");
+
+const TITLE_RULES: Readonly<Record<NamingStyle, string>> = {
+    standard: [
+        "<title>: two to six words naming what the work is about, the way a person writes a title.",
+        "No quotes, no trailing punctuation, no markdown.",
     ].join(" "),
-    title: [
+    subject: [
         "<title>: one to three words, at most 32 characters, naming what the work is about, such as Sidebar fixes.",
         'Name the subject, not every part of it: no "and", no "&", no quotes, no trailing punctuation, no markdown.',
     ].join(" "),
 };
+
+function rule(name: keyof TitleNamesWanted, style: NamingStyle): string {
+    return name === "slug" ? SLUG_RULE : TITLE_RULES[style];
+}
 
 const EXAMPLES: Readonly<Record<keyof TitleNamesWanted, string>> = {
     slug: "<slug>the-name</slug>",
@@ -47,6 +57,7 @@ const EXAMPLES: Readonly<Record<keyof TitleNamesWanted, string>> = {
 export function createNamingRequest(
     wanted: TitleNamesWanted,
     firstMessage: string,
+    style: NamingStyle = "standard",
 ): NamingRequestText {
     const names = wantedNames(wanted);
     return {
@@ -60,7 +71,7 @@ export function createNamingRequest(
             "",
             ...names.map((name) => EXAMPLES[name]),
             "",
-            ...names.map((name) => RULES[name]),
+            ...names.map((name) => rule(name, style)),
             "",
             CLOSING,
         ].join("\n"),
@@ -81,7 +92,7 @@ export function createBotNamingRequest(firstMessage: string): NamingRequestText 
             "",
             "<title>The name</title>",
             "",
-            "At most three words and 32 characters. No quotes, punctuation, markdown, or generic words such as Bot or Assistant.",
+            "At most three words and 40 characters. No quotes, punctuation, markdown, or generic words such as Bot or Assistant.",
             "",
             CLOSING,
         ].join("\n"),
@@ -101,6 +112,7 @@ export function createBotNamingRequest(firstMessage: string): NamingRequestText 
 export function createRefinementRequest(
     transcript: string,
     currentTitle?: string,
+    style: NamingStyle = "standard",
 ): NamingRequestText {
     return {
         instructions: [
@@ -111,7 +123,7 @@ export function createRefinementRequest(
             "",
             EXAMPLES.title,
             "",
-            RULES.title,
+            TITLE_RULES[style],
             "",
             CLOSING,
         ].join("\n"),

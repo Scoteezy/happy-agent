@@ -213,7 +213,7 @@ export class BotsModule implements AgentModule {
             if ((await scope.kv.read(hookCtx, BOT_NAME_ATTEMPTED_KEY)) !== undefined) return;
             await scope.kv.write(hookCtx, BOT_NAME_ATTEMPTED_KEY, { at: Date.now() });
             afterCommit(hookCtx, () => {
-                this.#startNaming(bot.id, scope.agent.provider, scope.agent.model, message);
+                this.#startNaming(bot.id, scope.agent.provider, message);
             });
         },
     };
@@ -630,17 +630,13 @@ export class BotsModule implements AgentModule {
         ctx: Context,
         botId: string,
         providerId: string,
-        modelId: string | undefined,
         message: string,
     ): Promise<void> {
         try {
             const initial = await this.get(ctx, botId);
             if (initial === undefined || initial.nameConfigured || initial.status !== "active")
                 return;
-            const name = await this.#titles.suggestBotName(ctx, message, {
-                providerId,
-                ...(modelId === undefined ? {} : { modelId }),
-            });
+            const name = await this.#titles.suggestBotName(ctx, message, providerId);
             if (this.#closed || name === undefined) return;
             await ctx.inTx(async (txCtx) => {
                 const current = await this.#required(txCtx, botId);
@@ -662,12 +658,7 @@ export class BotsModule implements AgentModule {
     }
 
     /** Start one detached naming request without delaying message acceptance or the real turn. */
-    #startNaming(
-        botId: string,
-        providerId: string,
-        modelId: string | undefined,
-        message: string,
-    ): void {
+    #startNaming(botId: string, providerId: string, message: string): void {
         const lifetime = this.#lifetime;
         if (this.#closed || lifetime === undefined || this.#namingTasks.has(botId)) return;
         let task!: Promise<void>;
@@ -678,7 +669,6 @@ export class BotsModule implements AgentModule {
                         lifetime.named("bot-initial-naming"),
                         botId,
                         providerId,
-                        modelId,
                         message,
                     ),
             )
