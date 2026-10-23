@@ -15,7 +15,12 @@ export interface SseWriterOptions {
 
 const DEFAULT_MAX_BYTES = 1_024 * 1_024;
 
-/** A bounded whole-frame SSE writer that resumes exclusively from Node's `drain` signal. */
+/**
+ * A bounded whole-frame SSE writer that resumes once Node has flushed every frame it accepted.
+ *
+ * Node's `drain` alone is not enough: Node 26 can report backpressure for a corked response and
+ * then flush it without ever emitting `drain`, so each frame's write callback also releases it.
+ */
 export function createSseWriter(
     request: IncomingMessage,
     response: ServerResponse,
@@ -27,6 +32,7 @@ export function createSseWriter(
     let bufferedBytes = 0;
     let blocked = false;
     let closed = false;
+    let unflushedWrites = 0;
     let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => {
         resolveDone = resolve;
@@ -39,6 +45,14 @@ export function createSseWriter(
         if (closed) return;
         blocked = false;
         flush();
+    };
+    const flushed = (error?: Error | null): void => {
+        unflushedWrites -= 1;
+        if (error !== undefined && error !== null) {
+            close(false);
+            return;
+        }
+        if (blocked && unflushedWrites === 0) drain();
     };
     request.once("close", finish);
     response.once("close", finish);
@@ -82,7 +96,8 @@ export function createSseWriter(
                 close(false, true);
                 return false;
             }
-            blocked = !response.write(frame);
+            unflushedWrites += 1;
+            blocked = !response.write(frame, flushed);
             if (response.writableLength > maxWritableBytes) {
                 close(false, true);
                 return false;

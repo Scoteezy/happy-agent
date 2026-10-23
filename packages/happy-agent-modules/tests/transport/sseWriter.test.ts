@@ -20,6 +20,25 @@ describe("Happy Agent SSE writer", () => {
         writer.close();
     });
 
+    it("resumes when a blocked frame is flushed without a drain event", () => {
+        // Node 26 corks a response per tick and measures that buffer against the high-water
+        // mark, so a replay burst can report backpressure. The socket can then flush below its
+        // own mark, never needing drain, and the response's drain never fires. Every byte still
+        // reaches the client and each write's callback runs.
+        const request = new EventEmitter() as IncomingMessage;
+        const response = new FakeResponse([false, true]);
+        const writer = createSseWriter(request, response.asServerResponse());
+        const finished = "id: finished\nevent: run.finished\ndata: {}\n\n";
+
+        expect(writer.write("replay\n\n")).toBe(true);
+        expect(writer.write(finished)).toBe(true);
+        expect(response.writes).toEqual(["replay\n\n"]);
+
+        response.flush();
+        expect(response.writes).toEqual(["replay\n\n", finished]);
+        writer.close();
+    });
+
     it("disconnects instead of growing its pending queue without drain", async () => {
         const request = new EventEmitter() as IncomingMessage;
         const response = new FakeResponse([false]);
@@ -70,6 +89,7 @@ class FakeResponse extends EventEmitter {
     writableLength = 0;
     readonly writes: string[] = [];
     readonly #results: boolean[];
+    readonly #flushed: (() => void)[] = [];
 
     constructor(results: boolean[]) {
         super();
@@ -80,10 +100,17 @@ class FakeResponse extends EventEmitter {
         return this as unknown as ServerResponse;
     }
 
-    write(frame: string): boolean {
+    write(frame: string, callback?: () => void): boolean {
         this.writes.push(frame);
         this.writableLength = Buffer.byteLength(frame);
+        if (callback !== undefined) this.#flushed.push(callback);
         return this.#results.shift() ?? true;
+    }
+
+    /** Hand every written frame to the socket, running write callbacks but emitting no drain. */
+    flush(): void {
+        this.writableLength = 0;
+        for (const callback of this.#flushed.splice(0)) callback();
     }
 
     end(): void {
