@@ -10594,15 +10594,22 @@ with these docs (`recipe/artifact-apps.md`).
 #### `GET /v0/artifacts/:artifactId/api/v1/style.css`
 
 Happy's standard styles for a page, loaded first with
-`<link rel="stylesheet" href="/api/v1/style.css">`. They lay the page on whatever surface shows it:
-a transparent root with no margin, the chat's typeface and sizes, text, link, code, table, and rule
-colors that follow the page's `color-scheme` through `light-dark()`, and the styles of the standard
-components below. Every rule has zero specificity, so anything the page writes itself wins. They
-also define custom properties a page may use, each a color that follows the color scheme:
-`--happy-text`, `--happy-muted`, `--happy-faint`, `--happy-border`, `--happy-surface`,
-`--happy-accent`, `--happy-added`, `--happy-removed`, `--happy-diff-added`, `--happy-diff-removed`,
-and `--happy-chart-1` to `--happy-chart-6`, and `--happy-font` and `--happy-mono`. It is served as `text/css; charset=utf-8` with an `ETag` and
-`Cache-Control: no-cache`, and a matching `If-None-Match` answers `304`.
+`<link rel="stylesheet" href="/api/v1/style.css">`. They make the page look like part of whatever
+surface shows it: a transparent root, the app's typeface and sizes, its text, link, code, table, and
+rule colors, its scrollbars, the body's inset, and the styles of the standard components below.
+Every rule has the least specificity it can, so anything the page writes itself wins. They define
+custom properties a page may use: the colors `--happy-text`, `--happy-muted`, `--happy-faint`,
+`--happy-border`, `--happy-surface`, `--happy-accent`, `--happy-added`, `--happy-removed`,
+`--happy-diff-added`, `--happy-diff-removed`, `--happy-chart-1` to `--happy-chart-6`,
+`--happy-scrollbar-thumb`, and `--happy-scrollbar-thumb-hover`; `--happy-font`, `--happy-mono`,
+`--happy-font-size`, `--happy-line-height`, and `--happy-scrollbar-size`; and `--happy-page-inset`,
+the body's `padding`. Each takes the value of a `--happy-host-<name>` property the page's host sets,
+when it sets one, and otherwise a default; default colors follow the page's `color-scheme` through
+`light-dark()`, and the root's `color-scheme` is `--happy-host-color-scheme`, else `light dark`. A
+host showing the page inline sets `--happy-host-page-inset` to `0`, and elsewhere to its own content
+inset. The sheet holds no `!important` and no `url()`, so a host may also insert it itself, at user
+origin, for a page that does not link it. It is served as `text/css; charset=utf-8` with an `ETag`
+and `Cache-Control: no-cache`, and a matching `If-None-Match` answers `304`.
 
 #### `GET /v0/artifacts/:artifactId/api/v1/components.js`
 
