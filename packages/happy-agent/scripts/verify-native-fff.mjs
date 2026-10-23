@@ -1,17 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-    copyFile,
-    mkdir,
-    mkdtemp,
-    readFile,
-    readdir,
-    realpath,
-    rename,
-    rm,
-    writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -44,27 +34,27 @@ try {
     // standalone builder does. No node_modules or running daemon is modified.
     const adapter = join(fixture, "sdk");
     await mkdir(adapter);
-    for (const entry of await readdir(join(sdkRoot, "dist/src"))) {
-        if (entry.endsWith(".js"))
-            await copyFile(join(sdkRoot, "dist/src", entry), join(adapter, entry));
-    }
     await writeFile(join(adapter, "package.json"), '{"type":"module"}');
+    const replaceOnce = (source, search, replacement) => {
+        assert.equal(source.split(search).length, 2, `Expected one ${JSON.stringify(search)}.`);
+        return source.replace(search, replacement);
+    };
+    // fff ships one bundle, so its resolver is rewritten in place rather than replaced as a file.
+    const entry = join(adapter, "index.js");
     await writeFile(
-        join(adapter, "binary.js"),
-        `export function binaryExists(){return true;}\nexport function findBinary(){return ${JSON.stringify(binary)};}\n`,
-    );
-    const ffiPath = join(adapter, "ffi.js");
-    const ffiSource = await readFile(ffiPath, "utf8");
-    assert.ok(ffiSource.includes('from "ffi-rs"'));
-    await writeFile(
-        ffiPath,
-        ffiSource.replace(
+        entry,
+        replaceOnce(
+            replaceOnce(
+                await readFile(join(sdkRoot, "dist/index.js"), "utf8"),
+                "function findBinary() {\n",
+                `function findBinary() {\n  return ${JSON.stringify(binary)};\n`,
+            ),
             'from "ffi-rs"',
             `from ${JSON.stringify(pathToFileURL(sdkRequire.resolve("ffi-rs")).href)}`,
         ),
     );
-    const { FileFinder } = await import(pathToFileURL(join(adapter, "index.js")).href);
-    ({ closeLibrary } = await import(pathToFileURL(ffiPath).href));
+    let FileFinder;
+    ({ FileFinder, closeLibrary } = await import(pathToFileURL(entry).href));
     const workspace = join(fixture, "workspace");
     await mkdir(join(workspace, "src"), { recursive: true });
     execFileSync("git", ["init", "--quiet", workspace], { windowsHide: true });

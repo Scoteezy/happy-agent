@@ -1,8 +1,8 @@
 {
     "repository": "https://github.com/dmtrKovalenko/fff.git",
-    "tag": "v0.9.6",
-    "version": "0.9.6",
-    "commit": "28321da22836b0e11da81e30f40f7a043b8f8fb4",
+    "tag": "v0.11.0",
+    "version": "0.11.0",
+    "commit": "95fd777c2529fc7b4d7572dabff64cc07268f2c5",
     "toolchain": "1.95.0-x86_64-pc-windows-gnu",
     "target": "x86_64-pc-windows-gnu"
 }
