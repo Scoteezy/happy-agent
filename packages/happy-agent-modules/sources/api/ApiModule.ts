@@ -195,6 +195,7 @@ import {
 } from "../history/index.js";
 import { USER_MESSAGE_ORIGIN_METADATA } from "../impl/messageOrigin.js";
 import { mutationIdOf } from "../impl/mutationEcho.js";
+import { RunMutationOwners } from "./RunMutationOwners.js";
 import { decodeRequestProfile, requestProfilesForAgent } from "../impl/requestProfile.js";
 import {
     PermissionsModule,
@@ -414,7 +415,6 @@ const MAX_TERMINAL_WIRE_MESSAGE_BYTES = 4 * 1024 * 1024 + 20;
 const MAX_ANNOUNCED_PENDING_MESSAGES = 10_000;
 const MAX_ANNOUNCED_AGENT_CREATIONS = 10_000;
 const MAX_ANNOUNCED_TERMINAL_RUNS = 10_000;
-const MAX_RUN_MUTATIONS = 10_000;
 const MAX_ANNOUNCED_EXECUTION_CONFIGURATIONS = 512 * 64;
 const DRAIN_MUTATION_LOG_INTERVAL_MS = 5_000;
 /** How often a drain looks at what still holds it open; it logs only on change or every 5s. */
@@ -619,15 +619,7 @@ export class ApiModule implements AgentModule {
     readonly #daemonId = createId();
     readonly #daemonStartedAt = Date.now();
     readonly #mutationIds = new AsyncLocalStorage<MutationScope>();
-    /**
-     * Each agent's current run and the mutation that started it, written when the run starts and
-     * removed when it settles. Agent events echo this rather than the async chain they run in,
-     * because an agent loop keeps the chain of whatever request woke it for its whole life.
-     */
-    readonly #runMutations = new Map<
-        string,
-        { readonly runId: string; readonly mutationId: string | undefined }
-    >();
+    readonly #runMutations = new RunMutationOwners();
     readonly #backgroundScope = new AsyncResource("happy-agent-api");
     /** Agents whose usage-driven metadata refresh is already scheduled. */
     readonly #pendingUsageMetadataAgents = new Set<string>();
@@ -835,12 +827,7 @@ export class ApiModule implements AgentModule {
                     accepted,
                 );
                 if (runId !== accepted.id) return;
-                boundedSet(
-                    this.#runMutations,
-                    scope.agent.id,
-                    { runId, mutationId: mutationIdOf(accepted.metadata) },
-                    MAX_RUN_MUTATIONS,
-                );
+                this.#runMutations.start(scope.agent.id, runId, mutationIdOf(accepted.metadata));
             },
             afterAgentActivatedTransact: async (hookCtx, scope, activation) => {
                 // A run the last process left in flight resumes here, still answering the
@@ -848,16 +835,10 @@ export class ApiModule implements AgentModule {
                 if (!activation.restored) return;
                 const agentId = scope.agent.id;
                 const runId = this.#events.activeRunId(agentId);
-                if (runId === undefined || this.#runMutations.has(agentId)) return;
+                if (runId === undefined) return;
                 const mutationId = await this.#history.runMutationId(hookCtx, agentId);
                 afterCommit(hookCtx, () => {
-                    if (this.#runMutations.has(agentId)) return;
-                    boundedSet(
-                        this.#runMutations,
-                        agentId,
-                        { runId, mutationId },
-                        MAX_RUN_MUTATIONS,
-                    );
+                    this.#runMutations.start(agentId, runId, mutationId);
                 });
             },
             metadataChangedTransact: async (hookCtx, scope, change) => {
@@ -3509,10 +3490,7 @@ export class ApiModule implements AgentModule {
             return;
         }
         if (event.type === "loop.settled") {
-            const settledRunId = stringValue(payload?.["runId"]);
-            if (this.#runMutations.get(agentId)?.runId === settledRunId) {
-                this.#runMutations.delete(agentId);
-            }
+            this.#runMutations.settle(agentId, stringValue(payload?.["runId"]));
             // A settled run retries nothing; announce the clear before the settlement's own updates.
             const cleared = await this.#retryingChange(ctx, agentId, event.type, payload);
             if (cleared.retrying !== undefined)
@@ -8466,7 +8444,7 @@ export class ApiModule implements AgentModule {
     #agentMutationId(agentId: string | undefined): string | undefined {
         const chain = this.#mutationIds.getStore();
         if (chain !== undefined && !chain.inLoop) return chain.mutationId;
-        return agentId === undefined ? undefined : this.#runMutations.get(agentId)?.mutationId;
+        return agentId === undefined ? undefined : this.#runMutations.mutationId(agentId);
     }
 
     #appendForAgent(agentId: string, type: string, payload: unknown, occurredAt?: number): void {

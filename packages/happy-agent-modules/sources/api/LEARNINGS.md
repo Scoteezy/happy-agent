@@ -432,6 +432,11 @@ The run owners live in memory, so a run left in flight by a stopped process resu
 every event after the restart echoed nothing. When Agent Base restores an agent whose run is still
 active, the API now reads that run's mutation back from History.
 
+The owners were also capped at 10,000 and evicted oldest first, so enough other runs could drop
+the owner of a run still going. `RunMutationOwners` now keeps an owner exactly as long as its run,
+with no cap, and keeps only runs that answer a mutation; the bound is the number of runs in
+progress.
+
 ## A failure retry's run echoes the retry's mutation
 
 Retry and switch accepted `mutationId` but started their run with a hidden notice that carried
