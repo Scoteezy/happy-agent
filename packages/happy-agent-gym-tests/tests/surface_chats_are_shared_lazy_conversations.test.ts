@@ -241,7 +241,7 @@ describe("Surface chats are shared lazy conversations", () => {
         const members = (await alice.listSurfaces()).surfaces.find(
             (entry) => entry.id === surface.id,
         )!.members;
-        expect(members.map((member) => member.userId)).toEqual([aliceId]);
+        expect(members).toEqual(surface.members);
         expect(gym.errors).toEqual([]);
     });
 });
