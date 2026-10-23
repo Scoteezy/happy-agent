@@ -32,7 +32,9 @@ import type { RunnersModule } from "../runners/index.js";
 import { MAX_NAMING_MESSAGE_CHARS, TitlesModule } from "../titles/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
 import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
+import type { HistoryModule } from "../history/index.js";
 import { isUserOriginMetadata, senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import { mutationIdMetadata } from "../impl/mutationEcho.js";
 
 import {
     archiveTaskCleanupSchema,
@@ -126,6 +128,8 @@ export class TasksModule implements AgentModule {
     readonly #listeners = new Set<TaskEventListener>();
     readonly #namingTasks = new Map<string, Promise<void>>();
     readonly #botSettings: BotSettingsModule | undefined;
+    /** The mutation the sending run answers, carried on each message into a task. */
+    readonly #history: HistoryModule | undefined;
     #agents: AgentSystemRef | undefined;
     #closed = false;
     #lifetime: RootContext | undefined;
@@ -141,8 +145,10 @@ export class TasksModule implements AgentModule {
         durableFunctions: DurableFunctionsModule,
         collaboration: CollaborationModule,
         botSettings?: BotSettingsModule,
+        history?: HistoryModule,
     ) {
         this.#collaboration = collaboration;
+        this.#history = history;
         this.#botSettings = botSettings;
         this.#config = config;
         this.#abort = abort;
@@ -836,6 +842,7 @@ export class TasksModule implements AgentModule {
         explicitMode?: MessageMode,
     ): Promise<void> {
         const agents = this.#requireAgents();
+        const mutationId = await this.#history?.runMutationId(ctx, fromAgentId);
         await ctx.inTx(async (txCtx) => {
             const config = await agents.config(txCtx, task.agentId);
             const hasInitialMode =
@@ -870,6 +877,7 @@ export class TasksModule implements AgentModule {
                         tasks: { fromAgentId, taskId: task.id },
                         ...senderAgentIdMetadata(fromAgentId),
                         ...(delivery === undefined ? {} : { mode: delivery.mode }),
+                        ...mutationIdMetadata(mutationId),
                     },
                     ...delivery?.options,
                 },

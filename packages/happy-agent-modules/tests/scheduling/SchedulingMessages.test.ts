@@ -457,7 +457,7 @@ describe("Scheduled messages", () => {
         expect("schedulingModuleOptionsSchema" in exports).toBe(false);
         expect("schedulingClockSchema" in exports).toBe(false);
         expect("schedulingTimersSchema" in exports).toBe(false);
-        // The one optional argument is the bot settings module, never an options object.
-        expect(exports.SchedulingModule.length).toBe(1);
+        // The optional arguments are the bot settings and History modules, never an options object.
+        expect(exports.SchedulingModule.length).toBe(2);
     });
 });

@@ -182,6 +182,8 @@ export const schedulingScheduledMessageSchema = Type.Object(
         failure: Type.Optional(
             Type.String({ minLength: 1, maxLength: MAX_SCHEDULING_FAILURE_LENGTH }),
         ),
+        /** The client mutation the scheduling run answered, echoed by the run the message starts. */
+        mutationId: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     },
     { additionalProperties: false },
 );

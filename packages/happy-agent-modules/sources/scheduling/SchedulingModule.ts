@@ -15,7 +15,9 @@ import { Value } from "@sinclair/typebox/value";
 import { afterCommit, detach, shutdown, type Context } from "@steve.kite/stdlib";
 
 import type { BotSettingsModule } from "../botSettings/index.js";
+import type { HistoryModule } from "../history/index.js";
 import { senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import { mutationIdMetadata } from "../impl/mutationEcho.js";
 import {
     MAX_SCHEDULING_FAILURE_LENGTH,
     MAX_SCHEDULING_MESSAGE_LENGTH,
@@ -116,6 +118,7 @@ export class SchedulingModule implements AgentModule {
     readonly #delivering = new Set<string>();
 
     readonly #botSettings: BotSettingsModule | undefined;
+    readonly #history: HistoryModule | undefined;
     #agents: AgentSystemRef | undefined;
     #ownCtx: Context | undefined;
 
@@ -123,9 +126,12 @@ export class SchedulingModule implements AgentModule {
      * @param botSettings Whether a bot keeps the agents it governs from scheduling messages for
      * agents outside its own tree. It is checked when a message is scheduled and again when it is
      * due, so a bot restricted in between does not deliver what it promised before.
+     * @param history The mutation the scheduling run answers, kept with the schedule and carried
+     * on the message when it is due. Without it, scheduled messages carry none.
      */
-    constructor(botSettings?: BotSettingsModule) {
+    constructor(botSettings?: BotSettingsModule, history?: HistoryModule) {
         this.#botSettings = botSettings;
+        this.#history = history;
     }
 
     /**
@@ -301,6 +307,7 @@ export class SchedulingModule implements AgentModule {
         if (!(await this.#mayReach(ctx, agentId, targetAgentId))) {
             throw new Error(OUTSIDE_BOT_REFUSAL);
         }
+        const mutationId = await this.#history?.runMutationId(ctx, agentId);
         const schedule = await ctx.inTx(async (txCtx) => {
             const id = input.id ?? this.#newId();
             const existing = await this.#readSchedule(txCtx, id);
@@ -337,6 +344,7 @@ export class SchedulingModule implements AgentModule {
                 status: "pending",
                 createdAt: now,
                 updatedAt: now,
+                ...mutationIdMetadata(mutationId),
             };
             await this.#writeSchedule(txCtx, created);
             await this.#announce(
@@ -738,6 +746,7 @@ export class SchedulingModule implements AgentModule {
                             targetAgentId: schedule.targetAgentId,
                         },
                         ...senderAgentIdMetadata(schedule.senderAgentId),
+                        ...mutationIdMetadata(schedule.mutationId),
                     },
                 },
             );

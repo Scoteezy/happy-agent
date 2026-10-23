@@ -26,7 +26,9 @@ import type { RunnersModule } from "../runners/index.js";
 import { TasksModule } from "../tasks/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
 import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
+import type { HistoryModule } from "../history/index.js";
 import { senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import { mutationIdMetadata } from "../impl/mutationEcho.js";
 import { MAX_NAMING_MESSAGE_CHARS, TitlesModule } from "../titles/index.js";
 
 import {
@@ -98,6 +100,7 @@ export class BotsModule implements AgentModule {
     readonly #runners: RunnersModule;
     readonly #tasks: TasksModule;
     readonly #botSettings: BotSettingsModule | undefined;
+    readonly #history: HistoryModule | undefined;
     #agents: AgentSystemRef | undefined;
     #closed = false;
     #lifetime: RootContext | undefined;
@@ -106,6 +109,8 @@ export class BotsModule implements AgentModule {
      * @param botSettings The owner's restrictions on each bot. Admin bots read and change them
      * through this catalog, and a bot kept inside its own tree loses the roster. Without it,
      * bots have no settings.
+     * @param history The mutation the sending run answers, carried on each message to a bot.
+     * Without it, those messages carry none.
      */
     constructor(
         config: ConfigModule,
@@ -116,8 +121,10 @@ export class BotsModule implements AgentModule {
         runners: RunnersModule,
         tasks: TasksModule,
         botSettings?: BotSettingsModule,
+        history?: HistoryModule,
     ) {
         this.#botSettings = botSettings;
+        this.#history = history;
         this.#config = config;
         this.#runners = runners;
         this.#tasks = tasks;
@@ -514,6 +521,7 @@ export class BotsModule implements AgentModule {
             );
         }
         const agents = this.#requireAgents();
+        const mutationId = await this.#history?.runMutationId(ctx, fromAgentId);
         // A bot nobody has spoken to has no model yet; the first message gives it the sender's.
         await ctx.inTx(async (txCtx) => {
             const delivery = await agentDeliveryMode(
@@ -538,6 +546,7 @@ export class BotsModule implements AgentModule {
                         bots: { fromAgentId, botId },
                         ...senderAgentIdMetadata(fromAgentId),
                         ...(delivery === undefined ? {} : { mode: delivery.mode }),
+                        ...mutationIdMetadata(mutationId),
                     },
                     ...delivery?.options,
                 },

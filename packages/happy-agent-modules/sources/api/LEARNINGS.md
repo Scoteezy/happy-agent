@@ -420,10 +420,13 @@ accepted.
 A message from another agent once took its owner from the sender's run at the moment the
 recipient accepted it. A message that waited in a busy recipient's inbox was then labelled with
 the sender's later run, or with nothing once the sender had settled; a helper's report, sent as
-the helper settles, always lost it. Collaboration now stamps the sending run's mutation on the
-message when it is sent, read from History's `runMutationId`, so a helper keeps its parent's
-retry and its report keeps it too. Acceptance never consults the sender's live run. Messages to
-bots and tasks carry no mutation and start runs that echo nothing.
+the helper settles, always lost it. Every module that sends a message on an agent's behalf now
+stamps the sending run's mutation on it when it is sent, read from History's `runMutationId` and
+written with `impl/mutationEcho.ts`: collaboration messages and reports, messages to bots and
+tasks, goal continuations, and scheduled messages, which keep it with the schedule until due. A
+helper keeps its parent's retry and its report keeps it too. A created agent's `agent.created`
+echoes the mutation recorded in its metadata at creation. Acceptance never consults the sender's
+live run.
 
 ## A failure retry's run echoes the retry's mutation
 

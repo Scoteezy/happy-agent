@@ -47,3 +47,9 @@ before the bot was restricted go out after it. The bot settings module is asked 
 message is scheduled, which refuses it to the sender at once, and when it falls due, which leaves
 it undelivered with the refusal as its failure. Messages to the sender itself and inside the bot's
 tree are unaffected.
+
+## A scheduled message keeps the mutation of the run that scheduled it
+
+A scheduled message is delivered after the scheduling run has settled, so it once started a run
+that echoed nothing. The schedule now records the `mutationId` its scheduling run answered, from
+History's `runMutationId`, and the delivered message carries it, so the run it starts echoes it.

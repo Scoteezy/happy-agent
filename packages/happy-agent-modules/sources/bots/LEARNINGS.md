@@ -252,3 +252,9 @@ cannot depend on the bots catalog. `BotsModule` therefore binds every bot's agen
 to its user with `RunnersModule.bindBots` while it starts, before any agent can run, and binds each
 new bot as it is created. Bot and task folders are placed under the workload user's home when
 `[execution]` is configured, because that user is the one that works in them.
+
+## A message to a bot carries the mutation of the run that sent it
+
+A message an agent sent a bot carried no `mutationId`, so the bot's run echoed nothing although
+the sending run answered a client's mutation. The message now carries that run's mutation, read
+from History when it is sent, so the bot's run echoes it.

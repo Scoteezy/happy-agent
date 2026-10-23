@@ -530,6 +530,7 @@ export async function startHappyAgentRuntime(
             durableFunctions,
             collaboration,
             botSettings,
+            history,
         );
         const bots = new BotsModule(
             config,
@@ -540,6 +541,7 @@ export async function startHappyAgentRuntime(
             runners,
             tasks,
             botSettings,
+            history,
         );
         const artifacts = new ArtifactsModule(
             config,
@@ -616,7 +618,7 @@ export async function startHappyAgentRuntime(
             compute.computeModule,
             botSettings,
         );
-        const scheduling = new SchedulingModule(botSettings);
+        const scheduling = new SchedulingModule(botSettings, history);
         const userInput = new UserInputModule(presence);
         const mcp = new McpModule(config, userInput, workspaces, runners, compute.computeModule);
         registerShutdown("mcp", async () => await mcp.close());
@@ -664,7 +666,7 @@ export async function startHappyAgentRuntime(
             tasks,
             surfaces,
         );
-        const goal = new GoalModule();
+        const goal = new GoalModule(history);
         const exportedBots = new ExportedBotsModule(
             config,
             bots,

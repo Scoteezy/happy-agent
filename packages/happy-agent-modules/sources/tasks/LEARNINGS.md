@@ -132,3 +132,9 @@ first agent-role delivery does not clear the creation draft (only user draft sav
 storage). If an
 agent sends the first message to an idle task whose explicitly chosen model, effort, or service tier
 is no longer available, delivery fails with an actionable error rather than silently mixing modes.
+
+## A message to a task carries the mutation of the run that sent it
+
+A message an agent sent a task, including the task's opening message, carried no `mutationId`,
+so the task's run echoed nothing although the sending run answered a client's mutation. The
+message now carries that run's mutation, read from History when it is sent.

@@ -26,7 +26,9 @@ import {
     type GoalEventListener,
     type GoalUnsubscribe,
 } from "./GoalEvent.js";
+import type { HistoryModule } from "../history/index.js";
 import { AGENT_MESSAGE_ORIGIN_METADATA, senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import { mutationIdMetadata } from "../impl/mutationEcho.js";
 import { createGoalContinuationPrompt } from "./impl/createGoalContinuationPrompt.js";
 import {
     clearGoal as clearStoredGoal,
@@ -111,7 +113,16 @@ export class GoalModule implements AgentModule {
     readonly #postCommitListeners = new Set<GoalEventListener>();
 
     readonly #mutations = new Map<string, Promise<void>>();
+    readonly #history: HistoryModule | undefined;
     #agents: AgentSystemRef | undefined;
+
+    /**
+     * @param history The mutation the run that pursued the goal answers, carried on the
+     * continuation that starts its next run. Without it, continuations carry none.
+     */
+    constructor(history?: HistoryModule) {
+        this.#history = history;
+    }
 
     /** Subscribe inside the committing transaction; throwing there rolls the mutation back. */
     onEventTransactional(listener: GoalEventListener): GoalUnsubscribe {
@@ -329,7 +340,8 @@ export class GoalModule implements AgentModule {
             }
             await kv.delete(txCtx, GOAL_FAILURE_COUNT_KEY);
             const id = await this.#continuationActionId(txCtx, scope);
-            return { id, goal: structuredClone(current) };
+            const mutationId = await this.#history?.runMutationId(txCtx, scope.agent.id);
+            return { id, goal: structuredClone(current), mutationId };
         });
         if (continuation === undefined) return undefined;
         return [
@@ -353,6 +365,7 @@ export class GoalModule implements AgentModule {
                 metadata: {
                     ...AGENT_MESSAGE_ORIGIN_METADATA,
                     ...senderAgentIdMetadata(scope.agent.id),
+                    ...mutationIdMetadata(continuation.mutationId),
                 },
             },
         ];
