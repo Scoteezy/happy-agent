@@ -45,13 +45,15 @@ one message it cannot carry.
 
 ## Reference tags and file links become plain text on the phone
 
-Agents now mention artifacts, conversations, workspaces, and projects as `<happy-KIND id="…"/>`
-tags. The phone cannot render them, and API.md requires every integration to get plain Markdown,
+Agents now mention artifacts, conversations, workspaces, projects, and Surfaces as
+`<happy-KIND id="…"/>` tags. The phone cannot render them, and API.md requires every integration to get plain Markdown,
 never a raw tag. The mapper stays synchronous and knows nothing of catalogs. After it runs, the
 connection rewrites only agent-role text, service notices, and tool-call descriptions with the client package's own
 fallback renderer, resolving each distinct reference once and in order, inside the event's
-transaction. The module takes the artifacts and tasks modules for this; bots, projects,
-workspaces, and the agent collection were already at hand. An inert reference, or a lookup
+transaction. The module takes the artifacts, tasks, and Surfaces modules for this; bots,
+projects, workspaces, and the agent collection were already at hand. A Surface has no route of
+its own, so `SurfacesModule.get` reads it from the catalog and answers nothing for an unknown or
+withdrawn one. An inert reference, or a lookup
 that throws, becomes the placeholder, because naming optional context must never stall the
 outbox. History keeps the tags, so a later client still renders them as links.
 

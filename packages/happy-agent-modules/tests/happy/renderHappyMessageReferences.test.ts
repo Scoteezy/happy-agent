@@ -162,6 +162,10 @@ describe("resolveHappyReferenceLabel", () => {
                     old: { name: "old", status: "archived" },
                 })[id],
         },
+        surfaces: {
+            get: async (_ctx: unknown, id: string) =>
+                ({ groceries: { id: "groceries", type: "todo", name: "Groceries" } })[id],
+        },
         workspaces: {
             get: async (_ctx: unknown, id: string) =>
                 ({
@@ -192,6 +196,8 @@ describe("resolveHappyReferenceLabel", () => {
             [{ kind: "project", id: "rig" }, "rig"],
             [{ kind: "project", id: "old" }, undefined],
             [{ kind: "service", id: "rig" }, undefined],
+            [{ kind: "surface", id: "groceries" }, "Groceries"],
+            [{ kind: "surface", id: "missing" }, undefined],
             [{ kind: "future", id: "rig" }, undefined],
         ];
         for (const [reference, expected] of cases) {

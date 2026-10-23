@@ -298,6 +298,21 @@ export class SurfacesModule implements AgentModule {
             Promise.all((await this.#stored(tx)).map((surface) => this.#present(tx, surface))),
         );
     }
+    /**
+     * One Surface of the catalog as `list` presents it, or undefined when the catalog has none
+     * with this ID, including a malformed ID or a withdrawn type.
+     */
+    async get(ctx: Context, surfaceId: string): Promise<Surface | undefined> {
+        if (!Value.Check(surfaceIdSchema, surfaceId)) return undefined;
+        return ctx.inTx(async (tx) => {
+            try {
+                return await this.#present(tx, await this.#surface(tx, surfaceId));
+            } catch (error) {
+                if (error instanceof SurfaceError && error.code === "not_found") return undefined;
+                throw error;
+            }
+        });
+    }
     /** Whether this supported feature currently holds useful shared content. */
     async hasContent(ctx: Context, surfaceId: string): Promise<boolean> {
         return ctx.inTx(async (tx) => {

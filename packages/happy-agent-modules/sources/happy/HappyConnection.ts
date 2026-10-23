@@ -44,6 +44,7 @@ import {
     type WorkspaceAgentPlacement,
     type WorkspaceEvent,
 } from "../workspaces/index.js";
+import type { SurfacesModule } from "../surfaces/index.js";
 import { TasksModule, type TaskRecord } from "../tasks/index.js";
 import { TeamModule, type TeamUser } from "../team/index.js";
 import { ConfigModule } from "../config/index.js";
@@ -244,6 +245,7 @@ export class HappyConnection implements HappySessionOperations, HappySpawnOperat
     readonly #userInput: UserInputModule;
     readonly #workspaces: WorkspacesModule;
     readonly #taskCatalog: TasksModule;
+    readonly #surfaces: SurfacesModule;
     readonly #sync: ReturnType<typeof createHappySyncDatabase>;
     readonly #projectSync: ReturnType<typeof createHappyProjectSyncDatabase>;
     readonly #integrationDatabase: ReturnType<typeof createHappyIntegrationDatabase>;
@@ -295,6 +297,7 @@ export class HappyConnection implements HappySessionOperations, HappySpawnOperat
         files: ProjectFilesModule,
         artifacts: ArtifactsModule,
         tasks: TasksModule,
+        surfaces: SurfacesModule,
         team?: TeamModule,
         owner?: TeamUser,
     ) {
@@ -317,6 +320,7 @@ export class HappyConnection implements HappySessionOperations, HappySpawnOperat
         this.#bots = bots;
         this.#artifacts = artifacts;
         this.#taskCatalog = tasks;
+        this.#surfaces = surfaces;
         const now = Date.now();
         this.#integration = {
             authorization: null,
@@ -377,6 +381,7 @@ export class HappyConnection implements HappySessionOperations, HappySpawnOperat
             artifacts: this.#artifacts,
             bots: this.#bots,
             projects: this.#projects,
+            surfaces: this.#surfaces,
             tasks: this.#taskCatalog,
             workspaces: this.#workspaces,
         };

@@ -135,11 +135,21 @@ describe("installation-owned Surface state", () => {
         await expect(f.surfaces.document(ctx, separatorId)).rejects.toMatchObject({
             code: "not_found",
         });
+        expect(await f.surfaces.get(ctx, separatorId)).toBeUndefined();
         const next = await f.surfaces.create(ctx, { type: "todo", name: "Next" }, "alice");
         expect(next.members[0]!.orderKey > list.members[0]!.orderKey).toBe(true);
         expect(await f.kv.read(ctx, `surface.${separatorId}`)).toEqual(separator);
         const tools = await f.hooks.tools!(ctx, { agent: { id: "admin" } } as AgentModuleScope);
         expect(tools.some((tool) => tool.name.includes("separator"))).toBe(false);
+    });
+
+    it("reads one Surface by ID as the catalog shows it, and nothing for an unknown ID", async () => {
+        const f = await fixture();
+        const ctx = f.db.context;
+        const list = await f.surfaces.create(ctx, { type: "todo", name: "Groceries" }, "alice");
+        expect(await f.surfaces.get(ctx, list.id)).toEqual(list);
+        expect(await f.surfaces.get(ctx, "missingsurface0000000001")).toBeUndefined();
+        expect(await f.surfaces.get(ctx, "not a surface id")).toBeUndefined();
     });
 
     it("keeps each person's ordering independent and validates administrative targets", async () => {

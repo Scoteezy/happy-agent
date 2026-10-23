@@ -61,6 +61,7 @@ const SELECTION = {
 
 /** Catalogs only reference tags are named from; these tests never mention anything. */
 const referenceArtifacts = { get: async () => undefined };
+const referenceSurfaces = { get: async () => undefined };
 const referenceTasks = {
     forAgent: async () => undefined,
     memberFor: () => "standalone",
@@ -428,6 +429,7 @@ async function fixture() {
                     ? { taskId, memberId: "standalone", orderKey: "0001", joinedAt: 1 }
                     : undefined,
         } as never,
+        referenceSurfaces as never,
     );
     modules.push(module);
     module.beforeStart(database.context, agents as never);
@@ -1376,6 +1378,7 @@ describe("archiving a Happy session", () => {
             {} as never,
             referenceArtifacts as never,
             referenceTasks as never,
+            referenceSurfaces as never,
         );
         modules.push(module);
         const hooks = module.beforeStart(database.context, agents as never);
@@ -1620,6 +1623,7 @@ describe("archiving a Happy session", () => {
             {} as never,
             referenceArtifacts as never,
             referenceTasks as never,
+            referenceSurfaces as never,
         );
         modules.push(module);
 

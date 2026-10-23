@@ -21,6 +21,7 @@ import type { HistoryModule } from "../history/index.js";
 import type { ProjectsModule } from "../projects/index.js";
 import type { ProviderUsageModule } from "../providerUsage/index.js";
 import type { SchedulingModule } from "../scheduling/index.js";
+import type { SurfacesModule } from "../surfaces/index.js";
 import type { TasksModule } from "../tasks/index.js";
 import { TeamAuthenticationError, type TeamModule, type TeamUser } from "../team/index.js";
 import type { UserInputModule } from "../userInput/index.js";
@@ -68,6 +69,7 @@ export class HappyModule extends HappyConnection implements AgentModule<AnyAgent
         files: ProjectFilesModule,
         artifacts: ArtifactsModule,
         tasks: TasksModule,
+        surfaces: SurfacesModule,
     ) {
         super(
             config,
@@ -84,6 +86,7 @@ export class HappyModule extends HappyConnection implements AgentModule<AnyAgent
             files,
             artifacts,
             tasks,
+            surfaces,
         );
         this.#team = team;
         this.#createConnection = (user) =>
@@ -102,6 +105,7 @@ export class HappyModule extends HappyConnection implements AgentModule<AnyAgent
                 files,
                 artifacts,
                 tasks,
+                surfaces,
                 team,
                 user,
             );

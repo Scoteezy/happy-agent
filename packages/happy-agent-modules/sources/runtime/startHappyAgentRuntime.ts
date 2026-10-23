@@ -647,6 +647,7 @@ export async function startHappyAgentRuntime(
             files,
             artifacts,
             tasks,
+            surfaces,
         );
         const goal = new GoalModule();
         const exportedBots = new ExportedBotsModule(

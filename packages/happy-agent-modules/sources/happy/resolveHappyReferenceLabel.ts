@@ -6,6 +6,7 @@ import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { ArtifactNotFoundError, type ArtifactsModule } from "../artifacts/index.js";
 import type { BotsModule } from "../bots/index.js";
 import type { ProjectsModule } from "../projects/index.js";
+import type { SurfacesModule } from "../surfaces/index.js";
 import type { TasksModule } from "../tasks/index.js";
 import type { WorkspacesModule } from "../workspaces/index.js";
 
@@ -15,6 +16,7 @@ export interface HappyReferenceCatalogs {
     readonly artifacts: ArtifactsModule;
     readonly bots: BotsModule;
     readonly projects: ProjectsModule;
+    readonly surfaces: SurfacesModule;
     readonly tasks: TasksModule;
     readonly workspaces: WorkspacesModule;
 }
@@ -64,6 +66,8 @@ export async function resolveHappyReferenceLabel(
         }
         case "project":
             return await projectLabel(ctx, catalogs, reference.id);
+        case "surface":
+            return (await catalogs.surfaces.get(ctx, reference.id))?.name;
         default:
             return undefined;
     }
