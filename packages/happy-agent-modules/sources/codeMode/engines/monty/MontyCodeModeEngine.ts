@@ -1,4 +1,4 @@
-import { Monty } from "@pydantic/monty";
+import type { Monty } from "@pydantic/monty";
 import type { AgentModuleHooks } from "@slopus/happy-agent-base";
 import {
     detach,
@@ -11,6 +11,7 @@ import {
 } from "@steve.kite/stdlib";
 
 import type { ConfigModule } from "../../../config/index.js";
+import { createMontyPool } from "../../../monty/index.js";
 import type { ComputeModule, HostCompute } from "../../../compute/index.js";
 import type { CodeModeEngine } from "../../CodeModeEngine.js";
 import {
@@ -61,7 +62,7 @@ export class MontyCodeModeEngine implements CodeModeEngine {
 
         const lifetime = new AbortController();
         const owner = detach(ctx).named("code-mode-monty-pool");
-        const pool = await Monty.create({
+        const pool = await createMontyPool({
             checkoutTimeout: 5,
             maxCheckoutsPerWorker: 100,
             maxProcesses: 4,

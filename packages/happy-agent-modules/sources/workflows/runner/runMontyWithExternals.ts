@@ -1,12 +1,13 @@
 import {
     FunctionSnapshot,
-    Monty,
     MontyComplete,
     NameLookupSnapshot,
     type MontySession,
     type ResourceLimits,
     type Snapshot,
 } from "@pydantic/monty";
+
+import { createMontyPool } from "../../monty/index.js";
 
 /** Drives a Monty script to completion, dispatching external calls and checkpointing snapshots. */
 export async function runMontyWithExternals(options: {
@@ -20,7 +21,11 @@ export async function runMontyWithExternals(options: {
     snapshot?: Uint8Array;
     scriptName: string;
 }): Promise<unknown> {
-    const pool = await Monty.create({
+    const stopped = () => {
+        if (options.signal.aborted) throw new Error("The workflow was stopped.");
+    };
+    stopped();
+    const pool = await createMontyPool({
         durationLimitGrace: 0.5,
         maxProcesses: 1,
         minProcesses: 1,
@@ -33,6 +38,7 @@ export async function runMontyWithExternals(options: {
             limits: options.limits,
             scriptName: options.scriptName,
         });
+        stopped();
         let progress: Snapshot =
             options.snapshot === undefined
                 ? await session.feedStart(options.code, {
@@ -41,8 +47,8 @@ export async function runMontyWithExternals(options: {
                   })
                 : await session.loadSnapshot(options.snapshot, { printCallback });
         for (;;) {
+            stopped();
             if (progress instanceof MontyComplete) return progress.output;
-            if (options.signal.aborted) throw new Error("The workflow was stopped.");
             if (progress instanceof NameLookupSnapshot) {
                 const external = options.externalFunctions[progress.variableName];
                 progress = await progress.resume(
@@ -68,6 +74,7 @@ export async function runMontyWithExternals(options: {
             await session.close();
             session = undefined;
             const value = await external(...args, kwargs);
+            stopped();
             session = await pool.checkout();
             const restored = await session.loadSnapshot(snapshot, { printCallback });
             if (!(restored instanceof FunctionSnapshot)) {
@@ -75,6 +82,9 @@ export async function runMontyWithExternals(options: {
             }
             progress = await restored.resume(value);
         }
+    } catch (error) {
+        stopped();
+        throw error;
     } finally {
         await session?.close().catch(() => undefined);
         await pool.close();

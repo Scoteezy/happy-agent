@@ -10,3 +10,14 @@ live restoration edge and pays for the same call twice.
 Register the recovered call's in-memory waiter before rereading its durable result. The restored
 agent may settle while workflow startup is still rebuilding the script; the post-registration
 read and settlement callback together cover both sides of that race without polling.
+
+## Worker CPU budgets belong to Python segments, not whole workflows
+
+The harness owns Monty's pool; Compute does not own these subprocesses. Code Mode and workflows
+share a constructor that installs a POSIX hard CPU limit of 60 seconds, independent of the harness
+and its native request watchdog. Every checkout receives a fresh worker. Workflows already dump
+and close their session before awaiting an external function and restore it into a fresh checkout
+afterward, so neither external-call waiting nor earlier segments consumes the next segment's CPU
+allowance. A killed harness can leave an in-flight worker briefly, but not an unlimited CPU loop.
+Windows retains its existing native watchdog. Cancellation is checked before executing Python and
+after external awaits; in-flight requests settle under their existing execution/request budgets.
