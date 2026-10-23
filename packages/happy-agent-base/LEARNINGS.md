@@ -188,6 +188,16 @@ that owns the data, even an empty one. `beforeMigrate` runs after the checks and
 first pending migration, so a host can record the oldest build able to read the store before
 that stops being true.
 
+## PGlite receives its options in one object
+
+`openAgentPGliteDatabase` called `new PGlite(dataDir, options)`. PGlite reads a non-string first
+argument as the options object, so without a data directory every option was dropped without a
+word. The opener now passes one options object. The PGlite test backend relies on this: each test
+database loads a copy of one initialized data directory instead of running `initdb`. The seeded
+restoration test opens sixty databases, and booting them took about three quarters of its time.
+That had kept it just above CI's sixty-second limit on PGlite since it was written. It now takes
+about twelve seconds locally.
+
 ## Verification
 
 `verification/lean/` (Lean 4) and `verification/tla/` (TLA+) model this state machine. Keep

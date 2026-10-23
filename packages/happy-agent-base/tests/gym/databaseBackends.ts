@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import { PGlite } from "@electric-sql/pglite";
 import { createId } from "@paralleldrive/cuid2";
 import postgres from "postgres";
 
@@ -56,7 +57,10 @@ function selectedBackend(): {
         return {
             label: "PGlite",
             open: async (): Promise<TestDatabase> => {
-                const connection = await openAgentPGliteDatabase();
+                pgliteTemplate ??= initializedPGliteDataDirectory();
+                const connection = await openAgentPGliteDatabase({
+                    loadDataDir: await pgliteTemplate,
+                });
                 return {
                     connection,
                     database: connection.database,
@@ -67,6 +71,25 @@ function selectedBackend(): {
     }
     if (selected === "postgres") return postgresBackend();
     throw new Error("HAPPY_AGENT_BASE_TEST_DATABASE must be sqlite, pglite, or postgres.");
+}
+
+/**
+ * A freshly initialized PGlite data directory, created once per test process. Every PGlite test
+ * database starts as its own copy of it. A new PGlite runs `initdb`, which took most of a
+ * many-database test's time: the seeded restoration test opens sixty databases and spent about
+ * thirty of its forty seconds booting them, enough to pass the CI time limit. Loading a copy
+ * takes about a sixth as long and leaves exactly the same empty database.
+ */
+let pgliteTemplate: Promise<Blob> | undefined;
+
+async function initializedPGliteDataDirectory(): Promise<Blob> {
+    const template = new PGlite();
+    try {
+        await template.waitReady;
+        return await template.dumpDataDir("none");
+    } finally {
+        await template.close();
+    }
 }
 
 function postgresBackend(): {

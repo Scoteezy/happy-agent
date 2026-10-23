@@ -12,8 +12,9 @@ export type OpenAgentPGliteDatabaseOptions = PGliteOptions & {
 export async function openAgentPGliteDatabase(
     options: OpenAgentPGliteDatabaseOptions = {},
 ): Promise<AgentDatabaseConnection<AgentPGliteDatabase>> {
-    const { dataDir, ...pgliteOptions } = options;
-    const client = new PGlite(dataDir, pgliteOptions);
+    // PGlite reads a non-string first argument as the options object, so passing an absent data
+    // directory first silently discards every option. Pass one options object instead.
+    const client = new PGlite(options);
     try {
         await client.waitReady;
         return new AgentDatabaseConnection(drizzle(client), async () => await client.close());
