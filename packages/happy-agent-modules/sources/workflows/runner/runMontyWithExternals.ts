@@ -1,13 +1,12 @@
 import {
     FunctionSnapshot,
+    Monty,
     MontyComplete,
     NameLookupSnapshot,
     type MontySession,
     type ResourceLimits,
     type Snapshot,
 } from "@pydantic/monty";
-
-import { createMontyPool } from "../../monty/index.js";
 
 /** Drives a Monty script to completion, dispatching external calls and checkpointing snapshots. */
 export async function runMontyWithExternals(options: {
@@ -25,7 +24,7 @@ export async function runMontyWithExternals(options: {
         if (options.signal.aborted) throw new Error("The workflow was stopped.");
     };
     stopped();
-    const pool = await createMontyPool({
+    const pool = await Monty.create({
         durationLimitGrace: 0.5,
         maxProcesses: 1,
         minProcesses: 1,

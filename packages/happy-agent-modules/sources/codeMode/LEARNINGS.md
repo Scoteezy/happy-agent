@@ -68,17 +68,14 @@ The shared pool starts with no prewarmed workers and grows on the first checkout
 inside the module startup hook can take longer than the daemon launcher's readiness window even
 though checkout itself is fast, making a healthy daemon look like it failed to start.
 
-## A native request watchdog cannot outlive the harness
+## Worker ownership cannot be replaced by a cumulative CPU limit
 
 Monty's native workers are owned by the harness, not by Compute; Compute only mediates filesystem
-operations. A killed daemon or test worker also loses Monty's native-pool request watchdog, so an
-in-flight infinite Python loop can otherwise become an orphan consuming a full CPU indefinitely.
-Code Mode and workflows now use the shared Monty pool constructor. On POSIX it launches each worker
-through an exec-only wrapper with a hard kernel CPU limit of 60 seconds. Exec preserves the actual
-worker PID for the existing pool timeout. Workers are recycled after every checkout so independent
-Python calls do not share a cumulative CPU allowance. Windows retains the native request watchdog
-without claiming this POSIX backstop. This bounds orphan CPU consumption; it is not immediate
-parent-death cleanup, and cancellation still waits for the existing native request deadline.
+operations. Their request watchdog applies to each native protocol request. A single Python call
+can make many OS callbacks and legitimately accumulate more CPU time than that watchdog duration.
+A fixed worker-wide CPU limit therefore changes valid execution behavior, even when workers are
+recycled after every checkout. Keep the caller's pool recycling policy and execution limits intact.
+Cleanup when the harness dies must follow worker ownership rather than introducing a CPU budget.
 
 ## The tool result and Python state need one write-ahead order
 

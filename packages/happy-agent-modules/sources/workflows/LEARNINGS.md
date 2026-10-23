@@ -11,16 +11,16 @@ Register the recovered call's in-memory waiter before rereading its durable resu
 agent may settle while workflow startup is still rebuilding the script; the post-registration
 read and settlement callback together cover both sides of that race without polling.
 
-## Worker CPU budgets belong to Python segments, not whole workflows
+## Execution budgets belong to Python segments, not whole workflows
 
-The harness owns Monty's pool; Compute does not own these subprocesses. Code Mode and workflows
-share a constructor that installs a POSIX hard CPU limit of 60 seconds, independent of the harness
-and its native request watchdog. Every checkout receives a fresh worker. Workflows already dump
-and close their session before awaiting an external function and restore it into a fresh checkout
-afterward, so neither external-call waiting nor earlier segments consumes the next segment's CPU
-allowance. A killed harness can leave an in-flight worker briefly, but not an unlimited CPU loop.
-Windows retains its existing native watchdog. Cancellation is checked before executing Python and
-after external awaits; in-flight requests settle under their existing execution/request budgets.
+The harness owns Monty's pool; Compute does not own these subprocesses. Workflows dump and close
+their session before awaiting an external function, then restore it into another checkout. Neither
+external-call waiting nor earlier segments consumes the next segment's execution allowance. The
+30-second sandbox execution budget and 31-second native request watchdog are not limits on the
+whole workflow. Do not add a cumulative worker CPU limit as a substitute for parent-death cleanup:
+the same native interpreter also serves Code Mode, whose OS callbacks can span many requests in
+one Python call. Cancellation is checked before executing Python and after external awaits;
+in-flight requests settle under their existing execution/request budgets.
 
 ## Agents a run starts answer the mutation of the run that launched it
 
