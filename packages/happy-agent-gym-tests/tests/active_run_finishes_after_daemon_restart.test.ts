@@ -23,7 +23,9 @@ describe("active run recovery after a daemon restart", () => {
                           content: [
                               {
                                   arguments: {
-                                      cmd: "sleep 30",
+                                      // Graceful shutdown lets a foreground command finish
+                                      // within its deadline; the next daemon resumes the run.
+                                      cmd: "sleep 2",
                                       max_output_tokens: 1_000,
                                       yield_time_ms: 30_000,
                                   },
@@ -60,6 +62,8 @@ describe("active run recovery after a daemon restart", () => {
             permissionMode: "full_access",
             wait: false,
         });
+        // The public block carries Agent Base's own ID, never the provider's call ID, so the
+        // command is recognized by its tool and arguments.
         await gym.waitForEvent(
             (event) =>
                 event.type === "message.updated" &&
@@ -67,13 +71,16 @@ describe("active run recovery after a daemon restart", () => {
                 event.payload.message.content.some(
                     (block) =>
                         block.type === "tool_call" &&
-                        block.id === "restartcommand" &&
+                        block.name === "exec_command" &&
+                        block.arguments?.["cmd"] === "sleep 2" &&
                         block.status === "running",
                 ),
             "the command tool call to become durably running",
         );
 
         await gym.restart();
+        // Only the command's turn ran before the restart; the answer comes from the next daemon.
+        expect(agentRequests()).toHaveLength(1);
 
         const finished = await gym.waitForRun(accepted.runId);
         expect(finished).toMatchObject({
