@@ -1013,6 +1013,103 @@ such as `ansi:202`, or true-color values such as `#D97706`. `/fast` toggles the
 Codex fast service tier when the selected provider supports it; fast inference
 uses twice the plan usage.
 
+## Happy Desktop colors
+
+`[theme]` colors the terminal. Happy Desktop's window has its own palette,
+chosen in its own preferences file, `~/.happy/desktop/config.json`. Its
+appearances are System, Light, Dark, Midnight, and Custom. Custom is a built-in
+palette with any color roles replaced. When a person asks to make the app
+darker, warmer, or a different accent color, edit this file. Happy Desktop
+watches it and applies each accepted change while it runs, with no reload or
+restart.
+
+The file belongs to Happy Desktop, so it is on the computer and in the user
+account where Happy Desktop runs. The path is in that user's home and does not
+move with `HAPPY_HOME_DIR`. An agent on a remote machine, in a container, or in
+team mode reaches a different home, and editing that one changes nothing. The
+path is outside your workspace, so a sandboxed write is reviewed or refused.
+It needs a Happy Desktop build that supports Custom. Older builds do not show
+Midnight or Custom, and older installed builds reset their preferences when
+they read these values.
+
+Read the file and merge these fields into the existing object. Keep every
+other field, including ones you do not recognize. Do not write a separate
+`theme.json`.
+
+```json
+{
+    "version": 1,
+    "appearance": "custom",
+    "customTheme": {
+        "base": "midnight",
+        "colors": {
+            "groupped-background": "#1d1a17",
+            "surface": "#25211d",
+            "text": "#ebdbb2",
+            "text-secondary": "#a89984",
+            "text-link": "#d79921"
+        }
+    }
+}
+```
+
+- `version` is the number `1`.
+- `appearance` is `system`, `light`, `dark`, `midnight`, or `custom`. Custom
+  only shows while it is selected, so set it in the same edit or have the person
+  pick it in Settings → General → Theme, the status bar theme menu, or the
+  command palette.
+- `base` is `light`, `dark`, or `midnight` and defaults to `midnight`. Every
+  role not listed in `colors` comes from it, and so does the window's light or
+  dark color scheme.
+- `colors` maps role names to `#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa`
+  values. It may be omitted. The Windows title bar only takes `#rgb` and
+  `#rrggbb`.
+- The app ignores fields it does not recognize and keeps them on disk.
+- An unknown role or a value that is not hex is dropped alone. The other roles
+  still apply.
+- A field with the wrong type keeps its last good value, or its default at
+  startup, and the other fields still apply.
+
+Write the file by renaming a complete temporary file over it, and make one edit
+at a time. The app rereads the file before it saves and merges only what it
+changed. If the file is not valid JSON, the app keeps the last good preferences
+and stops saving until it is fixed.
+
+After writing, wait about a second, then read
+`~/.happy/desktop/config.error.txt` if it exists. It names each ignored field or
+role and why. Fix `config.json`, not that file, which the app deletes once the
+preferences are clean. A missing error file is not proof the edit applied:
+nothing checks the file while Happy Desktop is not running.
+
+The roles that shape the overall look:
+
+| Role                                               | Paints                                               |
+| -------------------------------------------------- | ---------------------------------------------------- |
+| `groupped-background`                              | The window floor: sidebar, rail, settings background |
+| `surface`                                          | The main content panel, tabs, and cards              |
+| `surface-high`                                     | Recessed areas such as code blocks                   |
+| `surface-selected`, `surface-pressed`              | Selected and pressed rows                            |
+| `header-background`                                | Panel headers; on Windows, also the title bar        |
+| `divider`                                          | Hairlines between areas                              |
+| `input-background`, `sidebar-search-background`    | The composer, inputs, and the sidebar search         |
+| `user-message-background`                          | The person's own chat bubbles                        |
+| `text`, `agent-message-text`, `user-message-text`  | Main text                                            |
+| `text-secondary`, `groupped-section-title`         | Quieter text and section headings                    |
+| `text-link`                                        | The accent: links and active states                  |
+| `button-primary-background`, `button-primary-tint` | The main action button and its label                 |
+| `composer-send-background`, `composer-send-icon`   | The round send button in the composer and its arrow  |
+| `terminal-background`, `diff-context-bg`           | Terminal and diff backgrounds                        |
+
+Keep a visible step between surfaces: on a dark base, `surface` and
+`input-background` should be slightly lighter than `groupped-background`, and
+the primary button must stay readable against the surfaces around it.
+
+Permission buttons and warning and error boxes (`permission-*`, `box-error-*`,
+`box-warning-*`) cannot be recolored, so a theme cannot disguise an approval or
+hide a warning. The complete list of roles:
+
+`text`, `text-destructive`, `text-secondary`, `text-link`, `delete-action`, `warning-critical`, `warning`, `success`, `stem-cell-membrane`, `stem-cell-core`, `surface`, `surface-ripple`, `surface-pressed`, `surface-selected`, `surface-pressed-overlay`, `surface-high`, `surface-highest`, `surface-inverse`, `text-inverse`, `divider`, `shadow-color`, `shadow-subtle`, `shadow-rail`, `shadow-floating`, `shadow-elevated`, `shadow-activity-card`, `overlay-backdrop`, `overlay-panel`, `groupped-background`, `groupped-chevron`, `groupped-section-title`, `header-background`, `header-tint`, `header-tint-secondary`, `switch-track-active`, `switch-track-inactive`, `switch-thumb-active`, `switch-thumb-inactive`, `fab-background`, `fab-background-pressed`, `fab-icon`, `radio-active`, `radio-inactive`, `radio-dot`, `modal-border`, `button-primary-background`, `button-primary-tint`, `button-primary-ripple`, `button-primary-disabled`, `button-secondary-tint`, `composer-send-background`, `composer-send-icon`, `input-background`, `sidebar-search-background`, `sidebar-search-border`, `input-text`, `input-placeholder`, `review-accent`, `status-connected`, `status-connecting`, `status-disconnected`, `status-error`, `status-default`, `diff-outline`, `diff-success`, `diff-error`, `diff-added-bg`, `diff-added-border`, `diff-added-text`, `diff-removed-bg`, `diff-removed-border`, `diff-removed-text`, `code-comment`, `code-string`, `code-number`, `code-keyword`, `code-type`, `code-function`, `code-variable`, `code-constant`, `code-operator`, `code-punctuation`, `code-gutter`, `code-gutter-active`, `code-caret`, `code-selection`, `code-active-line`, `code-reveal`, `terminal-selection`, `diff-context-bg`, `diff-context-text`, `diff-line-number-bg`, `diff-line-number-text`, `diff-hunk-header-bg`, `diff-hunk-header-text`, `diff-leading-space-dot`, `diff-inline-added-bg`, `diff-inline-added-text`, `diff-inline-removed-bg`, `diff-inline-removed-text`, `user-message-background`, `user-message-text`, `agent-message-text`, `agent-event-text`, `syntax-keyword`, `syntax-string`, `syntax-comment`, `syntax-number`, `syntax-function`, `syntax-bracket-1`, `syntax-bracket-2`, `syntax-bracket-3`, `syntax-bracket-4`, `syntax-bracket-5`, `syntax-default`, `git-branch-text`, `git-file-count-text`, `git-added-text`, `git-removed-text`, `git-status-new`, `git-status-modified`, `git-status-renamed`, `git-status-deleted`, `file-code`, `file-data`, `file-style`, `file-image`, `file-video`, `file-audio`, `file-shell`, `file-secret`, `file-archive`, `file-prose`, `file-config`, `file-directory`, `file-other`, `file-path-text`, `terminal-background`, `terminal-prompt`, `terminal-command`, `terminal-stdout`, `terminal-stderr`, `terminal-error`, `terminal-empty-output`
+
 ## Heap snapshots
 
 Full heap snapshots near the memory limit are opt-in because they are large and
