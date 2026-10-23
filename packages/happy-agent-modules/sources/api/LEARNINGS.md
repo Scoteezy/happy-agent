@@ -416,3 +416,10 @@ it, so a helper keeps its parent's retry, else none. A message joining the run a
 changes nothing, and a steer that opens a successor run counts as a new run. Questions name their
 asking agent. An event that names no agent gets no inherited echo. Accepted-message batches
 announce later, so each message keeps the owner it had when it was accepted.
+
+## A failure retry's run echoes the retry's mutation
+
+Retry and switch accepted `mutationId` but started their run with a hidden notice that carried
+none, and History kept a message's `mutationId` only on person-attributed messages, so their runs
+echoed nothing. The notice now records the request's `mutationId`, and History keeps it on any
+accepted message.

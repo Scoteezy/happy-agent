@@ -5058,7 +5058,14 @@ export class ApiModule implements AgentModule {
         if ((await this.#activeRunId(ctx, agentId)) !== undefined) {
             throw new ApiError(409, "conflict", "The agent is still working.");
         }
-        let options: AgentBaseMessageOptions = { id: createId(), metadata: { hideFromUser: true } };
+        // The notice records the request's mutation, so the run it starts echoes it.
+        let options: AgentBaseMessageOptions = {
+            id: createId(),
+            metadata: {
+                hideFromUser: true,
+                ...(body.mutationId === undefined ? {} : { mutationId: body.mutationId }),
+            },
+        };
         let switchedMode: MessageMode | undefined;
         let text =
             "The person asked to retry the turn that just failed. Answer their last request again.";

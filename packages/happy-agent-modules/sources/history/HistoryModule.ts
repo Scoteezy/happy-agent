@@ -2478,11 +2478,13 @@ export class HistoryModule implements AgentModule {
                               (accepted.kind === "steering" ? "steer" : "queue"),
                           ...(mode === undefined ? {} : { mode }),
                           profile: pending?.profile ?? accepted.profile,
-                          ...(mutationId === undefined ? {} : { mutationId }),
                           ...(clientMetadata === undefined ? {} : { clientMetadata }),
                           ...(userId === undefined ? {} : { userId }),
                       }
                     : {}),
+                // Any accepted message may start a run on a request's behalf, such as the hidden
+                // notice a failure retry sends; its run echoes the mutation recorded here.
+                ...(mutationId === undefined ? {} : { mutationId }),
                 ...(sender === undefined ? {} : { senderAgentId: sender }),
                 ...(accepted.metadata?.hideFromUser === undefined
                     ? {}
