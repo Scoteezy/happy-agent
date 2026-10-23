@@ -61,18 +61,6 @@ export const updateSpaceSidebarRequestSchema = Type.Object(
     },
     { additionalProperties: false },
 );
-export const spaceSidebarObservationsRequestSchema = Type.Object(
-    {
-        visibleSpaceIds: Type.Array(cuid2Schema, { maxItems: 1000, uniqueItems: true }),
-        collapsed: Type.Optional(
-            Type.Array(Type.String({ minLength: 1, maxLength: 128 }), {
-                maxItems: 1000,
-                uniqueItems: true,
-            }),
-        ),
-    },
-    { additionalProperties: false },
-);
 
 /**
  * One sidebar row as clients see it: stored placement plus its content resolved live. A row whose

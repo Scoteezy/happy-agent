@@ -4,7 +4,7 @@ import { artifactsWorld, sha256 } from "./support/artifactsWorld.js";
 
 it("rolls back sidebar content and its upload intent with the caller, without writing files", async () => {
     const world = await artifactsWorld("sidebar-transactional-content");
-    const html = "<nav><p>Transactional sidebar</p></nav>";
+    const html = "<nav><happy-search/><happy-create/></nav>";
     try {
         await expect(
             world.ctx.inTx(async (ctx) => {

@@ -15,6 +15,7 @@ import {
     type SpacePendingChange,
     type SpaceRecord,
     type SpaceSectionRecord,
+    SpaceStorageError,
 } from "../Space.js";
 import {
     SPACE_BATCHES_TABLE,
@@ -364,18 +365,21 @@ export async function queryBatches(
     return rows.map((row) => parseValue(spaceBatchSchema, row.batch_json, "batch"));
 }
 
+interface OwnerRow {
+    readonly owner_user_id: string;
+    readonly state_json: string;
+}
+
 export async function queryOwnerState(
     ctx: Context,
     ownerUserId: string,
 ): Promise<SpaceOwnerState | undefined> {
-    const rows = await agentDatabaseRows<{ readonly state_json: string }>(
+    const rows = await agentDatabaseRows<OwnerRow>(
         ctx.db,
-        sql`SELECT state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)}
+        sql`SELECT owner_user_id, state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)}
             WHERE owner_user_id = ${ownerUserId} LIMIT 1`,
     );
-    return rows[0] === undefined
-        ? undefined
-        : parseValue(spaceOwnerStateSchema, rows[0].state_json, "owner state");
+    return rows[0] === undefined ? undefined : parseOwnerState(rows[0]);
 }
 
 /** The person whose Prioritizing this agent is, if it is anyone's. */
@@ -383,36 +387,62 @@ export async function queryOwnerByPrioritizingAgent(
     ctx: Context,
     agentId: string,
 ): Promise<SpaceOwnerState | undefined> {
-    const rows = await agentDatabaseRows<{ readonly state_json: string }>(
+    const rows = await agentDatabaseRows<OwnerRow>(
         ctx.db,
-        sql`SELECT state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)}
+        sql`SELECT owner_user_id, state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)}
             WHERE json_extract(state_json, '$.prioritizingAgentId') = ${agentId} LIMIT 1`,
     );
-    return rows[0] === undefined
-        ? undefined
-        : parseValue(spaceOwnerStateSchema, rows[0].state_json, "owner state");
+    return rows[0] === undefined ? undefined : parseOwnerState(rows[0]);
 }
 
-/** Every person who has a sidebar. */
+/** The person whose sidebar this artifact is, if it is anyone's. */
 export async function queryOwnerBySidebarArtifact(
     ctx: Context,
     artifactId: string,
 ): Promise<SpaceOwnerState | undefined> {
-    const rows = await agentDatabaseRows<{ readonly state_json: string }>(
+    const rows = await agentDatabaseRows<OwnerRow>(
         ctx.db,
-        sql`SELECT state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)} WHERE json_extract(state_json, '$.sidebarArtifactId') = ${artifactId} LIMIT 1`,
+        sql`SELECT owner_user_id, state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)} WHERE json_extract(state_json, '$.sidebarArtifactId') = ${artifactId} LIMIT 1`,
     );
-    return rows[0] === undefined
-        ? undefined
-        : parseValue(spaceOwnerStateSchema, rows[0].state_json, "owner state");
+    return rows[0] === undefined ? undefined : parseOwnerState(rows[0]);
 }
 
+/**
+ * Every person with a readable sidebar state. A state that cannot be read leaves only that person
+ * without Spaces; it is logged and skipped, so one bad row never stops the daemon.
+ */
 export async function queryOwnerStates(ctx: Context): Promise<SpaceOwnerState[]> {
-    const rows = await agentDatabaseRows<{ readonly state_json: string }>(
+    const rows = await agentDatabaseRows<OwnerRow>(
         ctx.db,
-        sql`SELECT state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)} ORDER BY owner_user_id`,
+        sql`SELECT owner_user_id, state_json FROM ${sql.raw(SPACE_OWNERS_TABLE)} ORDER BY owner_user_id`,
     );
-    return rows.map((row) => parseValue(spaceOwnerStateSchema, row.state_json, "owner state"));
+    const states: SpaceOwnerState[] = [];
+    for (const row of rows) {
+        try {
+            states.push(parseOwnerState(row));
+        } catch (error: unknown) {
+            if (!(error instanceof SpaceStorageError)) throw error;
+            ctx.log.error("A person's sidebar state could not be read; Spaces skips them.", {
+                ownerUserId: row.owner_user_id,
+            });
+        }
+    }
+    return states;
+}
+
+/**
+ * Stored state drops fields this build does not know, so state from a newer build that only
+ * added fields still reads here. Anything else that does not fit is unreadable.
+ */
+function parseOwnerState(row: OwnerRow): SpaceOwnerState {
+    let value: unknown;
+    try {
+        value = Value.Clean(spaceOwnerStateSchema, JSON.parse(row.state_json) as unknown);
+    } catch {
+        throw new SpaceStorageError(row.owner_user_id);
+    }
+    if (!Value.Check(spaceOwnerStateSchema, value)) throw new SpaceStorageError(row.owner_user_id);
+    return value;
 }
 
 export async function writeOwnerState(ctx: Context, state: SpaceOwnerState): Promise<void> {

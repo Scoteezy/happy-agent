@@ -15,10 +15,12 @@ it("applies one factual calm batch while legacy row actions stay independent", a
         await h.hold();
         await h.gym.send("Plan this release.", { sessionId: created.agent.id });
         const current = await h.read();
-        const node = `<happy-space ref="${created.space.id}" tree></happy-space>`;
-        const placed = current.html.replace(
-            node,
-            `<happy-section id="release" label="Release">${node}</happy-section>`,
+        const node = `  <happy-space id="${created.space.id}"/>
+`;
+        const placed = current.html.replace(node, "").replace(
+            "</nav>",
+            `  <happy-section id="release" label="Releases"/>
+${node}</nav>`,
         );
         expect((await h.edit(placed)).text).toContain("queued");
         expect((await h.read()).html).toBe(current.html);
@@ -35,7 +37,7 @@ it("applies one factual calm batch while legacy row actions stay independent", a
             "/v0/spaces/batches",
         );
         expect(batches.batches).toHaveLength(1);
-        expect(batches.batches[0]!.note).toMatch(/^Put .+ in Release\.$/);
+        expect(batches.batches[0]!.note).toMatch(/^Put .+ in Releases\.$/);
         const notes = (
             await h.gym.http.ok<{ runs: { messages: { id: string }[] }[] }>(
                 "GET",
@@ -65,6 +67,7 @@ it("applies one factual calm batch while legacy row actions stay independent", a
             "list_sidebar",
             "read_artifact",
             "read_artifact_file",
+            "read_row_conversation",
             "set_space_icon",
             "update_artifact",
         ]);

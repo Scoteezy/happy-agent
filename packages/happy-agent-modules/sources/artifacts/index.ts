@@ -83,6 +83,8 @@ export {
 } from "./ArtifactsModule.js";
 export {
     parseSidebar,
+    parseLegacySidebar,
+    formatSidebar,
     sidebarNodes,
     escapeSidebarText,
     SIDEBAR_STYLES,

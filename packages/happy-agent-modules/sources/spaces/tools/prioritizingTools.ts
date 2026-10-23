@@ -25,6 +25,13 @@ const editsSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+const conversationSchema = Type.Object(
+    {
+        id: cuid2Schema,
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 40 })),
+    },
+    { additionalProperties: false },
+);
 const iconSchema = Type.Object(
     { spaceId: cuid2Schema, slug: spaceIconSlugSchema },
     { additionalProperties: false },
@@ -42,7 +49,7 @@ export function prioritizingTools(
             defer: false,
             capabilities: ["Read the person's sidebar artifact and live spaces."],
             description:
-                "Read {artifactId, version, html, spaces, observations, manualSpaceIds}. The HTML nesting is the authoritative layout. Pending edits are included with the version your next edit must use.",
+                "Read {artifactId, version, html, spaces, sessions, visibleRows, manualIds}. The html is the sidebar exactly as the person sees it. spaces describe each row; sessions list every session under the rows with its parent, whether or not it is shown. visibleRows counts the rows shown outside collapsed sections and the sessions shown under them, not counting Happy and new work waiting for its first message, against the budget to stay within. Pending edits are included with the version your next edit must use.",
             parameters: emptySchema,
             returnType: resultSchema,
             durable: true,
@@ -53,11 +60,26 @@ export function prioritizingTools(
             toLLM,
         }),
         defineAgentTool({
+            name: "read_row_conversation",
+            defer: false,
+            capabilities: ["Read what was said in a sidebar row's conversation."],
+            description:
+                "Read what the person, the agent, and other agents writing to it (such as the task a subtask was given, or a subtask reporting back) said in a row's conversation (its space ID) or a session under a row (its agent ID), newest first. Tool calls, their output and reasoning are left out; long messages are shortened and the whole answer is capped. Read the conversations a decision rests on before placing, ranking, or tucking anything away.",
+            parameters: conversationSchema,
+            returnType: resultSchema,
+            durable: true,
+            shouldReviewInAutoMode: () => false,
+            execute: async (ctx, input: Static<typeof conversationSchema>) => ({
+                text: await spaces.rowConversation(ctx, ownerUserId, input.id, input.limit ?? 12),
+            }),
+            toLLM,
+        }),
+        defineAgentTool({
             name: "edit_sidebar",
             defer: false,
             capabilities: ["Edit the person's sidebar artifact."],
             description:
-                "Apply sequential exact-text edits to the sidebar HTML. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Keep Happy first, manual moves unchanged, and recent work in place. New pending work may receive its first placement.",
+                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Leave Happy, Search, Create, the person's manual moves, new work without a first message, and recent work in place. New pending work may receive its first placement.",
             parameters: editsSchema,
             returnType: resultSchema,
             durable: true,
@@ -70,9 +92,9 @@ export function prioritizingTools(
         defineAgentTool({
             name: "get_sidebar_styles",
             defer: false,
-            capabilities: ["Read the sidebar's allowed elements, classes, and theme tokens."],
+            capabilities: ["Read the sidebar document's grammar."],
             description:
-                "Read the published HTML element/attribute contract, allowed classes, and light/dark theme tokens. The sidebar inherits the app theme; do not author style elements, inline styles, or JavaScript.",
+                "Read the sidebar's allowed elements, their attributes and children, and its rules. The app draws every element itself; nothing else is allowed.",
             parameters: emptySchema,
             returnType: resultSchema,
             durable: true,
@@ -83,9 +105,9 @@ export function prioritizingTools(
         defineAgentTool({
             name: "set_space_icon",
             defer: false,
-            capabilities: ["Set a sidebar row's icon."],
+            capabilities: ["Set the icon of a sidebar row or a session under it."],
             description:
-                "Set a row's icon from the icon library. Applies immediately because it moves nothing.",
+                "Set an icon from the icon library on a row (its space ID) or a session under a row (its agent ID), shown or not. Applies immediately because it moves nothing. New work without a first message keeps its stem-cell mark.",
             parameters: iconSchema,
             returnType: resultSchema,
             durable: true,

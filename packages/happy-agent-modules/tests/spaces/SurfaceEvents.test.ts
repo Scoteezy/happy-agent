@@ -51,6 +51,10 @@ it("refreshes Surface names and pictures from current state and removes its subs
         {} as ConstructorParameters<typeof SpacesModule>[5],
         { register: () => undefined } as unknown as ConstructorParameters<typeof SpacesModule>[6],
         {} as ConstructorParameters<typeof SpacesModule>[7],
+        {} as ConstructorParameters<typeof SpacesModule>[8],
+        { get: async () => ({ value: null }) } as unknown as ConstructorParameters<
+            typeof SpacesModule
+        >[9],
     );
     try {
         await writeOwnerState(database.context, { ownerUserId: "standalone" });
@@ -157,6 +161,10 @@ it.each([false, true])(
                 typeof SpacesModule
             >[6],
             {} as ConstructorParameters<typeof SpacesModule>[7],
+            {} as ConstructorParameters<typeof SpacesModule>[8],
+            { get: async () => ({ value: null }) } as unknown as ConstructorParameters<
+                typeof SpacesModule
+            >[9],
         );
         try {
             await writeOwnerState(database.context, { ownerUserId: "standalone" });

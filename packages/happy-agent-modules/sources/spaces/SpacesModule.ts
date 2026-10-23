@@ -9,7 +9,6 @@ import {
     type AgentSystemRef,
     type AnyAgentTool,
 } from "@slopus/happy-agent-base";
-import { messageModeSchema } from "@slopus/happy-agent-client";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import {
@@ -25,13 +24,13 @@ import {
 import { BotsModule, type BotRecord } from "../bots/index.js";
 import {
     ArtifactsModule,
+    formatSidebar,
     parseSidebar,
     sidebarNodes,
-    escapeSidebarText,
     SidebarValidationError,
     type ArtifactAuthor,
-    type UpdateArtifactInput,
     type SidebarNode,
+    type UpdateArtifactInput,
 } from "../artifacts/index.js";
 import { ConfigModule } from "../config/index.js";
 import { DurableFunctionsModule } from "../durableFunctions/index.js";
@@ -40,6 +39,8 @@ import { HistoryModule } from "../history/index.js";
 import { SubtasksModule } from "../subtasks/index.js";
 import { SurfacesModule } from "../surfaces/index.js";
 import { TasksModule, type TaskRecord } from "../tasks/index.js";
+import { TeamModule } from "../team/index.js";
+import { UserSettingsModule } from "../userSettings/index.js";
 import { AGENT_MESSAGE_ORIGIN_METADATA, isUserOriginMetadata } from "../impl/messageOrigin.js";
 
 import {
@@ -47,6 +48,7 @@ import {
     spaceOwnerIdSchema,
     SpaceConflictError,
     SpaceNotFoundError,
+    SpaceStorageError,
     SpaceInputError,
     type SpaceBatch,
     type SpaceDescription,
@@ -69,7 +71,10 @@ import {
 } from "./impl/applySpaceChanges.js";
 import { composeSpaceBatchNote } from "./impl/composeSpaceBatchNote.js";
 import { formatPrioritizingInstructions } from "./impl/formatPrioritizingInstructions.js";
-import { selectPrioritizingRoute } from "./impl/selectPrioritizingRoute.js";
+import {
+    PRIORITIZING_DEFAULT_MODEL_SETTING,
+    selectPrioritizingRoute,
+} from "./impl/selectPrioritizingRoute.js";
 import { spaceContentKey } from "./impl/spaceRefKey.js";
 import {
     deletePendingChanges,
@@ -102,15 +107,27 @@ import {
 import { requestSpacePlacementTool } from "./tools/request_space_placement.js";
 import { prioritizingTools } from "./tools/prioritizingTools.js";
 import {
-    changedSidebarRefs,
     insertSidebarSpace,
-    removeSidebarSpace,
+    isSidebarHeading,
+    migrateLegacySidebar,
+    removeSidebarNode,
     seedSidebar,
+    shownSidebarRows,
+    SIDEBAR_VISIBLE_BUDGET,
     SidebarConflictError,
+    type ClassicSidebar,
+    sidebarKey,
+    sidebarEdits,
+    sidebarPlacement,
 } from "./impl/sidebarLayout.js";
 
-/** Without a focus change or a message for this long, the person counts as idle, which is calm. */
-export const SPACE_IDLE_MS = 2 * 60_000;
+/**
+ * Without an attention report or a message for this long, the person counts as idle, which is
+ * calm. Reading a reply or skimming the sidebar between clicks easily takes two minutes, so a
+ * shorter wait would still move rows while the person looks; five minutes untouched means they
+ * stepped away, and a tidy still lands several times an hour.
+ */
+export const SPACE_IDLE_MS = 5 * 60_000;
 /**
  * A client that said the person is mid-interaction and then went silent is not trusted forever;
  * after this long without a word the hold lapses and idle rules apply again.
@@ -121,8 +138,10 @@ const CALM_CHECK_INTERVAL_MS = 15_000;
 const BRIEF_FUNCTION = "spaces.briefPrioritizing";
 /** The opening task of a new Prioritizing; work seeded before it existed waits for it. */
 const PRIORITIZING_OPENING =
-    "Keep this person's sidebar artifact tidy from now on. Read it with list_sidebar and get_sidebar_styles. Give rows icons and use edit_sidebar to place pending work into authored happy-section elements. Preserve manual placement and recent work.";
+    "Keep this person's sidebar tidy from now on. It was just made to mirror the sidebar they already know, so change nothing in it now: read it with list_sidebar and give rows and sessions icons. From your next notice on, read the conversations with read_row_conversation, then use edit_sidebar to order rows within the visible budget, under titled happy-section headings for subjects or happy-separator rules where only a visual break helps. Keep sessions hidden unless there is a strong reason to show one. Leave new work that has no first message alone. Preserve manual placement and recent work.";
 const MAX_BRIEF_TEXT = 2_000;
+/** The seed's default sections, which only the person may remove or rename. */
+const DEFAULT_SECTION_IDS = ["bots", "tasks"];
 /** Work active this recently is never folded or hidden by Prioritizing. */
 export const SPACE_RECENT_WORK_MS = 2 * 60 * 60_000;
 
@@ -138,8 +157,8 @@ const briefArgumentsSchema = Type.Object(
 /**
  * One flat sidebar per person, kept tidy by Prioritizing, a subtask of Happy.
  *
- * A space is one row: Happy, or an item wrapping a task, bot, or Surface. Sections are flat
- * labels. New work is a stem cell: a fresh unnamed task wrapped in a row that waits under Happy
+ * A space is one row: Happy, or an item wrapping a task, bot, or Surface. Separators are
+ * untitled visual dividers. New work is a stem cell: a fresh unnamed task wrapped in a row that waits under Happy
  * until Prioritizing places it.
  *
  * Every organisation write goes through Prioritizing's tools, except the person's own explicit
@@ -157,6 +176,8 @@ export class SpacesModule implements AgentModule {
     readonly #events: EventsModule;
     readonly #history: HistoryModule;
     readonly #subtasks: SubtasksModule;
+    readonly #team: TeamModule;
+    readonly #userSettings: UserSettingsModule;
     readonly #surfaces: SurfacesModule;
     readonly #tasks: TasksModule;
     readonly #durableFunctions: DurableFunctionsModule;
@@ -167,12 +188,10 @@ export class SpacesModule implements AgentModule {
     readonly #interactingSince = new Map<SpaceOwnerId, number>();
     /** People whose client signalled calm while Prioritizing was still deciding. */
     readonly #calmSignalled = new Set<SpaceOwnerId>();
-    readonly #sidebarObservations = new Map<
-        SpaceOwnerId,
-        NonNullable<SpaceOwnerState["sidebarObservations"]>
-    >();
     /** Prioritizing agents with a turn in progress; their batch waits until they finish. */
     readonly #busyPrioritizing = new Set<string>();
+    /** Prioritizing agents being made right now, which are not sessions to brief about. */
+    readonly #creatingPrioritizing = new Set<string>();
     readonly #unsubscribe: (() => void)[] = [];
     #agents: AgentSystemRef | undefined;
     #lifetime: RootContext | undefined;
@@ -188,6 +207,8 @@ export class SpacesModule implements AgentModule {
         events: EventsModule,
         durableFunctions: DurableFunctionsModule,
         subtasks: SubtasksModule,
+        team: TeamModule,
+        userSettings: UserSettingsModule,
         artifacts?: ArtifactsModule,
     ) {
         this.#config = config;
@@ -198,6 +219,8 @@ export class SpacesModule implements AgentModule {
         this.#events = events;
         this.#durableFunctions = durableFunctions;
         this.#subtasks = subtasks;
+        this.#team = team;
+        this.#userSettings = userSettings;
         this.#artifacts = artifacts;
         artifacts?.bindSpaces(this);
         // Telling Prioritizing about new work commits with the work; the message is delivered
@@ -290,6 +313,26 @@ export class SpacesModule implements AgentModule {
                 ctx.log.warn("The sidebar batch could not be applied.", {}, error);
             });
         },
+        // Sessions under a person's rows are Prioritizing's to give icons and to show or hide.
+        agentCreatedTransact: async (ctx, _scope, agent) => {
+            if (
+                this.#creatingPrioritizing.has(agent.id) ||
+                agent.metadata?.["subtaskConversation"] === true
+            )
+                return;
+            const title = agent.metadata?.["title"];
+            for (const owner of await this.#sessionOwners(ctx, agent.id))
+                await this.#queueSidebarBrief(
+                    ctx,
+                    owner,
+                    `New session ${agent.id}${typeof title === "string" ? ` "${title}"` : ""} started under one of the person's rows. Give it an icon with set_space_icon, and show it under its parent with edit_sidebar if the person should see it.`,
+                );
+        },
+        metadataChangedTransact: async (ctx, _scope, change) => {
+            if (typeof change.update["archivedAt"] !== "number") return;
+            for (const owner of await this.#sessionOwners(ctx, change.agentId))
+                await this.#sidebarLifecycle(ctx, owner, { remove: change.agentId });
+        },
         messageAcceptedTransact: async (ctx, scope, accepted) => {
             if (accepted.message.role !== "user" || !isUserOriginMetadata(accepted.metadata)) {
                 return;
@@ -309,7 +352,14 @@ export class SpacesModule implements AgentModule {
                     .trim();
                 if (text.length === 0) continue;
                 await updateSpaceBriefedAt(ctx, row.id, now);
-                await this.#brief(ctx, row.ownerUserId, newWorkBrief(row, text));
+                const placedByPerson = (
+                    await this.#ownerState(ctx, row.ownerUserId)
+                ).sidebarManualIds?.includes(row.id);
+                await this.#brief(
+                    ctx,
+                    row.ownerUserId,
+                    newWorkBrief(row, text, placedByPerson === true),
+                );
             }
         },
     };
@@ -360,7 +410,38 @@ export class SpacesModule implements AgentModule {
             await this.#ensureOwner(txCtx, ownerUserId);
             await this.#ensurePrioritizing(txCtx, ownerUserId);
             const artifactId = await this.#ensureSidebar(txCtx, ownerUserId);
+            await this.#migrateSidebar(txCtx, ownerUserId, artifactId);
             return await this.#readSidebar(txCtx, ownerUserId, artifactId);
+        });
+    }
+
+    /** A document in the first grammar is rewritten once, as a version of its own. */
+    async #migrateSidebar(ctx: Context, ownerUserId: SpaceOwnerId, artifactId: string) {
+        const current = await this.#readSidebar(ctx, ownerUserId, artifactId);
+        const html = migrateLegacySidebar(current.html);
+        if (html === undefined) return;
+        const known = new Set(current.spaces.map((space) => space.id));
+        const root = parseSidebar(html);
+        const kept = root.children.filter(
+            (node) => node.tag !== "happy-space" || known.has(node.attrs["id"]!),
+        );
+        root.children.splice(0, root.children.length, ...kept);
+        await this.#writeSidebar(
+            ctx,
+            artifactId,
+            formatSidebar(root),
+            current.version,
+            createId(),
+            ownerAuthor(ownerUserId),
+        );
+        const state = await this.#ownerState(ctx, ownerUserId);
+        await writeOwnerState(ctx, {
+            ...state,
+            sidebarPending: [],
+            sidebarBrief: [
+                ...(state.sidebarBrief ?? []),
+                "The sidebar was rewritten in the current grammar. Decide which sessions to show under their rows.",
+            ].slice(-32),
         });
     }
 
@@ -377,11 +458,19 @@ export class SpacesModule implements AgentModule {
             "index.html",
             { maxBytes: 128 * 1024 },
         );
+        const state = await this.#ownerState(ctx, ownerUserId);
         return {
             artifactId,
             version: file.version,
             html: new TextDecoder().decode(file.bytes),
             spaces: await querySpaces(ctx, ownerUserId),
+            agentIcons: Object.fromEntries(
+                Object.entries(state.agentIcons ?? {}).map(([agentId, slug]) => [
+                    agentId,
+                    { type: "library" as const, slug },
+                ]),
+            ),
+            ...(state.sidebarSeed === true ? { seed: true as const } : {}),
         };
     }
 
@@ -394,11 +483,27 @@ export class SpacesModule implements AgentModule {
             );
         const artifacts = this.#requireArtifacts();
         const artifactId = createId();
-        const html = seedSidebar({
-            spaces: sortForDisplay(await querySpaces(ctx, ownerUserId)),
-            sections: await querySections(ctx, ownerUserId),
+        const classic = await this.#classicSidebar(ctx, ownerUserId);
+        const html = seedSidebar(classic);
+        // Rows the person already knows are placed, not new: the two-hour rule protects them from
+        // the start. Untouched new work still gets its first placement after its first message.
+        const untouched = new Set(
+            (await querySpaces(ctx, ownerUserId))
+                .filter((space) => isUntouchedStemCell(space))
+                .map((space) => space.id),
+        );
+        const mirrored = [...classic.surfaces, ...classic.bots, ...classic.tasks].filter(
+            (id) => !untouched.has(id),
+        );
+        // The seed is the person's to adjust first; Prioritizing changes nothing until its next run.
+        await writeOwnerState(ctx, {
+            ...state,
+            sidebarArtifactId: artifactId,
+            sidebarSeed: true,
+            sidebarPlacedIds: [...new Set([...(state.sidebarPlacedIds ?? []), ...mirrored])].slice(
+                -1000,
+            ),
         });
-        await writeOwnerState(ctx, { ...state, sidebarArtifactId: artifactId });
         const happy = (await querySpaces(ctx, ownerUserId)).find((space) => space.role === "happy")
             ?.contents[0];
         const actor = (await artifacts.actorFor(ctx, state.prioritizingAgentId)).author;
@@ -425,6 +530,44 @@ export class SpacesModule implements AgentModule {
         return artifactId;
     }
 
+    /**
+     * The person's classic sidebar as the daemon knows it: joined Surfaces in their member order,
+     * every bot in catalog order with Happy among them, and joined tasks in membership order.
+     * Sessions under them are not part of it: the sidebar shows rows, never sessions.
+     */
+    async #classicSidebar(ctx: Context, ownerUserId: SpaceOwnerId): Promise<ClassicSidebar> {
+        const rows = await querySpaces(ctx, ownerUserId);
+        const rowFor = (match: (content: SpaceRef) => boolean) =>
+            rows.find((row) => row.contents[0] !== undefined && match(row.contents[0]));
+        const userId = ownerUserId === SPACE_STANDALONE_OWNER ? null : ownerUserId;
+        const surfaces = (await this.#surfaces.list(ctx))
+            .flatMap((surface) => {
+                const member = surface.members.find((candidate) => candidate.userId === userId);
+                const row = rowFor((c) => c.kind === "surface" && c.surfaceId === surface.id);
+                return member === undefined || row === undefined
+                    ? []
+                    : [{ id: row.id, orderKey: member.orderKey }];
+            })
+            .sort((a, b) => (a.orderKey < b.orderKey ? -1 : a.orderKey > b.orderKey ? 1 : 0))
+            .map(({ id }) => id);
+        let happy: string | undefined;
+        const bots: string[] = [];
+        for (const bot of await this.#bots.list(ctx)) {
+            const row = rowFor((c) => c.kind === "bot" && c.botId === bot.id);
+            if (row === undefined || bot.status !== "active") continue;
+            if (row.role === "happy") happy = row.id;
+            else bots.push(row.id);
+        }
+        const tasks: string[] = [];
+        for (const { task } of await this.#tasks.listForMember(ctx, ownerUserId)) {
+            const row = rowFor((c) => c.kind === "task" && c.taskId === task.id);
+            if (row === undefined || task.status !== "active" || task.agentId === undefined)
+                continue;
+            tasks.push(row.id);
+        }
+        return { happy, surfaces, bots, tasks };
+    }
+
     #requireArtifacts(): ArtifactsModule {
         if (this.#artifacts === undefined)
             throw new SpaceInputError("Sidebar artifacts are unavailable.");
@@ -442,7 +585,7 @@ export class SpacesModule implements AgentModule {
         if (owner === undefined)
             throw new SidebarValidationError("Sidebar artifacts are created by Spaces.");
         const rows = await querySpaces(ctx, owner.ownerUserId);
-        parseSidebar(html, new Set(rows.map((space) => space.id)));
+        await this.#checkSidebarIds(ctx, parseSidebar(html), rows);
         if (author.kind === "user") {
             const userId = author.userId ?? SPACE_STANDALONE_OWNER;
             if (userId !== owner.ownerUserId) throw new SpaceNotFoundError();
@@ -454,30 +597,116 @@ export class SpacesModule implements AgentModule {
             );
         const artifact = await this.#requireArtifacts().get(ctx, artifactId);
         if (artifact === undefined) return;
-        const current = await this.#readSidebar(ctx, owner.ownerUserId, artifactId);
-        const changed = new Set(changedSidebarRefs(current.html, html));
-        for (const row of rows) {
-            if (!changed.has(row.id)) continue;
-            if (row.role === "happy")
-                throw new SidebarValidationError("Prioritizing cannot move or fold Happy.");
-            if (row.manualAt !== undefined || owner.sidebarManualIds?.includes(row.id))
+        if (owner.sidebarSeed === true)
+            throw new SidebarValidationError(
+                "The sidebar still mirrors the person's classic sidebar. Change nothing until your next notice.",
+            );
+        const read = (await this.#readSidebar(ctx, owner.ownerUserId, artifactId)).html;
+        const current = migrateLegacySidebar(read) ?? read;
+        const { moved, carried, folded } = sidebarEdits(current, html);
+        for (const key of moved) {
+            if (key === "happy-search" || key === "happy-create")
+                throw new SidebarValidationError("Search and Create are the person's to move.");
+            if (owner.sidebarManualIds?.includes(key))
+                throw new SidebarValidationError("Keep the person's manual placement.");
+        }
+        for (const key of folded)
+            if (owner.sidebarManualFolds?.includes(key))
+                throw new SidebarValidationError("Keep the person's own folds.");
+        const labels = new Map(
+            parseSidebar(current).children.map((node) => [sidebarKey(node), node.attrs["label"]]),
+        );
+        const kept = new Map(
+            parseSidebar(html).children.map((node) => [sidebarKey(node), node.attrs["label"]]),
+        );
+        for (const id of DEFAULT_SECTION_IDS)
+            if (labels.get(id) !== undefined && kept.get(id) !== labels.get(id))
                 throw new SidebarValidationError(
-                    "Keep the person's manual placement and disclosure.",
+                    "Keep the Bots and Tasks sections and their names; only the person reorganizes them.",
                 );
-            const firstPlacement =
-                row.placement === "pending" && !owner.sidebarPlacedIds?.includes(row.id);
-            if (!firstPlacement && (await this.#recentWork(ctx, row)) !== undefined)
+        const sections = parseSidebar(html).children.filter(
+            (node) => node.attrs["label"] !== undefined,
+        );
+        const name = (node: SidebarNode) =>
+            node.attrs["label"]!.trim().replace(/\s+/g, " ").toLowerCase();
+        for (const node of sections) {
+            const label = node.attrs["label"]!;
+            if (labels.get(sidebarKey(node)) === label) continue;
+            if (
+                labels.get(sidebarKey(node)) !== undefined &&
+                owner.sidebarManualIds?.includes(sidebarKey(node))
+            )
+                throw new SidebarValidationError("Keep the person's name for this section.");
+            if (agedLabel(label))
                 throw new SidebarValidationError(
-                    "Leave work active in the last two hours where it is.",
+                    `Section "${label}" sorts by age or whether work is finished; name a subject instead.`,
+                );
+            const twin = sections.find((other) => other !== node && name(other) === name(node));
+            if (twin !== undefined)
+                throw new SidebarValidationError(
+                    `Section ${sidebarKey(twin)} is already called "${twin.attrs["label"]!.trim()}". Move rows there instead.`,
                 );
         }
-        const happy = rows.find((row) => row.role === "happy");
-        if (happy !== undefined) {
-            const refs = sidebarNodes(parseSidebar(html)).filter(
-                (node) => node.tag === "happy-space",
-            );
-            if (refs[0]?.attrs["ref"] !== happy.id)
-                throw new SidebarValidationError("Happy must stay first.");
+        for (const row of rows) {
+            const wasMoved = moved.includes(row.id);
+            // A row inside a moved section moves on screen too.
+            const travelled = wasMoved || carried.includes(row.id);
+            const before = sidebarPlacement(current, row.id).visibility;
+            const tucked =
+                before === "shown" && sidebarPlacement(html, row.id).visibility !== "shown";
+            if (!travelled && !tucked && !folded.includes(row.id)) continue;
+            if (isUntouchedStemCell(row))
+                throw new SidebarValidationError(
+                    "Leave new work alone until the person sends its first message.",
+                );
+            if (row.role === "happy" && (travelled || tucked))
+                throw new SidebarValidationError("Prioritizing cannot move or hide Happy.");
+            if (wasMoved && row.manualAt !== undefined)
+                throw new SidebarValidationError("Keep the person's manual placement.");
+            const firstPlacement =
+                row.placement === "pending" && !owner.sidebarPlacedIds?.includes(row.id);
+            if (
+                (travelled || tucked) &&
+                !firstPlacement &&
+                (await this.#recentWork(ctx, row)) !== undefined
+            )
+                throw new SidebarValidationError(
+                    "Leave work active in the last two hours where it is, and shown.",
+                );
+        }
+    }
+
+    /**
+     * A top-level happy-space names one of the person's rows; a nested one names a session whose
+     * parent is the conversation it sits under.
+     */
+    async #checkSidebarIds(
+        ctx: Context,
+        root: SidebarNode,
+        rows: readonly SpaceRecord[],
+    ): Promise<void> {
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        const agentOf = (node: SidebarNode): string | undefined => {
+            if (node.parent !== root) return node.attrs["id"];
+            const content = byId.get(node.attrs["id"]!)?.contents[0];
+            return content === undefined || content.kind === "surface"
+                ? undefined
+                : content.agentId;
+        };
+        for (const node of sidebarNodes(root)) {
+            if (node.tag !== "happy-space") continue;
+            const id = node.attrs["id"]!;
+            if (node.parent === root) {
+                if (!byId.has(id))
+                    throw new SidebarValidationError(`Unknown space ${id}.`, node.start);
+                continue;
+            }
+            const parentAgent = agentOf(node.parent!);
+            if (parentAgent === undefined || (await this.#parentOf(ctx, id)) !== parentAgent)
+                throw new SidebarValidationError(
+                    `${id} is not a session of the happy-space it is nested in.`,
+                    node.start,
+                );
         }
     }
 
@@ -526,12 +755,12 @@ export class SpacesModule implements AgentModule {
                 author,
             );
             const state = await this.#ownerState(txCtx, ownerUserId);
-            const changed = changedSidebarRefs(latest.html, input.html);
+            const edits = sidebarEdits(latest.html, input.html);
+            const changed = [...edits.moved, ...edits.folded];
+            delete state.sidebarSeed;
             await writeOwnerState(txCtx, {
                 ...state,
-                sidebarManualIds: [
-                    ...new Set([...(state.sidebarManualIds ?? []), ...changed]),
-                ].slice(-1000),
+                ...manualAuthority(state, edits, latest.html, input.html),
                 sidebarPending: [],
                 sidebarBrief: [
                     ...(state.sidebarBrief ?? []),
@@ -547,12 +776,13 @@ export class SpacesModule implements AgentModule {
         const state = await queryOwnerBySidebarArtifact(ctx, artifactId);
         if (state === undefined) throw new SpaceNotFoundError();
         const current = await this.#readSidebar(ctx, state.ownerUserId, artifactId);
-        const changed = changedSidebarRefs(current.html, html);
+        const previous = migrateLegacySidebar(current.html) ?? current.html;
+        const edits = sidebarEdits(previous, html);
+        const changed = [...edits.moved, ...edits.folded];
+        const { sidebarSeed: _seed, ...rest } = state;
         await writeOwnerState(ctx, {
-            ...state,
-            sidebarManualIds: [...new Set([...(state.sidebarManualIds ?? []), ...changed])].slice(
-                -1000,
-            ),
+            ...rest,
+            ...manualAuthority(state, edits, previous, html),
             sidebarPending: [],
             sidebarBrief: [
                 ...(state.sidebarBrief ?? []),
@@ -591,20 +821,132 @@ export class SpacesModule implements AgentModule {
         const current = await this.sidebar(ctx, ownerUserId);
         const state = await this.#ownerState(ctx, ownerUserId);
         const pending = state.sidebarPending?.at(-1);
-        return {
-            ...current,
-            spaces: await Promise.all(
-                current.spaces.map(async (space) => ({
-                    ...space,
-                    ...(await this.describe(ctx, space)),
-                })),
-            ),
-            ...(pending === undefined
-                ? {}
-                : { html: pending.html, version: pending.baseVersion + 1 }),
-            observations: this.#sidebarObservations.get(ownerUserId),
-            manualSpaceIds: state.sidebarManualIds ?? [],
+        const now = Date.now();
+        const age = (at: number | undefined) =>
+            at === undefined ? undefined : `${formatAge(now - at)} ago`;
+        const spaces = [];
+        const sessions: {
+            id: string;
+            parentId: string;
+            title: string | undefined;
+            working: boolean;
+            lastActive: string | undefined;
+            icon: string | undefined;
+        }[] = [];
+        const visit = async (parentId: string, depth: number): Promise<void> => {
+            if (depth > 3) return;
+            for (const id of await this.#requireAgents().childOf(ctx, parentId)) {
+                if (sessions.length >= 200 || id === state.prioritizingAgentId) continue;
+                const metadata = (await this.#requireAgents().config(ctx, id))?.metadata;
+                if (typeof metadata?.["archivedAt"] === "number") continue;
+                sessions.push({
+                    id,
+                    parentId,
+                    title: typeof metadata?.["title"] === "string" ? metadata["title"] : undefined,
+                    working: this.#events.activeRunId(id) !== undefined,
+                    lastActive: age(
+                        await this.#history.latestUserOrFinalAssistantTextMessageAt(ctx, id),
+                    ),
+                    icon: state.agentIcons?.[id],
+                });
+                await visit(id, depth + 1);
+            }
         };
+        for (const space of current.spaces) {
+            const description = await this.describe(ctx, space);
+            const placedByPerson =
+                space.manualAt !== undefined || state.sidebarManualIds?.includes(space.id) === true;
+            spaces.push({
+                id: space.id,
+                kind: space.role === "happy" ? "happy" : (description.target?.kind ?? "empty"),
+                title: description.named ? description.title : undefined,
+                icon: space.icon?.type === "library" ? space.icon.slug : space.icon?.type,
+                working: description.working,
+                lastActive: age(description.lastActivityAt),
+                ...(isUntouchedStemCell(space)
+                    ? { newWork: "waiting for the person's first message; leave it alone" }
+                    : space.placement === "pending" &&
+                        !placedByPerson &&
+                        state.sidebarPlacedIds?.includes(space.id) !== true
+                      ? { newWork: "not placed yet" }
+                      : {}),
+                ...(placedByPerson ? { placedByPerson: true } : {}),
+            });
+            const content = space.contents[0];
+            if (content !== undefined && content.kind !== "surface" && !isUntouchedStemCell(space))
+                await visit(content.agentId, 1);
+        }
+        const html = pending === undefined ? current.html : pending.html;
+        // Happy and new work waiting for its first message sit outside the budget.
+        const exempt = new Set(
+            current.spaces
+                .filter((space) => space.role === "happy" || isUntouchedStemCell(space))
+                .map((space) => space.id),
+        );
+        return {
+            artifactId: current.artifactId,
+            version: pending === undefined ? current.version : pending.baseVersion + 1,
+            html,
+            spaces,
+            sessions,
+            visibleRows: {
+                shown: shownSidebarRows(html).filter((id) => !exempt.has(id)).length,
+                budget: SIDEBAR_VISIBLE_BUDGET,
+            },
+            manualIds: state.sidebarManualIds ?? [],
+        };
+    }
+
+    /**
+     * What the person and the agent said in a row's conversation, or in a session under one of
+     * the person's rows, newest first. Tool calls, their output and reasoning are left out, and the
+     * answer is capped so reading a long thread stays cheap.
+     */
+    async rowConversation(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        id: string,
+        limit: number,
+    ): Promise<string> {
+        let agentId = id;
+        if ((await querySpace(ctx, id)) !== undefined) {
+            const content = (await this.#ownedSpace(ctx, ownerUserId, id)).contents[0];
+            if (content === undefined) return "This row has no conversation.";
+            if (content.kind === "surface")
+                return "This row is a shared Surface; it has no conversation of its own.";
+            agentId = content.agentId;
+        } else if (!(await this.#sessionOwners(ctx, id)).includes(ownerUserId)) {
+            throw new SpaceNotFoundError();
+        }
+        const page = await this.#history.read(ctx, agentId, {
+            from: "end",
+            roles: ["user", "assistant", "agent"],
+            limit: Math.min(limit * 8, 500),
+        });
+        const now = Date.now();
+        const said: string[] = [];
+        let size = 0;
+        for (const { message } of [...page.messages].reverse()) {
+            if (said.length >= limit) break;
+            if (message.hideFromUser === true) continue;
+            const text = message.blocks
+                .flatMap((block) => (block.type === "text" ? [block.text.trim()] : []))
+                .filter((part) => part.length > 0)
+                .join("\n\n");
+            if (text.length === 0) continue;
+            const who =
+                message.role === "user"
+                    ? "Person"
+                    : message.role === "agent"
+                      ? "Another agent"
+                      : "Agent";
+            const when = message.at === undefined ? "" : `, ${formatAge(now - message.at)} ago`;
+            const line = `${who}${when}: ${text.length > 2_000 ? `${text.slice(0, 2_000)}…` : text}`;
+            if (size + line.length > 16_000) break;
+            said.push(line);
+            size += line.length;
+        }
+        return said.length === 0 ? "Nothing has been said here yet." : said.join("\n\n");
     }
 
     async editSidebar(
@@ -685,29 +1027,6 @@ export class SpacesModule implements AgentModule {
         return this.#artifacts?.sidebarTools(agentId) ?? [];
     }
 
-    async observeSidebar(
-        ctx: Context,
-        ownerUserId: SpaceOwnerId,
-        input: { visibleSpaceIds: string[]; collapsed?: string[] },
-    ): Promise<void> {
-        await ctx.inTx(async (txCtx) => {
-            const rows = new Set((await querySpaces(txCtx, ownerUserId)).map((space) => space.id));
-            if (input.visibleSpaceIds.some((id) => !rows.has(id))) throw new SpaceNotFoundError();
-            if (
-                JSON.stringify(this.#sidebarObservations.get(ownerUserId)) === JSON.stringify(input)
-            )
-                return;
-            afterCommit(txCtx, () => {
-                this.#sidebarObservations.set(ownerUserId, structuredClone(input));
-            });
-            await this.#queueSidebarBrief(
-                txCtx,
-                ownerUserId,
-                "The visible spaces or folded nodes changed. Read the latest observations with list_sidebar.",
-            );
-        });
-    }
-
     async #queueSidebarBrief(ctx: Context, ownerUserId: SpaceOwnerId, text: string): Promise<void> {
         const state = await this.#ownerState(ctx, ownerUserId);
         if (state.sidebarArtifactId === undefined) return;
@@ -736,28 +1055,46 @@ export class SpacesModule implements AgentModule {
     ): Promise<void> {
         const state = await this.#ownerState(ctx, ownerUserId);
         if (state.sidebarArtifactId === undefined) return;
+        await this.#migrateSidebar(ctx, ownerUserId, state.sidebarArtifactId);
         const current = await this.#readSidebar(ctx, ownerUserId, state.sidebarArtifactId);
-        const happyId = current.spaces.find((space) => space.role === "happy")?.id;
         let html =
             change.remove === undefined
                 ? current.html
-                : removeSidebarSpace(current.html, change.remove);
-        if (change.add !== undefined)
-            html = insertSidebarSpace(html, change.add, happyId, change.sectionId);
+                : removeSidebarNode(current.html, change.remove);
+        if (change.add !== undefined) {
+            const happyId = (await querySpaces(ctx, ownerUserId)).find(
+                (space) => space.role === "happy",
+            )?.id;
+            html = insertSidebarSpace(html, change.add, {
+                ...(change.sectionId === undefined ? {} : { headingId: change.sectionId }),
+                ...(happyId === undefined ? {} : { happyId }),
+            });
+        }
         if (html === current.html) return;
-        await this.#writeSidebar(ctx, state.sidebarArtifactId, html, current.version, createId(), {
-            kind: "user",
-            ...(ownerUserId === SPACE_STANDALONE_OWNER ? {} : { userId: ownerUserId }),
-        });
+        await this.#writeSidebar(
+            ctx,
+            state.sidebarArtifactId,
+            html,
+            current.version,
+            createId(),
+            ownerAuthor(ownerUserId),
+        );
+        const added = change.add === undefined ? undefined : await querySpace(ctx, change.add);
+        const fresh = await this.#ownerState(ctx, ownerUserId);
         await writeOwnerState(ctx, {
-            ...state,
+            ...fresh,
             sidebarPending: [],
-            sidebarBrief: [
-                ...(state.sidebarBrief ?? []),
-                change.add === undefined
-                    ? `Archived or left space ${change.remove} was removed.`
-                    : `New space ${change.add} was inserted${change.sectionId === undefined ? " after Happy" : ` in ${change.sectionId}`}.`,
-            ].slice(-32),
+            // New work is told to Prioritizing with its first message, not when it appears.
+            ...(added !== undefined && isUntouchedStemCell(added)
+                ? {}
+                : {
+                      sidebarBrief: [
+                          ...(fresh.sidebarBrief ?? []),
+                          change.add === undefined
+                              ? `${change.remove} left the sidebar with the sessions under it.`
+                              : `New space ${change.add} was inserted${change.sectionId === undefined ? " below Happy" : ` after ${change.sectionId}`}.`,
+                      ].slice(-32),
+                  }),
         });
     }
 
@@ -855,11 +1192,8 @@ export class SpacesModule implements AgentModule {
                         : await this.sidebar(txCtx, ownerUserId);
                 const authored =
                     sidebar !== undefined &&
-                    sidebarNodes(parseSidebar(sidebar.html)).some(
-                        (node) =>
-                            node.tag === "happy-section" &&
-                            node.attrs["id"] === input.sectionId &&
-                            node.attrs["id"] !== "older",
+                    parseSidebar(sidebar.html).children.some(
+                        (node) => isSidebarHeading(node) && node.attrs["id"] === input.sectionId,
                     );
                 if (legacySectionId === undefined && !authored) {
                     throw new SpaceNotFoundError("The section was not found.");
@@ -1061,8 +1395,8 @@ export class SpacesModule implements AgentModule {
 
     /**
      * The client's view of the person's attention. `interacting` holds every batch back until
-     * the client says otherwise or goes quiet; `calm` — a navigation gesture just completed, or
-     * the person is idle — applies the queued batch now, unless Prioritizing is mid-decision, in
+     * the client says otherwise or goes quiet; `calm` — the person is idle or the app is out of
+     * sight, never a click or a navigation — applies the queued batch now, unless Prioritizing is mid-decision, in
      * which case it applies as soon as Prioritizing finishes. Returns the applied batch, if any.
      */
     async reportAttention(
@@ -1092,72 +1426,6 @@ export class SpacesModule implements AgentModule {
             await this.#ensureOwner(txCtx, ownerUserId);
             await this.#brief(txCtx, ownerUserId, "Tidy the sidebar now.");
         });
-    }
-
-    /** Prioritizing's view: everything it may judge, with IDs to act on. */
-    async prioritizingOverview(ctx: Context, ownerUserId: SpaceOwnerId): Promise<string> {
-        const snapshot = await this.snapshot(ctx, ownerUserId);
-        const pending = await queryPendingChanges(ctx, ownerUserId);
-        const now = Date.now();
-        const describe = async (space: SpaceRecord): Promise<string> => {
-            const description = await this.describe(ctx, space);
-            const facts = [
-                `id ${space.id}`,
-                space.icon === undefined
-                    ? "no icon"
-                    : space.icon.type === "library"
-                      ? `icon ${space.icon.slug}`
-                      : space.icon.type === "stem_cell"
-                        ? "new work, no icon yet"
-                        : "own picture",
-                description.target?.kind ?? "empty",
-                description.working ? "working now" : undefined,
-                description.lastActivityAt === undefined
-                    ? undefined
-                    : `last active ${formatAge(now - description.lastActivityAt)} ago`,
-                description.archived ? "archived" : undefined,
-                space.placement === "pending" ? "not placed yet" : undefined,
-                space.manualAt === undefined ? undefined : "placed by the person",
-            ].filter((fact) => fact !== undefined);
-            return `- ${description.title} (${facts.join(", ")})`;
-        };
-        const items = snapshot.spaces.filter((space) => space.role === "item");
-        const lines: string[] = ["Under Happy:"];
-        for (const space of items.filter(
-            (row) => row.visibility === "shown" && row.sectionId === undefined,
-        )) {
-            lines.push(await describe(space));
-        }
-        for (const section of snapshot.sections) {
-            const extra = [
-                section.visibleCount === undefined
-                    ? undefined
-                    : `shows first ${String(section.visibleCount)}`,
-            ].filter((value) => value !== undefined);
-            lines.push(
-                "",
-                `Section "${section.name}" (id ${section.id}${extra.length === 0 ? "" : `, ${extra.join(", ")}`}):`,
-            );
-            for (const space of items.filter(
-                (row) => row.visibility === "shown" && row.sectionId === section.id,
-            )) {
-                lines.push(await describe(space));
-            }
-        }
-        lines.push("", "Older:");
-        for (const space of items.filter((row) => row.visibility === "folded")) {
-            lines.push(await describe(space));
-        }
-        const hidden = items.filter(
-            (row) => row.visibility === "hidden" && row.contents.length > 0,
-        );
-        lines.push("", `Hidden: ${String(hidden.length)} rows.`);
-        for (const space of hidden.slice(0, 20)) lines.push(await describe(space));
-        if (pending.length > 0) {
-            lines.push("", `Queued for the next calm moment: ${String(pending.length)} changes.`);
-            for (const change of pending) lines.push(`- ${JSON.stringify(change)}`);
-        }
-        return lines.join("\n");
     }
 
     /** Queue one Prioritizing change for the next calm moment. Only Prioritizing calls this. */
@@ -1268,8 +1536,14 @@ export class SpacesModule implements AgentModule {
         slug: SpaceIconSlug,
     ): Promise<string> {
         return await ctx.inTx(async (txCtx) => {
+            const row = await querySpace(txCtx, spaceId);
+            if (row === undefined)
+                return await this.#setSessionIcon(txCtx, ownerUserId, spaceId, slug);
             const space = await this.#ownedSpace(txCtx, ownerUserId, spaceId);
             if (space.role !== "item") throw new SpaceConflictError("Only item rows take icons.");
+            // A stem cell stays one until the person says what they want.
+            if (isUntouchedStemCell(space))
+                return "This is new work with no first message yet; its icon was left alone.";
             if (space.icon?.type === "library" && space.icon.slug === slug) {
                 return `The row already shows ${slug}.`;
             }
@@ -1286,6 +1560,46 @@ export class SpacesModule implements AgentModule {
             ]);
             return `Icon set to ${slug}.`;
         });
+    }
+
+    /** A session under one of the person's rows keeps its icon even when it is not shown. */
+    async #setSessionIcon(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        agentId: string,
+        slug: SpaceIconSlug,
+    ): Promise<string> {
+        const owners = await this.#sessionOwners(ctx, agentId);
+        if (!owners.includes(ownerUserId)) throw new SpaceNotFoundError();
+        const state = await this.#ownerState(ctx, ownerUserId);
+        if (state.agentIcons?.[agentId] === slug) return `The session already shows ${slug}.`;
+        const icons = Object.entries({ ...state.agentIcons, [agentId]: slug }).filter(
+            ([id]) => id !== agentId,
+        );
+        await writeOwnerState(ctx, {
+            ...state,
+            agentIcons: Object.fromEntries([...icons.slice(-999), [agentId, slug]]),
+        });
+        return `Icon set to ${slug}.`;
+    }
+
+    /** An agent's parent, or null for a root or an agent that does not exist. */
+    async #parentOf(ctx: Context, agentId: string): Promise<string | null> {
+        const agents = this.#requireAgents();
+        if ((await agents.config(ctx, agentId)) === undefined) return null;
+        return await agents.parentOf(ctx, agentId);
+    }
+
+    /** The people whose rows hold this session: the owners of the rows of its root conversation. */
+    async #sessionOwners(ctx: Context, agentId: string): Promise<string[]> {
+        let root = agentId;
+        for (let depth = 0; depth < 16; depth++) {
+            const parent = await this.#parentOf(ctx, root);
+            if (parent === null) break;
+            root = parent;
+        }
+        if (root === agentId) return [];
+        return [...new Set((await querySpacesByAgent(ctx, root)).map((row) => row.ownerUserId))];
     }
 
     /**
@@ -1490,63 +1804,73 @@ export class SpacesModule implements AgentModule {
         }
         const final = pending.at(-1);
         if (final === undefined) return undefined;
-        const changed = changedSidebarRefs(current.html, final.html);
-        const before = sidebarNodes(parseSidebar(current.html));
-        const after = sidebarNodes(parseSidebar(final.html));
-        const position = (nodes: SidebarNode[], id: string) => {
-            const node = nodes.find((candidate) => candidate.attrs["ref"] === id);
-            let section = node?.parent;
-            let folded = Object.hasOwn(node?.attrs ?? {}, "collapsed");
-            while (section !== undefined && section.tag !== "happy-section") {
-                folded ||= Object.hasOwn(section.attrs, "collapsed");
-                section = section.parent;
-            }
-            folded ||= Object.hasOwn(section?.attrs ?? {}, "collapsed");
-            return {
-                sectionId: section?.attrs["id"] ?? null,
-                sectionName: section?.attrs["label"] ?? null,
-                visibility:
-                    node === undefined
-                        ? ("hidden" as const)
-                        : folded
-                          ? ("folded" as const)
-                          : ("shown" as const),
-                index: Math.max(
-                    0,
-                    nodes
-                        .filter(
-                            (candidate) =>
-                                candidate.tag === "happy-space" &&
-                                candidate.parent === node?.parent,
-                        )
-                        .findIndex((candidate) => candidate === node),
-                ),
-                placement: "settled" as const,
-            };
-        };
+        const base = migrateLegacySidebar(current.html) ?? current.html;
+        const edits = sidebarEdits(base, final.html);
+        const changed = [...new Set([...edits.moved, ...edits.folded])];
         const changes: SpaceBatch["changes"] = [];
-        for (const id of changed) {
-            const row = current.spaces.find((space) => space.id === id);
-            if (row === undefined || row.role === "happy") continue;
-            const description = await this.describe(ctx, row);
+        for (const key of changed) {
+            // Opening a row moves nothing; only what moved or appeared or vanished is described.
+            if (
+                !edits.moved.includes(key) &&
+                sidebarPlacement(base, key).visibility ===
+                    sidebarPlacement(final.html, key).visibility
+            )
+                continue;
+            const row = current.spaces.find((space) => space.id === key);
+            if (row?.role === "happy") continue;
+            let title: string | undefined;
+            if (row !== undefined) {
+                const description = await this.describe(ctx, row);
+                title = description.named ? description.title : "a new chat";
+            } else {
+                // A session under a row; separators, Search, and Create are not work.
+                const metadata = (await this.#requireAgents().config(ctx, key))?.metadata;
+                if (metadata === undefined) continue;
+                title = typeof metadata["title"] === "string" ? metadata["title"] : "a session";
+            }
             changes.push({
-                spaceId: id,
-                title: description.named ? description.title : "a new chat",
-                from: { ...position(before, id), placement: row.placement },
-                to: position(after, id),
+                spaceId: key,
+                title,
+                from: { ...sidebarPlacement(base, key), placement: row?.placement ?? "settled" },
+                to: { ...sidebarPlacement(final.html, key), placement: "settled" },
             });
         }
-        const sections: SpaceBatch["sections"] = after
-            .filter(
-                (node) =>
-                    node.tag === "happy-section" &&
-                    !before.some((old) => old.attrs["id"] === node.attrs["id"]),
-            )
-            .map((node) => ({
-                sectionId: node.attrs["id"]!,
-                name: node.attrs["label"]!,
-                change: "created" as const,
-            }));
+        const headings = (html: string) =>
+            new Map(
+                parseSidebar(html)
+                    .children.filter(isSidebarHeading)
+                    .map((node) => [sidebarKey(node), node]),
+            );
+        const earlier = headings(base);
+        const later = headings(final.html);
+        // A section that moved carried its rows; the note names the section, not each row.
+        const movedSections = edits.moved.flatMap((key) => {
+            const label = later.get(key)?.attrs["label"];
+            return label === undefined || !earlier.has(key) ? [] : [label];
+        });
+        const sections: SpaceBatch["sections"] = [];
+        for (const [id, node] of later) {
+            const label = node.attrs["label"];
+            if (label === undefined) continue;
+            const previous = earlier.get(id);
+            if (previous === undefined)
+                sections.push({ sectionId: id, name: label, change: "created" });
+            else if (previous.attrs["label"] !== label)
+                sections.push({ sectionId: id, name: label, change: "updated" });
+        }
+        for (const [id, node] of earlier)
+            if (node.attrs["label"] !== undefined && !later.has(id))
+                sections.push({ sectionId: id, name: node.attrs["label"], change: "removed" });
+        // Separators have no title, so new ones are counted rather than named.
+        const separators = [...later].filter(
+            ([id, node]) => node.tag === "happy-separator" && !earlier.has(id),
+        );
+        if (separators.length > 0)
+            sections.push({
+                sectionId: separators[0]![0],
+                name: separators.length === 1 ? "a separator" : `${separators.length} separators`,
+                change: "created",
+            });
         for (const proposal of pending)
             await this.#writeSidebar(
                 ctx,
@@ -1579,9 +1903,9 @@ export class SpacesModule implements AgentModule {
         )
             return undefined;
         const note =
-            changes.length === 0 && sections.length === 0
+            changes.length === 0 && sections.length === 0 && movedSections.length === 0
                 ? "Updated the sidebar."
-                : composeSpaceBatchNote(changes, sections);
+                : composeSpaceBatchNote(changes, sections, movedSections);
         const now = Date.now();
         const happyAgentId = await this.#happyAgentId(ctx, ownerUserId);
         const noteMessageId = createId();
@@ -1680,7 +2004,12 @@ export class SpacesModule implements AgentModule {
         }
         for (const owner of owners) {
             if (!Value.Check(spaceOwnerIdSchema, owner)) continue;
-            await this.#applyIfDue(ctx, owner, "check");
+            try {
+                await this.#applyIfDue(ctx, owner, "check");
+            } catch (error: unknown) {
+                // An unreadable state was already skipped above; it must not stop everyone else.
+                if (!(error instanceof SpaceStorageError)) throw error;
+            }
         }
     }
 
@@ -1696,13 +2025,10 @@ export class SpacesModule implements AgentModule {
     ): Promise<void> {
         if ((await this.#livePrioritizing(ctx, ownerUserId)) === undefined) return;
         const state = await this.#ownerState(ctx, ownerUserId);
-        const observations = JSON.stringify(
-            this.#sidebarObservations.get(ownerUserId) ?? { visibleSpaceIds: [] },
-        );
         const brief = [
             text,
             ...(state.sidebarBrief ?? []),
-            `Current sidebar observations: ${observations}. Read the artifact and preserve manual moves and folds.`,
+            "Read the sidebar with list_sidebar and read_row_conversation before placing or ranking anything, keep within the visible budget, and preserve manual moves and folds.",
         ]
             .join("\n\n")
             .slice(0, 20_000);
@@ -1711,7 +2037,9 @@ export class SpacesModule implements AgentModule {
             arguments: { ownerUserId, messageId: createId(), text: brief },
             ...(operationId === undefined ? {} : { operationId: `spaces:${operationId}` }),
         });
-        await writeOwnerState(ctx, { ...state, sidebarBrief: [] });
+        const { sidebarSeed: _seed, ...rest } = state;
+        // A notice after the opening is Prioritizing's next normal run: the seed is its to tidy.
+        await writeOwnerState(ctx, { ...rest, sidebarBrief: [] });
     }
 
     async #deliverBrief(
@@ -1749,16 +2077,23 @@ export class SpacesModule implements AgentModule {
             : agentId;
     }
 
-    /** The cheapest model of the account Happy last ran on. */
+    /** The default model from Settings, which a new chat also starts with, at its own effort. */
     async #prioritizingRoute(ctx: Context, ownerUserId: SpaceOwnerId) {
-        const happyAgentId = await this.#happyAgentId(ctx, ownerUserId);
-        const happyMode =
-            happyAgentId === undefined
-                ? undefined
-                : (await this.#requireAgents().config(ctx, happyAgentId))?.metadata?.["lastMode"];
+        // Settings belong to whoever the context names: the standalone person, or a team member.
+        let personCtx: Context | undefined = ctx;
+        if (this.#team.enabled) {
+            const user = await this.#team.getUser(ctx, ownerUserId);
+            personCtx =
+                user === undefined || user.authentication === "guest"
+                    ? undefined
+                    : this.#team.connectionContext(ctx, user);
+        }
         return selectPrioritizingRoute(
             this.#config.models,
-            Value.Check(messageModeSchema, happyMode) ? happyMode.providerId : undefined,
+            personCtx === undefined
+                ? null
+                : (await this.#userSettings.get(personCtx, PRIORITIZING_DEFAULT_MODEL_SETTING))
+                      .value,
         );
     }
 
@@ -1778,6 +2113,10 @@ export class SpacesModule implements AgentModule {
         const route = await this.#prioritizingRoute(ctx, ownerUserId);
         if (happyAgentId === undefined || route === undefined) return;
         const prioritizingAgentId = createId();
+        this.#creatingPrioritizing.add(prioritizingAgentId);
+        afterCommit(ctx, () => {
+            this.#creatingPrioritizing.delete(prioritizingAgentId);
+        });
         await this.#subtasks.create(
             ctx,
             happyAgentId,
@@ -2206,15 +2545,63 @@ type SpaceEventDraft = SpaceEvent extends infer Event
         : never
     : never;
 
-function newWorkBrief(row: SpaceRecord, text: string): string {
+function newWorkBrief(row: SpaceRecord, text: string, placedByPerson: boolean): string {
     const excerpt = text.length > MAX_BRIEF_TEXT ? `${text.slice(0, MAX_BRIEF_TEXT)}…` : text;
     return [
         `New work started in row ${row.id}. Its first message:`,
         excerpt,
-        row.placement === "pending"
-            ? "Choose its icon now with set_space_icon, then read the sidebar artifact and place it with edit_sidebar (author a happy-section if none fits). This first placement waits for a calm moment."
+        row.placement === "pending" && !placedByPerson
+            ? "Choose its icon now with set_space_icon, then read the sidebar with list_sidebar and place it with edit_sidebar next to the rows it belongs with. This first placement waits for a calm moment."
             : "The person already placed it. Choose its icon now with set_space_icon; do not move it.",
     ].join("\n\n");
+}
+
+/** The person's moves and folds, kept so Prioritizing leaves exactly those alone. */
+/**
+ * What a person's write makes theirs: the items they moved, and the sections they named, keep
+ * their place and their name; the switches they set keep their state.
+ */
+function manualAuthority(
+    state: SpaceOwnerState,
+    edits: { moved: readonly string[]; folded: readonly string[] },
+    before: string,
+    after: string,
+) {
+    const labelOf = (html: string) =>
+        new Map(
+            parseSidebar(html)
+                .children.filter((node) => node.attrs["label"] !== undefined)
+                .map((node) => [sidebarKey(node), node.attrs["label"]]),
+        );
+    const earlier = labelOf(before);
+    const named = [...labelOf(after)]
+        .filter(([key, label]) => earlier.get(key) !== label)
+        .map(([key]) => key);
+    return {
+        sidebarManualIds: [
+            ...new Set([...(state.sidebarManualIds ?? []), ...edits.moved, ...named]),
+        ].slice(-1000),
+        sidebarManualFolds: [
+            ...new Set([...(state.sidebarManualFolds ?? []), ...edits.folded]),
+        ].slice(-1000),
+    };
+}
+
+/** New work nobody has written in yet: it stays a stem cell until its first message. */
+function isUntouchedStemCell(row: SpaceRecord): boolean {
+    return row.role === "item" && row.icon?.type === "stem_cell" && row.briefedAt === undefined;
+}
+
+/** An "Older" or "Done" section reads as finished work; sections name subjects instead. */
+function agedLabel(label: string): boolean {
+    return /\b(old|older|oldest|done|finished|archive|archived|stale)\b/i.test(label);
+}
+
+function ownerAuthor(ownerUserId: SpaceOwnerId): ArtifactAuthor {
+    return {
+        kind: "user",
+        ...(ownerUserId === SPACE_STANDALONE_OWNER ? {} : { userId: ownerUserId }),
+    };
 }
 
 function blankDescription(title: string, target: SpaceDescription["target"]): SpaceDescription {

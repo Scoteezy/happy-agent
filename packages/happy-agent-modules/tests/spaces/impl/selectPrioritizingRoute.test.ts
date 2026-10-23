@@ -14,24 +14,26 @@ const MODELS = [
 ];
 
 describe("selectPrioritizingRoute", () => {
-    it("runs on the cheapest model of Happy's own account at the least effort", () => {
-        expect(selectPrioritizingRoute(MODELS, "codex")).toEqual({
-            providerId: "codex",
-            model: "openai/gpt-6-luna",
-            effort: "low",
-        });
-        expect(selectPrioritizingRoute(MODELS, "claude")).toEqual({
-            providerId: "claude",
-            model: "anthropic/haiku-5-5",
-            effort: "off",
-        });
+    it("runs on the default model chosen in Settings at that model's own default effort", () => {
+        expect(
+            selectPrioritizingRoute(MODELS, {
+                providerId: "claude",
+                modelId: "anthropic/opus-5-5",
+            }),
+        ).toEqual({ providerId: "claude", model: "anthropic/opus-5-5", effort: "high" });
     });
 
-    it("falls back to the installation's default account when Happy's is unknown", () => {
-        expect(selectPrioritizingRoute(MODELS, undefined)).toEqual({
+    it("falls back to the installation's default model, never a cheaper one", () => {
+        const installationDefault = {
             providerId: "codex",
-            model: "openai/gpt-6-luna",
-            effort: "low",
-        });
+            model: "openai/gpt-5.6-sol",
+            effort: "high",
+        };
+        expect(selectPrioritizingRoute(MODELS, null)).toEqual(installationDefault);
+        expect(
+            selectPrioritizingRoute(MODELS, { providerId: "claude", modelId: "anthropic/retired" }),
+        ).toEqual(installationDefault);
+        expect(selectPrioritizingRoute(MODELS, { modelId: "x" })).toEqual(installationDefault);
+        expect(selectPrioritizingRoute([], null)).toBeUndefined();
     });
 });

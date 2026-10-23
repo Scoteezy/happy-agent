@@ -360,6 +360,7 @@ import {
     SidebarConflictError,
     SpaceInputError,
     SpaceNotFoundError,
+    SpaceStorageError,
     SpacesModule,
     type SpaceEvent,
     type SpaceOwnerId,
@@ -368,7 +369,6 @@ import {
 import {
     createStemCellRequestSchema,
     updateSpaceSidebarRequestSchema,
-    spaceSidebarObservationsRequestSchema,
     updateSpaceRequestSchema,
     updateSpaceSectionRequestSchema,
     spaceBatchResource,
@@ -6989,16 +6989,6 @@ export class ApiModule implements AgentModule {
                 sendJson(response, 200, { ...document, spaces: rows });
                 return true;
             }
-            if (url.pathname === "/v0/spaces/sidebar/observations" && request.method === "POST") {
-                const body = await bodyAs(
-                    request,
-                    spaceSidebarObservationsRequestSchema,
-                    "sidebar observations",
-                );
-                await spaces.observeSidebar(ctx, owner, body);
-                response.writeHead(204).end();
-                return true;
-            }
             if (request.method === "GET" && url.pathname === "/v0/spaces") {
                 const cursor = this.#journal.cursor();
                 const snapshot = await spaces.snapshot(ctx, owner);
@@ -9779,6 +9769,14 @@ export class ApiModule implements AgentModule {
                 currentVersion: profile["version"],
                 profile,
             });
+            return;
+        }
+        if (error instanceof SpaceStorageError) {
+            // The person's sidebar state is unreadable: say so plainly instead of a generic error.
+            ctx.log.error("A person's sidebar state could not be read.", {
+                ownerUserId: error.ownerUserId,
+            });
+            sendJson(response, 500, { error: error.message, code: "internal" });
             return;
         }
         ctx.log.error("The Happy Agent API request failed.", {}, error);

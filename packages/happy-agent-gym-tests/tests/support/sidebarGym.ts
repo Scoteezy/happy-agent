@@ -9,10 +9,18 @@ export type SidebarDocument = {
         title: string | null;
         target: { id: string; agentId: string | null };
         working: boolean;
+        icon: { type: string; slug?: string } | null;
     }[];
+    agentIcons?: Record<string, { type: string; slug: string }>;
+    seed?: true;
 };
 export type SidebarStem = {
-    space: { id: string; target: { id: string }; placement: string; sectionId: string | null };
+    space: {
+        id: string;
+        target: { id: string; agentId: string };
+        placement: string;
+        sectionId: string | null;
+    };
     agent: { id: string };
 };
 
@@ -32,10 +40,19 @@ export async function sidebarGym() {
                         },
                     ],
                 };
+            // Naming answers with a title far too long for the sidebar, to prove it is cut.
+            if (request.instructions.includes("You name a piece of work"))
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "<title>Sidebar UI fixes and draggable spaces</title>\n<slug>sidebar-ui-fixes</slug>",
+                        },
+                    ],
+                };
             const last = request.messages.at(-1);
             if (
                 command !== undefined &&
-                request.instructions.includes("You are Prioritizing") &&
                 last?.role === "user" &&
                 JSON.stringify(last).includes(command.token)
             ) {
@@ -71,8 +88,8 @@ export async function sidebarGym() {
                 )?.sessionId,
             "Prioritizing's opening turn",
         );
-    const call = async (name: string, args: unknown) => {
-        const sessionId = await manager();
+    const call = async (name: string, args: unknown, sessionId?: string) => {
+        sessionId ??= await manager();
         const token = `sidebar_scenario_${++sequence}`;
         command = { token, name, args };
         await gym.send(`Execute sidebar request ${token}.`, { sessionId });
@@ -97,5 +114,14 @@ export async function sidebarGym() {
             "/v0/spaces/stem-cells",
             sectionId === undefined ? {} : { sectionId },
         );
-    return { gym, read, call, edit, calm, hold, create, manager };
+    /** The first notice after Prioritizing's opening ends the classic-sidebar seed. */
+    const unseed = async () => {
+        await manager();
+        await gym.http.request("POST", "/v0/spaces/tidy", {});
+        await gym.waitUntil(
+            async () => ((await read()).seed === undefined ? true : undefined),
+            "the end of the seed",
+        );
+    };
+    return { gym, read, call, edit, calm, hold, create, manager, unseed };
 }

@@ -1,29 +1,141 @@
 # Spaces — learnings
 
-## The authored document owns the experimental layout
+## The document is the sidebar, and everything in it is an item
 
-The sidebar is one versioned artifact per person. HTML nesting owns its composition; rows still
-own identity and live activity. Document edits never approximate or synchronize legacy section
-and order fields. Every writer uses CAS, and validation also runs through ordinary artifact tools.
-The first placement of new pending work is permitted after its first message; later manager moves
-respect the two-hour guard, Happy's position, and the person's moves and folds. Section + creation
-is manual placement from the outset. This preserves immediate new-work organization without
-letting repeated tidies move the work the person is doing.
+The first experimental document was HTML with sections that walled rows off, plain markup, a
+`tree` flag for live subtasks, and an "Older" section that read as "done". Kirill: the sidebar is
+"kinda literally HTML, that's the state"; everything must be draggable, separators included, and
+Search and Create too; a separator is a visual cue, not a hint. The document is now one `<nav>` of
+`happy-search`, `happy-create`, `happy-section`, `happy-separator`, and `happy-space` items in one
+flat order. Nested `happy-space` elements are sessions (subtasks and collaborators) by agent ID, so
+what Prioritizing writes is exactly what is shown: absent means hidden, `expanded` shows a row's
+sessions. Attributes are quoted and switches are `"true"`, so HTML and XML parsers read the same
+tree. `fold-ribbon` lets Prioritizing choose whether a foldable row's ribbon shows on hover or
+always.
 
-Manual reorder protection belongs to the moved rows, not every row whose index shifted. Compare
-parent/disclosure changes directly, then retain a longest common subsequence of the remaining
-refs to infer the minimum moved set. A full HTML replacement cannot identify which row was
-dragged in an ambiguous swap; ties retain the earliest longest subsequence in the final order.
-Demo and daemon setup must use manager placement, not the person-only legacy PATCH route:
-that route intentionally records manual authority, including `manual_at`.
+Sections and separators are different things. Folding the titled sections into untitled separators
+lost what Kirill liked about them, so both exist: a `happy-section` has an ID and a required label,
+heads the rows after it up to the next section or separator, and folds them with `collapsed`; a
+`happy-separator` is a plain rule with an ID only, cannot fold, and ends a section's run. A label
+names a subject: the daemon refuses Prioritizing a new or renamed section whose label names age or
+doneness ("Older", "Done", "Archive", "Stale"), or whose label matches another section's ignoring
+case and spacing, while the person may name sections freely. First-grammar documents are rewritten
+once on read, keeping order: sections become sections with their labels and folds, the old "Older"
+bucket becomes a plain separator, and plain markup is dropped.
+
+Every writer uses CAS, and validation runs through ordinary artifact tools too. A nested node must
+be a session of the conversation it sits under. The person may move anything. Prioritizing may not
+move Search, Create, or Happy, undo the person's moves or folds, or move or tuck away work active in
+the last two hours (new pending work may receive its first placement). Moves and folds are tracked
+separately: a dragged row stays where the person put it, yet Prioritizing may still open it to show
+a session waiting on the person. An item that now sits under another section or separator has
+moved even if its order among the other items did not; otherwise inserting one above a row the
+person placed would regroup it unnoticed.
+
+A section is its heading plus the rows after it, up to the next section or separator, and Kirill
+asked that it always move as one block. A row-level diff blamed whichever side of a swap had fewer
+rows, so dragging a big section past a small one marked the small section's rows as hand-placed.
+The diff now compares heading order first, then each block's rows, then each parent's sessions,
+each with a longest common subsequence. A moved section is one move: only its heading becomes
+hand-placed, its rows are `carried`, and the batch note names the section ("Moved Research.").
+Carried rows still count as moving for Prioritizing's guards, so it cannot move a section that
+holds Happy, untouched new work, or work active in the last two hours. A full replacement cannot
+tell which of two swapped items was dragged; ties keep the earliest subsequence.
+
+New rows go right below Happy, after everything nested under it, where the person expects new
+work; or after the section or separator they were made under. When Happy is gone, nested, or
+inside a collapsed section, they go right after Create instead, so new work is never hidden.
+Archived rows and sessions leave the document with everything nested under them. Demo and daemon
+setup must use manager placement, not the person-only legacy PATCH route, which records
+`manual_at`.
 
 Maintenance notes have durable runs without provider events. Live API delivery must announce the
 terminal run as well as its message so an open chat can render exactly the note found after reload.
 
+## Turning Spaces on moves nothing
+
+Kirill asked that new people start from the sidebar they already know, with Prioritizing proposing
+changes only afterwards. The first document is Search, Create, Happy, the joined Surfaces in
+member order, a `divider` separator, a `bots` section labelled Bots with the other active bots, and
+a `tasks` section labelled Tasks with joined tasks in membership order, each row with its active
+subtasks nested and shown. Kirill moved Happy out of Bots so new work lands right below it. Bots
+and Tasks are default sections, present even when empty and kept stable: Prioritizing is told to
+keep Bots especially stable (long-term responsibilities), and the daemon refuses it removing or
+renaming either; only the person reorganizes them. The fixed IDs let the desktop apply the
+person's classic folds, which live only on the desktop, with one write. The owner state carries `sidebarSeed` until that write or Prioritizing's
+next notice, and Prioritizing's writes are refused while it is set; its opening turn only gives
+icons.
+
+## A stem cell stays one until the person speaks
+
+Kirill saw new work turn into something before saying what it was. The row was briefed to
+Prioritizing on insertion, and its opening and calm briefs let it give an icon and place the row.
+Now insertion of untouched new work briefs nothing, and an icon, move, or fold of a stem cell whose
+first message has not arrived is refused (`briefedAt` marks that message).
+
+## Sessions are hidden by default, and every one gets an icon
+
+Showing working subtasks under their rows, and seeding every row with its subtasks expanded, made
+the sidebar long. Kirill: give every session an icon, but don't show sessions. Subtasks and
+collaborators are still created as before. The seed shows rows only, and Prioritizing leaves
+sessions out of the document unless there is a strong reason to show one, such as a session
+waiting on the person; a shown session counts toward the visible budget. The grammar keeps nested
+sessions, so the person or Prioritizing can still show one. Session icons live in the owner state
+by agent ID, are served as `agentIcons` beside the document, and Prioritizing is briefed when a
+session starts under one of the person's rows.
+
+## About ten rows are shown
+
+A sidebar that showed everything was not prioritized. Prioritizing aims for at most ten shown rows
+as a hard target: rows outside collapsed sections plus shown sessions, not counting Search,
+Create, Happy, headings, separators, or new work waiting for its first message. `list_sidebar`
+reports `visibleRows: {shown, budget}` for the document including pending edits. The daemon does
+not refuse a batch over budget: work waiting on the person, recent work, and the person's own
+moves and folds may alone exceed it, and refusing would leave Prioritizing no valid edit.
+
+In a live run Prioritizing stopped at 14 and called it the floor, though folding Releases and Bots
+would have reached 9. It had read "placed by the person" as "must stay shown", and treated quiet
+rows whose last reply offered more help as waiting on the person. The prompt now says placing
+protects position, not visibility; that waiting means the work cannot go on without the person,
+and still counts; and that over budget it folds whole quiet sections first, Bots included, then
+moves quiet rows into folded sections, then removes what the rules allow.
+
+## Rows mirrored from the classic sidebar start placed
+
+The first document mirrors rows the person already knows, but they kept the `pending` placement
+of new rows. A pending row counts as a first placement, which the two-hour rule exempts, so the
+daemon would have let Prioritizing move work active minutes ago, and `list_sidebar` called every
+row "not placed yet". Creating the document now records every mirrored row, except untouched new
+work, as placed.
+
+## Prioritizing reads the threads before it decides
+
+Placing by title and timestamps alone misjudged what work was about and whether it was done.
+`read_row_conversation` takes a row's space ID or a session's agent ID and returns what the person
+and the agent said, and what other agents wrote to it (a subtask's task, a report back), newest
+first, without tool calls or reasoning, capped at 40 messages and about 16,000 characters, through
+History's public page read. The prompt tells Prioritizing to read the conversations a decision
+rests on before placing, ranking, folding, or removing anything.
+
+## Prioritizing runs on the default model from Settings
+
+Prioritizing ran on the cheapest model at the lowest effort, and its grouping and choices were
+poor. It now runs on `happy-desktop.model.default`, the model a new chat starts with, at that
+model's own default effort, read through the person's own context in team mode; without a chosen
+model still served, the installation's default model. Titles likewise no longer uses a cheap
+route; it writes names with the chat's own model (see the Titles learnings).
+
+## Clients report nothing about what the person sees
+
+`POST /v0/spaces/sidebar/observations` sent which rows were in the viewport. Visibility was never
+permission to move anything, folds already live in the document, and the reports only woke
+Prioritizing, so the route, its schema, and its brief were removed. An older desktop that still
+sends it gets a 404 and ignores it.
+
 ## Notes in Happy's chat are one factual line
 
-Kirill and the UX review asked for terse notes such as "Moved Preview viewer release to Older."
-with no narration. Prioritizing no longer writes free text: the note is composed from the batch's
+Kirill and the UX review asked for terse notes such as "Put Preview viewer release in Releases."
+with no narration; folded work is "tucked away", never "Older", because quiet is not done. Prioritizing no longer writes free text: the note is composed from the batch's
 own diff, so it can only describe what moved; a batch of several moves names two and counts the
 rest. Prioritizing gives no reasons: a cheap model's clause ("Hid Quick Sanity Check finished
 one-off check.") broke the line, and nothing else read them.
@@ -31,10 +143,27 @@ one-off check.") broke the line, and nothing else read them.
 ## The client decides when the person is calm
 
 Applying a batch on every focus change moved rows while the person was still navigating, so
-there is no focus report. The client signals `interacting` (hold everything) and
-`calm` (a gesture finished, or idle); only `calm`, idle, or a move the person asked for in their own words
-apply a batch, and never while `interacting` or mid-Prioritizing-turn. Applying a batch never changes what
-the person has selected.
+there is no focus report. The client signals `interacting` (hold everything) and `calm`; only
+`calm`, idle, or a move the person asked for in their own words apply a batch, and never while
+`interacting` or mid-Prioritizing-turn. Applying a batch never changes what the person has
+selected.
+
+`calm` once also meant "a navigation gesture just finished". That let a click on one row fold
+others away into new collapsed sections, which reads as rows vanishing because of the click.
+`calm` now means the person is not using the app: five minutes without input, or the window or
+sidebar out of sight. A client never sends it for a gesture. The daemon's own fallback is also
+five minutes: two still landed while the person was reading between clicks. Every row a batch
+folds out of view is named in its note, because that is the change the person can no longer see.
+
+## Stored state survives a rollback
+
+A desktop swapped a database written by a newer build to release 0.4.104, whose strict read of
+each person's state rejected the new fields; the throw ran at startup and the supervisor restarted
+it forever. Reading stored owner state now drops fields this build does not know, so a newer build
+that only adds fields stays readable. State that still does not fit makes Spaces unavailable for
+that one person: it is logged, skipped by the background work, and every route for them answers
+with a plain error the desktop can show. It never stops the daemon. Releases up to 0.4.104 cannot
+be fixed this way; protecting them belongs to whatever installs daemon releases.
 
 ## One row per piece of work, enforced by the store
 
@@ -106,10 +235,9 @@ reads, and the organiser-model setting. Space events carry whole objects, so the
 ## Happy is an ordinary row
 
 A `role` field and Happy-specific IDs made clients special-case Happy. The API now shows Happy as
-an ordinary row whose target is Happy's bot, first by `orderKey`; new work goes right after it.
-Prioritizing never moves or hides it, but the person may drag it. Task trees (subtasks and
-worktrees) are not part of a space: clients build them from the agent's `subtasks` and the
-workspaces' `creatorAgentId`/`subtaskAgentId`, which they already hold.
+an ordinary row whose target is Happy's bot. Prioritizing never moves or hides it, but the person
+may drag it. Sessions under a row are part of the document, not drawn by clients from `subtasks`;
+worktrees are still drawn by clients under the session that works in them.
 
 ## The person's changes are PATCHes; tidy is one message
 
@@ -135,10 +263,10 @@ Six tidy requests in a row led a cheap model to hide every row but Happy, includ
 was running. The prompt already said working rows stay shown; the daemon now enforces it. A fold
 or hide of a row whose work is running, or was active in the last two hours, is answered with
 "…so it stays shown. Nothing was queued.", and a queued one is dropped at apply time if the work
-came back to life meanwhile. Untouched new work has no activity, so it may still be hidden.
+came back to life meanwhile. A stem cell nobody has written in is not touched at all.
 
 The apply-time guard checks the composed batch, including section removal. Removing a section
-evacuates its protected shown rows to the unsectioned shown list, while quiet rows may fold into
-Older; intermediate changes cannot bypass the guard. Existing manual visibility is preserved.
+evacuates its protected shown rows to the unsectioned shown list, while quiet rows may fold;
+intermediate changes cannot bypass the guard. Existing manual visibility is preserved.
 Evacuated shown rows receive fresh destination keys after Happy, preserving section and row
 order; carrying an old section's key could otherwise place protected work above Happy.

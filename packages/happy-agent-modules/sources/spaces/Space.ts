@@ -28,7 +28,7 @@ export const spaceRoleSchema = Type.Union([Type.Literal("happy"), Type.Literal("
 /** Pending means Prioritizing has not placed the row yet; its position is still its section. */
 export const spacePlacementSchema = Type.Union([Type.Literal("pending"), Type.Literal("settled")]);
 
-/** Shown in its section, folded into Older at the bottom, or hidden. Hidden is never deletion. */
+/** Shown, folded out of view under a collapsed section or parent, or hidden. Hidden is never deletion. */
 export const spaceVisibilitySchema = Type.Union([
     Type.Literal("shown"),
     Type.Literal("folded"),
@@ -164,7 +164,7 @@ const spacePositionSchema = Type.Object(
     {
         sectionId: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
         sectionName: Type.Union([Type.String(), Type.Null()]),
-        /** The row's position in its section, under Happy, or in Older. */
+        /** The item's index among its siblings. */
         index: Type.Integer({ minimum: 0 }),
         visibility: spaceVisibilitySchema,
         placement: spacePlacementSchema,
@@ -214,8 +214,23 @@ export const spaceOwnerStateSchema = Type.Object(
     {
         ownerUserId: spaceOwnerIdSchema,
         sidebarArtifactId: Type.Optional(cuid2Schema),
-        sidebarManualIds: Type.Optional(Type.Array(cuid2Schema, { maxItems: 1000 })),
-        sidebarPlacedIds: Type.Optional(Type.Array(cuid2Schema, { maxItems: 1000 })),
+        /** Sidebar item keys: space, session, section, and separator IDs, or the tag of Search and Create. */
+        sidebarManualIds: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 1000 }),
+        ),
+        /** Items whose expanded or collapsed switch the person set by hand. */
+        sidebarManualFolds: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 1000 }),
+        ),
+        sidebarPlacedIds: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 1000 }),
+        ),
+        /** The document is still the classic-sidebar seed nobody has written to yet. */
+        sidebarSeed: Type.Optional(Type.Literal(true)),
+        /** Icons Prioritizing chose for sessions under the person's rows, by agent ID. */
+        agentIcons: Type.Optional(
+            Type.Record(cuid2Schema, spaceIconSlugSchema, { maxProperties: 1000 }),
+        ),
         sidebarPending: Type.Optional(
             Type.Array(
                 Type.Object(
@@ -237,17 +252,6 @@ export const spaceOwnerStateSchema = Type.Object(
                     { additionalProperties: false },
                 ),
                 { maxItems: 32 },
-            ),
-        ),
-        sidebarObservations: Type.Optional(
-            Type.Object(
-                {
-                    visibleSpaceIds: Type.Array(cuid2Schema, { maxItems: 1000 }),
-                    collapsed: Type.Optional(
-                        Type.Array(Type.String({ maxLength: 128 }), { maxItems: 1000 }),
-                    ),
-                },
-                { additionalProperties: false },
             ),
         ),
         sidebarBrief: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 32 })),
@@ -321,5 +325,15 @@ export class SpaceConflictError extends Error {
     constructor(message: string) {
         super(message);
         this.name = "SpaceConflictError";
+    }
+}
+
+/** One person's stored sidebar state cannot be read; Spaces is unavailable for that person only. */
+export class SpaceStorageError extends Error {
+    constructor(readonly ownerUserId: string | undefined) {
+        super(
+            "Your sidebar's saved state could not be read. It may come from a newer version of Happy Agent; update Happy Agent to use the sidebar again.",
+        );
+        this.name = "SpaceStorageError";
     }
 }

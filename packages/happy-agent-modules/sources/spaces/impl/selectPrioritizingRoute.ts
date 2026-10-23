@@ -1,5 +1,7 @@
 import type { AgentModel } from "@slopus/happy-agent-base";
 import type { SessionReasoningEffort } from "@slopus/happy-providers";
+import { Type } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 
 /** The model, account, and effort a Prioritizing turn runs on. */
 export interface PrioritizingRoute {
@@ -8,49 +10,30 @@ export interface PrioritizingRoute {
     readonly effort: SessionReasoningEffort;
 }
 
-/** Fast, inexpensive models that sort a sidebar well, in order of preference. */
-const ECONOMICAL_MODEL_IDS = [
-    "anthropic/haiku-5-5",
-    "openai/gpt-6-luna",
-    "openai/gpt-5.6-luna",
-    "xai/grok-composer-2.5-fast",
-    "anthropic/sonnet-5",
-];
+/** The installation's default model, as Settings in the desktop app saves it. */
+export const PRIORITIZING_DEFAULT_MODEL_SETTING = "happy-desktop.model.default";
 
-/** Sorting rows is light work, so the least reasoning the model accepts is enough. */
-const CHEAPEST_EFFORTS: readonly SessionReasoningEffort[] = ["off", "minimal", "low", "medium"];
+const defaultModelSchema = Type.Object({
+    providerId: Type.String({ minLength: 1 }),
+    modelId: Type.String({ minLength: 1 }),
+});
 
 /**
- * Picks what Prioritizing runs on: the cheapest model of the account Happy runs on, because only
- * that account is known to be signed in and paid for, and then of the installation's default
- * account.
+ * Picks what Prioritizing runs on: the default model from Settings, the one Happy suggests for
+ * every new chat, at that model's own default effort. Grouping and choosing what to show need the
+ * strongest model, never a cheaper one. Without a chosen model still served, the installation's
+ * default model.
  */
 export function selectPrioritizingRoute(
     models: readonly AgentModel[],
-    preferredProviderId: string | undefined,
+    defaultModel: unknown,
 ): PrioritizingRoute | undefined {
-    const served =
-        servedBy(models, preferredProviderId) ?? servedBy(models, models[0]?.providerId) ?? models;
+    const chosen = Value.Check(defaultModelSchema, defaultModel) ? defaultModel : undefined;
     const model =
-        ECONOMICAL_MODEL_IDS.map((id) => served.find((candidate) => candidate.id === id)).find(
-            (candidate) => candidate !== undefined,
-        ) ?? served[0];
+        models.find(
+            (candidate) =>
+                candidate.providerId === chosen?.providerId && candidate.id === chosen.modelId,
+        ) ?? models[0];
     if (model === undefined) return undefined;
-    return { providerId: model.providerId, model: model.id, effort: cheapestEffort(model) };
-}
-
-function servedBy(
-    models: readonly AgentModel[],
-    providerId: string | undefined,
-): readonly AgentModel[] | undefined {
-    if (providerId === undefined) return undefined;
-    const served = models.filter((model) => model.providerId === providerId);
-    return served.length === 0 ? undefined : served;
-}
-
-function cheapestEffort(model: AgentModel): SessionReasoningEffort {
-    for (const effort of CHEAPEST_EFFORTS) {
-        if (model.effortLevels.includes(effort)) return effort;
-    }
-    return model.defaultEffort;
+    return { providerId: model.providerId, model: model.id, effort: model.defaultEffort };
 }

@@ -42,7 +42,7 @@ export function requestSpacePlacementTool(spaces: SpacesModule, actingAgentId: s
         ],
         searchKeywords: ["sidebar", "move to section", "organize sidebar", "put this in"],
         description:
-            "Ask Prioritizing, the helper that organises the person's sidebar, to move a conversation's row: into a section, to Older, or out of sight. Prioritizing decides and applies it at a calm moment, or at once when the person explicitly asked.",
+            "Ask Prioritizing, the helper that organises the person's sidebar, to move a conversation's row: into a section, under a collapsed section, or out of sight. Prioritizing decides and applies it at a calm moment, or at once when the person explicitly asked.",
         parameters: requestSpacePlacementSchema,
         returnType: resultSchema,
         durable: true,

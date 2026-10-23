@@ -9588,10 +9588,11 @@ on the cheapest model the installation offers. It is created with the person's f
 `subtasks` like any other; until then there is none, and nothing organises the sidebar. After a new conversation's first
 message it gives the row an icon and decides where it belongs, and it tidies the list when asked.
 Its placement, visibility, and section changes are not applied one by one: they wait and apply
-together as one **batch** at a calm moment — when the client reports `calm`, or after two minutes
+together as one **batch** at a calm moment — when the client reports `calm`, or after five minutes
 without a report or a message from the person — and never while the client reports
 `interacting`. Each batch adds one short line to Happy's conversation, such as "Moved Preview
-viewer release to Releases.", and is recorded with its diff. Icons apply at once, because they move
+viewer release to Releases.", that names every row it folded out of view, and is recorded with
+its diff. Icons apply at once, because they move
 nothing. A person's own changes through `PATCH` apply immediately and are never queued. Other
 agents may ask Prioritizing to move a row through their `request_space_placement` tool; only
 Prioritizing changes organisation.
@@ -9930,8 +9931,13 @@ Request: `{ "state": "interacting" }` or `{ "state": "calm" }`.
 - `interacting` — the person is in the middle of something in the sidebar: pointing at it,
   dragging, or using a menu. No batch applies until the client reports `calm`, or ten minutes
   pass without a report.
-- `calm` — a navigation gesture just finished, or the person went idle. A waiting batch applies
+- `calm` — the person is not using the app: there has been no input for five minutes, or the app
+  or its sidebar is not visible (the window is hidden or minimised, or the sidebar is collapsed).
+  A client never reports `calm` for a click, a navigation, or a selection. A waiting batch applies
   now; if Prioritizing is still deciding, it applies as soon as Prioritizing finishes.
+
+Without any report, the daemon treats the person as calm after five minutes with neither an
+attention report nor a message from them.
 
 Response — `200`: `{ "batch": { ... } }` for the batch this report applied, or `{ "batch": null }`.
 A batch moves rows only and never changes what the person has selected.

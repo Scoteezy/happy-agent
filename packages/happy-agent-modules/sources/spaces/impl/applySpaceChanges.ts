@@ -28,7 +28,7 @@ export interface SpaceChangeOutcome {
  * A change naming a row or section that no longer exists is dropped rather than failing the whole
  * batch: the person may have closed or moved things since Prioritizing decided. Placing a row
  * shows it and settles its placement; a section that is removed while rows remain in it folds
- * those rows into Older instead of losing them.
+ * those rows instead of losing them.
  */
 export function applySpaceChanges(
     ownerUserId: string,

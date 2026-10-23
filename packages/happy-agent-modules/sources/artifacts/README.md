@@ -33,7 +33,7 @@ rewriting.
 | -------------- | ------------------- | ----------------------------------------------- |
 | `markdown`     | `index.md`, UTF-8   | the entry and up to 255 other files of any kind |
 | `html`         | `index.html`, UTF-8 | the entry and up to 255 other files of any kind |
-| `sidebar`      | `index.html`, UTF-8 | exactly one inert HTML file, at most 128 KiB    |
+| `sidebar`      | `index.html`, UTF-8 | exactly one sidebar document, at most 128 KiB   |
 | `image`        | its one file        | one image                                       |
 | `image_series` | the first file      | 1–64 images, shown in path order                |
 | `video`        | its one file        | one video                                       |
@@ -176,7 +176,11 @@ Every mutation composes with a caller's transaction and publishes its event only
 outermost commit.
 
 Spaces binds itself through `bindSpaces` to validate sidebar references and writer authority.
-Sidebar writes require the immutable `baseVersion`, run the strict HTML validator on every path,
+`SidebarDocument` owns the grammar: one `<nav>` of `happy-search`, `happy-create`, titled
+`happy-section`, untitled `happy-separator`, and nested `happy-space` elements with quoted
+attributes and no text, so HTML
+and XML parsers read the same tree. Sidebar writes require the immutable `baseVersion`, run the
+strict validator on every path,
 and reject malformed content with source diagnostics. Manager writes enter Spaces' durable calm
 queue; `commitSidebar` is the apply path after its guards are checked again.
 

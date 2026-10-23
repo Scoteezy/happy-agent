@@ -5,6 +5,6 @@
 - `composeSpaceBatchNote` — Happy's one-line note, built from the diff.
 - `formatPrioritizingInstructions` — Prioritizing's whole system prompt, with the tidy rules and
   the icon slugs.
-- `selectPrioritizingRoute` — the model Prioritizing runs on.
+- `selectPrioritizingRoute` — the model Prioritizing runs on: the default from Settings.
 - `spaceIconSlugs` — the bundled icon library's slugs; clients ship the artwork.
 - `spaceRefKey`, `spaceOrderKeyBetween` — row identity and fractional order keys.

@@ -8,6 +8,7 @@ export {
     SpaceConflictError,
     SpaceInputError,
     SpaceNotFoundError,
+    SpaceStorageError,
     type SpaceBatch,
     type SpaceDescription,
     type SpaceIcon,
