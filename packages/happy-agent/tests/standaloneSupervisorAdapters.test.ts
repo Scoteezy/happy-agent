@@ -41,4 +41,31 @@ describe("standalone supervisor packaging", () => {
         // Each installed copy must independently satisfy the build's adapter gate.
         expect(names.size).toBe(resolverPaths.size);
     });
+
+    it("resolves the fff native library from the embedded assets", () => {
+        const modules = createRequire(
+            createRequire(new URL("../package.json", import.meta.url)).resolve(
+                "@slopus/happy-agent-modules",
+            ),
+        );
+        // The modules import fff as ESM, so the bundle loads the package's `import` entry.
+        const manifestPath = modules.resolve("@ff-labs/fff-node/package.json");
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+            readonly exports: { readonly ".": { readonly import: string } };
+        };
+        const entry = realpathSync(join(dirname(manifestPath), manifest.exports["."].import));
+        const adapter = resolveSourceAdapters({
+            arch: "arm64",
+            bunTarget: "bun-darwin-arm64",
+            key: "darwin-arm64",
+            platform: "darwin",
+        }).get(entry);
+        expect(adapter, `Missing standalone adapter for ${entry}`).toBeDefined();
+        expect(adapter!.required).toBe(true);
+        const bundledSource = adapter!.adapt(readFileSync(entry, "utf8"));
+        expect(bundledSource).toContain('from "happy-agent:binary-assets"');
+        expect(bundledSource).toMatch(
+            /function findBinary\(\) \{\n\s*return getFffLibraryPath\(\);/,
+        );
+    });
 });

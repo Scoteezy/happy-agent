@@ -303,6 +303,12 @@ async function main() {
                 throw new Error("The release binary did not embed the patched Parcel watcher.");
             }
             process.stdout.write("Embedded Parcel watcher matches the verified patched build.\n");
+            // File search ran on fff's library, which must come from the binary, not node_modules.
+            const fffGroups = (await readdir(cache)).filter((name) => name.startsWith("fff-"));
+            if (fffGroups.length !== 1) {
+                throw new Error("File search did not load the embedded fff library.");
+            }
+            process.stdout.write("File search loaded the embedded fff library.\n");
         }
 
         process.stdout.write("Checking standalone compute and workflows.\n");

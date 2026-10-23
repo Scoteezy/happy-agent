@@ -706,13 +706,17 @@ export function findMontyBinary(explicit) {
             return `const nativeBinding = require(${JSON.stringify(VIRTUAL_ASSETS_MODULE)}).loadFfiRsNative();\n${source.slice(markerIndex)}`;
         },
     });
-    addAdapter(adapters, join(fffRoot, "dist", "src", "binary.js"), {
+    // fff ships one bundle, so its resolver is rewritten in place rather than replaced as a file.
+    addAdapter(adapters, join(fffRoot, "dist", "index.js"), {
         name: "fff native library resolver",
         required: true,
-        adapt: () => `import { getFffLibraryPath } from ${JSON.stringify(VIRTUAL_ASSETS_MODULE)};
-export function binaryExists() { return true; }
-export function findBinary() { return getFffLibraryPath(); }
-`,
+        adapt: (source) =>
+            `import { getFffLibraryPath } from ${JSON.stringify(VIRTUAL_ASSETS_MODULE)};\n${replaceOnce(
+                source,
+                "function findBinary() {\n",
+                "function findBinary() {\n  return getFffLibraryPath();\n",
+                "fff native library resolver",
+            )}`,
     });
     // The CLI and published compute package can pin distinct supervisor copies.
     // Both must resolve the same embedded helper, including Windows setup.
