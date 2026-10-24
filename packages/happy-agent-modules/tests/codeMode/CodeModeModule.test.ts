@@ -168,6 +168,28 @@ describe("CodeModeModule", () => {
         }
     });
 
+    it("runs a described program exactly as an undescribed one", async () => {
+        const { module, python } = await enabledCodeMode();
+        try {
+            expect(
+                Value.Check(codeModePythonInputSchema, {
+                    code: "40 + 2",
+                    description: "Add two numbers",
+                }),
+            ).toBe(true);
+            const plain = await python.execute(ctx, { code: "40 + 2" }, pythonCall());
+            await expect(
+                python.execute(
+                    ctx,
+                    { code: "40 + 2", description: "Add two numbers" },
+                    pythonCall(),
+                ),
+            ).resolves.toEqual(plain);
+        } finally {
+            await module.close();
+        }
+    });
+
     it("isolates state by agent while serializing calls for the same agent", async () => {
         const { hooks, module, python } = await enabledCodeMode();
         const other = await toolFor(hooks, "agentcode02");

@@ -129,6 +129,14 @@ export function senderAgentExplanationSchemaOf(description?: string) {
 
 const senderAgentExplanationSchema = senderAgentExplanationSchemaOf();
 
+/**
+ * The `explanation` argument every agent-messaging tool requires, with one wording for every
+ * model, so each tool's message rows read the same way.
+ */
+export const senderAgentExplanationArgumentSchema = senderAgentExplanationSchemaOf(
+    '2–8 words saying what this message says, shown to the user; refer to agents by their ID. Example: "Why the CSV tests fail" or "Asking for the deploy logs".',
+);
+
 /** Stamp the sending agent's explanation on a system-generated message's metadata. */
 export function senderAgentExplanationMetadata(explanation: string): {
     readonly [SENDER_AGENT_EXPLANATION_METADATA_KEY]: string;
@@ -137,6 +145,15 @@ export function senderAgentExplanationMetadata(explanation: string): {
         throw new Error("The sender agent explanation is not a valid metadata value.");
     }
     return Object.freeze({ [SENDER_AGENT_EXPLANATION_METADATA_KEY]: explanation });
+}
+
+/**
+ * The title a creating call gave a new conversation, as the explanation of the opening message it
+ * sends there. A title too long or not on one line gives none, leaving the sender's name alone.
+ */
+export function senderAgentExplanationFromTitle(title: string | undefined): string | undefined {
+    const line = title?.trim();
+    return Value.Check(senderAgentExplanationSchema, line) ? line : undefined;
 }
 
 /** The explanation this message's metadata carries, or undefined when it carries none. */

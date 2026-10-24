@@ -81,8 +81,9 @@ settings receives none either, and a task an agent creates stays governed by tha
   owner, creator, and folder; follow `nextOffset`. `scope: "all"` (the default) lists every task,
   oldest first; `scope: "joined"` lists the tasks joined by the person the conversation works for,
   in that person's order, and fails when no person is identified in team mode.
-- `send_task_message` — `{ taskId, text }`. Delivers into an active task's conversation, keyed by
-  the tool call ID.
+- `send_task_message` — `{ taskId, explanation, text }`. Delivers into an active task's
+  conversation, keyed by the tool call ID. `explanation` is 2–8 words saying what the message says,
+  stamped as `senderAgentExplanation`; the opening message of a named task uses the task's name.
 - `archive_task` — `{ taskId }`. Only the creating agent may archive through the tool. Reviewed
   in Auto, never elevated.
 

@@ -234,3 +234,12 @@ machine it builds on a runner, including the reviewer's workload-user runner, an
 no release signal: a runner read keeps waiting exactly as before. Tools never guess this from a
 name or a compute kind. A released read also tells the model that Happy Agent is restarting, so a
 result saying the command is still running is not mistaken for an ordinary timeout.
+
+## Commands say what they do without showing the command
+
+A person reading a conversation saw every Codex command as its raw shell text, while Claude's
+`Bash` already carried a short `description` clients show instead. `exec_command` now accepts the
+same optional 2–8 word `description`, a Happy Agent extension on Codex's schema. It reaches clients
+only through the call's raw arguments; execution destructures the fields it uses, so the shell,
+the result, and the Auto review text never see it. Grok's `run_terminal_command` and Kimi's `Bash`
+already carry vendor-worded descriptions and are unchanged.

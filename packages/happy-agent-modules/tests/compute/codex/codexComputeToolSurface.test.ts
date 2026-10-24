@@ -53,9 +53,12 @@ const OMITTED_BY_MODULE: Readonly<Record<string, readonly string[]>> = {
     write_stdin: [],
 };
 
-/** Happy Agent's host-owned command extension on top of Codex's schema. */
+/**
+ * Happy Agent's extensions on top of Codex's schema: host-owned secret selection, and the optional
+ * display-only description a person sees in place of the command.
+ */
 const ADDED_BY_MODULE: Readonly<Record<string, readonly string[]>> = {
-    exec_command: ["secrets"],
+    exec_command: ["description", "secrets"],
 };
 
 /** The argument schema of one tool, reduced to what a fidelity check is about. */

@@ -1,11 +1,13 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { cuid2Schema, defineAgentTool } from "@slopus/happy-agent-base";
 
+import { senderAgentExplanationArgumentSchema } from "../../impl/messageOrigin.js";
 import type { BotsModule } from "../BotsModule.js";
 
 const sendBotMessageInputSchema = Type.Object(
     {
         botId: cuid2Schema,
+        explanation: senderAgentExplanationArgumentSchema,
         text: Type.String({ minLength: 1, maxLength: 100_000 }),
     },
     { additionalProperties: false },
@@ -29,7 +31,14 @@ export function sendBotMessageTool(bots: BotsModule, actingAgentId: string) {
         durable: true,
         shouldReviewInAutoMode: () => false,
         execute: async (ctx, input: SendBotMessageInput, call) => {
-            await bots.sendMessage(ctx, actingAgentId, input.botId, input.text, call.id);
+            await bots.sendMessage(
+                ctx,
+                actingAgentId,
+                input.botId,
+                input.text,
+                call.id,
+                input.explanation,
+            );
         },
         toLLM: () => [
             {

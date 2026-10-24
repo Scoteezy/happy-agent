@@ -132,3 +132,9 @@ now requires a one-line `explanation`, recorded as `senderAgentExplanation` meta
 `senderAgentId` and carried to clients, so the row can say what the message is. The settlement
 report, which this module writes rather than the model, carries a fixed explanation for finishing
 or stopping. Direct module callers may still send without one.
+
+The argument asks for 2–8 words saying what the message says, referring to agents by their ID,
+with one wording shared by every agent-messaging tool. A created collaborator's opening task,
+which no model explains, uses the creation's title when it fits on one explanation line, so
+`create_agent`, `create_subtask`, and workflow agents all open with a row that says what they are
+for.

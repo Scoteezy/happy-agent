@@ -125,3 +125,9 @@ assertions also do not describe Windows ACLs.
 Snapshot bytes are version-specific. Empty, oversized, corrupt, or incompatible bytes are moved
 to `snapshot.invalid.bin`, replacing the previous invalid copy, and the affected agent starts
 fresh. Transient filesystem and worker failures do not quarantine or overwrite the last snapshot.
+
+## Interpreter calls say what they do
+
+A Code Mode call shows a person its whole program. The `python` and `javascript` tools now accept
+an optional 2–8 word `description` of what the code does, which clients show in its place. Only
+`code` reaches the interpreter, so a described call runs exactly like an undescribed one.

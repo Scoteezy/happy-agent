@@ -1,7 +1,10 @@
 import { agentMetadataSchema } from "@slopus/happy-agent-base";
 import { Type, type Static } from "@sinclair/typebox";
 
-import { senderAgentExplanationSchemaOf } from "../impl/messageOrigin.js";
+import {
+    senderAgentExplanationArgumentSchema,
+    senderAgentExplanationSchemaOf,
+} from "../impl/messageOrigin.js";
 
 /** IDs used by the collaboration tools and by Agent Base. */
 export const collaborationAgentIdSchema = Type.String({
@@ -133,9 +136,7 @@ export const collaborationSendInputSchema = Type.Object(
 export const collaborationSendToolInputSchema = Type.Object(
     {
         toAgentId: collaborationAgentIdSchema,
-        explanation: senderAgentExplanationSchemaOf(
-            'One short line saying what this message is, shown to people in the recipient\'s chat before they open it, such as "Report: why the CSV tests fail" or "Asking for the failing test output".',
-        ),
+        explanation: senderAgentExplanationArgumentSchema,
         text: collaborationMessageTextSchema,
     },
     { additionalProperties: false },

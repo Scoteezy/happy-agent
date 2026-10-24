@@ -261,6 +261,12 @@ describe("Happy mobile tool-call normalization", () => {
     it.each([
         ["exec_command", { cmd: "pnpm test" }, "CodexBash", "Running CodexBash"],
         [
+            "exec_command",
+            { cmd: "pnpm test", description: "Run unit tests" },
+            "CodexBash",
+            "Run unit tests",
+        ],
+        [
             "run_terminal_command",
             { command: "git status", description: "Checking Git" },
             "Bash",

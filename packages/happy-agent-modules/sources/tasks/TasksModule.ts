@@ -32,7 +32,12 @@ import { MAX_NAMING_MESSAGE_CHARS, TitlesModule } from "../titles/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
 import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
 import type { HistoryModule } from "../history/index.js";
-import { isUserOriginMetadata, senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import {
+    isUserOriginMetadata,
+    senderAgentExplanationFromTitle,
+    senderAgentExplanationMetadata,
+    senderAgentIdMetadata,
+} from "../impl/messageOrigin.js";
 import { mutationIdMetadata } from "../impl/mutationEcho.js";
 import { runNamingAttempts } from "../impl/runNamingAttempts.js";
 
@@ -682,6 +687,8 @@ export class TasksModule implements AgentModule {
                     input.text,
                     agentId,
                     input.mode,
+                    // The opening message's row says what the task was created to do.
+                    senderAgentExplanationFromTitle(input.name),
                 );
             }
             await this.#publish(txCtx, {
@@ -700,7 +707,8 @@ export class TasksModule implements AgentModule {
     /**
      * Deliver one message into the task's conversation. It queues behind the current run and
      * starts one when the task is idle. The caller-supplied message ID makes redelivery after an
-     * interruption idempotent.
+     * interruption idempotent. The sender's explanation, when given, is the line a person sees
+     * for the message before opening it.
      */
     async sendMessage(
         ctx: Context,
@@ -708,6 +716,7 @@ export class TasksModule implements AgentModule {
         taskId: string,
         text: string,
         messageId: string,
+        explanation?: string,
     ): Promise<TaskRecord> {
         const task = await this.#required(ctx, taskId);
         if (task.status === "archived") {
@@ -716,7 +725,7 @@ export class TasksModule implements AgentModule {
         if (task.agentId === fromAgentId) {
             throw new TaskConflictError("A task cannot send a message to itself.");
         }
-        await this.#deliver(ctx, fromAgentId, task, text, messageId);
+        await this.#deliver(ctx, fromAgentId, task, text, messageId, undefined, explanation);
         return structuredClone(task);
     }
 
@@ -845,6 +854,7 @@ export class TasksModule implements AgentModule {
         text: string,
         messageId: string,
         explicitMode?: MessageMode,
+        explanation?: string,
     ): Promise<void> {
         const agents = this.#requireAgents();
         const mutationId = await this.#history?.runMutationId(ctx, fromAgentId);
@@ -881,6 +891,9 @@ export class TasksModule implements AgentModule {
                     metadata: {
                         tasks: { fromAgentId, taskId: task.id },
                         ...senderAgentIdMetadata(fromAgentId),
+                        ...(explanation === undefined
+                            ? {}
+                            : senderAgentExplanationMetadata(explanation)),
                         ...(delivery === undefined ? {} : { mode: delivery.mode }),
                         ...mutationIdMetadata(mutationId),
                     },

@@ -115,7 +115,11 @@ describe("work one agent hands to another", () => {
         const handOff: HandOff = { name: "send_bot_message", arguments: {} };
         const gym = await handingOff(handOff);
         const { bot } = await gym.client.createBot({ name: "Researcher" });
-        handOff.arguments = { botId: bot.id, text: "Collect the incident reports." };
+        handOff.arguments = {
+            botId: bot.id,
+            explanation: "Incident report request",
+            text: "Collect the incident reports.",
+        };
         await reviewTagged(gym);
 
         expect(await strayEchoes(gym, await finishedRun(gym, bot.agent.id))).toEqual([]);
@@ -126,7 +130,11 @@ describe("work one agent hands to another", () => {
         const handOff: HandOff = { name: "send_task_message", arguments: {} };
         const gym = await handingOff(handOff);
         const { task } = await gym.client.createTask({ name: "Audit exports" });
-        handOff.arguments = { taskId: task.id, text: "Check the billing exports." };
+        handOff.arguments = {
+            taskId: task.id,
+            explanation: "Billing export check",
+            text: "Check the billing exports.",
+        };
         await reviewTagged(gym);
 
         expect(await strayEchoes(gym, await finishedRun(gym, task.agent.id))).toEqual([]);

@@ -27,7 +27,11 @@ import type { ComputeModule } from "../compute/index.js";
 import { HistoryModule } from "../history/index.js";
 import type { ConfigModule } from "../config/index.js";
 import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
-import { senderAgentExplanationMetadata, senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import {
+    senderAgentExplanationFromTitle,
+    senderAgentExplanationMetadata,
+    senderAgentIdMetadata,
+} from "../impl/messageOrigin.js";
 import { mutationIdMetadata, mutationIdOf } from "../impl/mutationEcho.js";
 import {
     collaborationAgentIdSchema,
@@ -382,6 +386,8 @@ export class CollaborationModule implements AgentModule {
             "send",
             selection,
             mutationId,
+            // The opening assignment's row says what the collaborator was created to do.
+            senderAgentExplanationFromTitle(input.title),
         );
         return { agentId };
     }

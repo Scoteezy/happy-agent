@@ -485,6 +485,22 @@ describe("collaboration", () => {
         });
     });
 
+    it("explains an opening task with the collaborator's title when it fits on one line", async () => {
+        const collection = new Collection();
+        const { module, ctx } = await started(collection);
+        await module.createAgent(ctx, "parent", { ...TASK, title: "  CSV parser fix  " }, "child");
+        await module.createAgent(ctx, "parent", { ...TASK, title: "x".repeat(121) }, "second");
+        await module.createAgent(ctx, "parent", { ...TASK, title: "Two\nlines" }, "third");
+
+        expect(collection.delivered[0]!.options.metadata).toMatchObject({
+            senderAgentId: "parent",
+            senderAgentExplanation: "CSV parser fix",
+        });
+        for (const delivery of collection.delivered.slice(1)) {
+            expect(delivery.options.metadata).not.toHaveProperty("senderAgentExplanation");
+        }
+    });
+
     it("delivers under the durable tool call's own identity", async () => {
         const collection = new Collection();
         const { module, hooks, ctx } = await started(collection);

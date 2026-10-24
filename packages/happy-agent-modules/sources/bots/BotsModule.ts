@@ -30,7 +30,7 @@ import { TasksModule } from "../tasks/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
 import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
 import type { HistoryModule } from "../history/index.js";
-import { senderAgentIdMetadata } from "../impl/messageOrigin.js";
+import { senderAgentExplanationMetadata, senderAgentIdMetadata } from "../impl/messageOrigin.js";
 import { mutationIdMetadata } from "../impl/mutationEcho.js";
 import { runNamingAttempts } from "../impl/runNamingAttempts.js";
 import { MAX_NAMING_MESSAGE_CHARS, TitlesModule } from "../titles/index.js";
@@ -550,7 +550,8 @@ export class BotsModule implements AgentModule {
     /**
      * Deliver one message into the bot's conversation. The message queues behind the bot's
      * current run and starts one immediately when the bot is idle. The caller-supplied message
-     * ID makes redelivery after an interruption idempotent.
+     * ID makes redelivery after an interruption idempotent. The sender's explanation, when given,
+     * is the line a person sees for the message before opening it.
      */
     async sendMessage(
         ctx: Context,
@@ -558,6 +559,7 @@ export class BotsModule implements AgentModule {
         botId: string,
         text: string,
         messageId: string,
+        explanation?: string,
     ): Promise<BotRecord> {
         const bot = await this.#required(ctx, botId);
         if (bot.status === "archived") {
@@ -599,6 +601,9 @@ export class BotsModule implements AgentModule {
                     metadata: {
                         bots: { fromAgentId, botId },
                         ...senderAgentIdMetadata(fromAgentId),
+                        ...(explanation === undefined
+                            ? {}
+                            : senderAgentExplanationMetadata(explanation)),
                         ...(delivery === undefined ? {} : { mode: delivery.mode }),
                         ...mutationIdMetadata(mutationId),
                     },

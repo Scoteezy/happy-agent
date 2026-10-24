@@ -32,6 +32,13 @@ export function codexExecCommandTool(compute: Compute) {
         parameters: Type.Object(
             {
                 cmd: Type.String({ description: "Shell command to execute." }),
+                // Shown to the person in place of the command; never reaches the shell.
+                description: Type.Optional(
+                    Type.String({
+                        description:
+                            "A 2–8 word description of what this command does, in active voice, shown to the user. Example: 'List project files', 'Run unit tests'.",
+                    }),
+                ),
                 workdir: Type.Optional(
                     Type.String({
                         description: "Working directory for the command. Defaults to the turn cwd.",

@@ -88,6 +88,7 @@ describe("conversations an agent opens", () => {
 
         await call(bot.agent.id, "send_task_message", {
             taskId: task.id,
+            explanation: "Billing export check",
             text: "Check the billing exports.",
         });
         expect(await firstRequest(task.agent.id)).toMatchObject({
@@ -102,6 +103,7 @@ describe("conversations an agent opens", () => {
         });
         await call(bot.agent.id, "send_task_message", {
             taskId: task.id,
+            explanation: "Progress check",
             text: "Any progress?",
         });
         const last = await gym.waitUntil(
@@ -125,6 +127,7 @@ describe("conversations an agent opens", () => {
         const quiet = (await gym.client.createBot({ name: "Researcher" })).bot;
         await call(bot.agent.id, "send_bot_message", {
             botId: quiet.id,
+            explanation: "Incident report request",
             text: "Collect last week's incident reports.",
         });
         expect(await firstRequest(quiet.agent.id)).toMatchObject({

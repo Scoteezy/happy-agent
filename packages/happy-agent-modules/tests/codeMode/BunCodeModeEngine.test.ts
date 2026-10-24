@@ -1,5 +1,6 @@
 import { computePermissions, type ComputeRunResult } from "@slopus/happy-agent-compute";
 import { Value } from "@sinclair/typebox/value";
+import { createRootContext } from "@steve.kite/stdlib";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -7,7 +8,10 @@ import {
     MAX_CODE_MODE_BUN_OUTPUT_CHARACTERS,
     codeModeJavaScriptInputSchema,
 } from "../../sources/codeMode/engines/bun/index.js";
-import { runCodeModeJavaScript } from "../../sources/codeMode/engines/bun/tools/javascript.js";
+import {
+    createCodeModeJavaScriptTool,
+    runCodeModeJavaScript,
+} from "../../sources/codeMode/engines/bun/tools/javascript.js";
 import type { HostCompute } from "../../sources/compute/index.js";
 
 function result(overrides: Partial<ComputeRunResult> = {}): ComputeRunResult {
@@ -50,6 +54,17 @@ describe("the Bun Code Mode engine", () => {
             maxOutputBytes: 64 * 1024,
             signal,
         });
+    });
+
+    it("hands only the program to Bun, never the description shown to the person", async () => {
+        const run = vi.fn(async () => ({ output: "stdout:\n42", isError: false }));
+        const tool = createCodeModeJavaScriptTool(run);
+        const ctx = createRootContext().named("happy-agent-modules-bun-description");
+        const input = { code: "console.log(42)", description: "Print the answer" };
+
+        expect(Value.Check(codeModeJavaScriptInputSchema, input)).toBe(true);
+        await tool.execute(ctx, input, {} as Parameters<typeof tool.execute>[2]);
+        expect(run).toHaveBeenCalledWith(ctx, "console.log(42)");
     });
 
     it("reports process failures and timeout without throwing the agent run", async () => {

@@ -30,6 +30,34 @@ describe("codex compute command tools", () => {
         });
     });
 
+    it("keeps a command's description out of the shell, the result, and the review", async () => {
+        const { compute, tool, call } = await machine();
+        compute.script("pnpm test", { chunks: ["12 tests passed\n"], exitCode: 0 });
+        const execCommand = tool("exec_command");
+
+        const plain = await execCommand.execute(ctx, { cmd: "pnpm test" }, call);
+        const described = await execCommand.execute(
+            ctx,
+            { cmd: "pnpm test", description: "Run unit tests" },
+            call,
+        );
+
+        expect(compute.startedOptions[1]).toEqual(compute.startedOptions[0]);
+        expect({ ...described, wall_time_seconds: 0 }).toEqual({ ...plain, wall_time_seconds: 0 });
+        expect(
+            await execCommand.shouldReviewInAutoMode(
+                { cmd: "pnpm test", description: "Run unit tests" },
+                ctx,
+            ),
+        ).toBe(false);
+        expect(
+            execCommand.describeAutoPermissionAction?.(
+                { cmd: "pnpm test", description: "Run unit tests" },
+                ctx,
+            ),
+        ).toBe(execCommand.describeAutoPermissionAction?.({ cmd: "pnpm test" }, ctx));
+    });
+
     it("reports a command that failed as an error", async () => {
         const { compute, tool, call } = await machine();
         compute.script("pnpm build", { chunks: ["it did not build\n"], exitCode: 1 });

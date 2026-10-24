@@ -264,3 +264,9 @@ new bot as it is created. Bot and task folders are placed under the workload use
 A message an agent sent a bot carried no `mutationId`, so the bot's run echoed nothing although
 the sending run answered a client's mutation. The message now carries that run's mutation, read
 from History when it is sent, so the bot's run echoes it.
+
+## A message to a bot says what it is
+
+A message an agent sent a bot showed only "Message from <agent>" until opened. `send_bot_message`
+now requires the same 2–8 word `explanation` as `send_agent_message`, stamped as
+`senderAgentExplanation` beside the sender. `sendMessage` keeps it optional for direct callers.

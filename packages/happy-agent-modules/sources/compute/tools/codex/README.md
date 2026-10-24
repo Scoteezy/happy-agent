@@ -42,6 +42,10 @@ itself — `*** Begin Patch`, `*** Add File:`, `*** Update File:`, `*** Delete F
 the model to put the patch in the `patch` field instead of repeating the vendor's "do not wrap the
 patch in JSON", which would be false in this runtime.
 
+**`description` is a Happy Agent extension.** `exec_command` accepts an optional 2–8 word
+description of what the command does, which clients show in place of the command, as Claude's
+`Bash` does. It is display-only: the shell, the result, and the Auto review never see it.
+
 **`secrets` is a Happy Agent extension.** `exec_command` accepts attached secret bundle IDs. The
 host resolves them immediately before spawning and exposes only their environment variables to
 that process; the model and tool result never receive values. Omitted or empty means none.

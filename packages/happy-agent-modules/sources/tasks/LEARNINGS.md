@@ -152,3 +152,11 @@ is no longer available, delivery fails with an actionable error rather than sile
 A message an agent sent a task, including the task's opening message, carried no `mutationId`,
 so the task's run echoed nothing although the sending run answered a client's mutation. The
 message now carries that run's mutation, read from History when it is sent.
+
+## A message to a task says what it is
+
+A message an agent sent a task showed only "Message from <agent>" until opened.
+`send_task_message` now requires the same 2–8 word `explanation` as `send_agent_message`, stamped
+as `senderAgentExplanation` beside the sender, and a named task's opening message uses the task's
+name. An unnamed task's opening message has none; `sendMessage` keeps it optional for direct
+callers.
