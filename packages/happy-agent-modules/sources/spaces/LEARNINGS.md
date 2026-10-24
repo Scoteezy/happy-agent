@@ -143,7 +143,7 @@ would have reached 9. It had read "placed by the person" as "must stay shown", a
 rows whose last reply offered more help as waiting on the person. The prompt now says placing
 protects position, not visibility; that waiting means the work cannot go on without the person,
 and still counts; and that over budget it folds whole quiet sections first, Bots included, then
-moves quiet rows into folded sections, then removes what the rules allow.
+puts quiet work into Distractions one row per batch, then removes what the rules allow.
 
 ## Rows mirrored from the classic sidebar start placed
 
@@ -153,14 +153,43 @@ daemon would have let Prioritizing move work active minutes ago, and `list_sideb
 row "not placed yet". Creating the document now records every mirrored row, except untouched new
 work, as placed.
 
-## Prioritizing reads the threads before it decides
+## Prioritizing hears the person, and reads threads only as a last resort
 
 Placing by title and timestamps alone misjudged what work was about and whether it was done.
 `read_row_conversation` takes a row's space ID or a session's agent ID and returns what the person
 and the agent said, and what other agents wrote to it (a subtask's task, a report back), newest
 first, without tool calls or reasoning, capped at 40 messages and about 16,000 characters, through
-History's public page read. The prompt tells Prioritizing to read the conversations a decision
-rests on before placing, ranking, folding, or removing anything.
+History's public page read.
+
+Reading every thread made each turn long, and the first message alone often said too little to
+place new work. Kirill: send every message the person writes in stem-cell chats to the focus
+agent, "and the last text message before", so it has enough context. Each later message the person
+writes in work that started as a stem cell, or in a session under it, is now a short calm-brief
+notice quoting the agent's last text reply (400 characters) and the message (900), without tool
+calls; a session under such work that stops is one too, with its last reply. Only the latest three
+notices per row wait, so a busy chat never crowds the rest out. They wait for calm like every other
+notice, never waking Prioritizing while the person works. Stem-cell origin is read from the
+subject-naming mark, which only `createStemCell` sets and which covers chats under it. The prompt
+now calls `read_row_conversation` a last resort, for when a decision is genuinely unclear.
+
+## Sections are the layout, and Prioritizing inserts rather than reshuffles
+
+Prioritizing barely used sections and treated new work as something to rank among the rest.
+Kirill: sections are "one of the core components"; keep "a bucket for distractions" folded by
+default; place a stem cell "when there's enough signal"; and "we want minimal reordering. We just
+want insertion usually", with no major reorganisation unless the person asks. The prompt now makes
+topic sections the layout, keeps one `distractions` section labelled Distractions and collapsed for
+work outside the person's focus, places new work once its messages make the subject clear, adds a
+new section where no existing row changes section, and moves a placed row only for a strong reason.
+A session that needs the person (review, approval, an answer) is nested under its row, expanded,
+and taken out again afterwards. The daemon enforces the cheap part: one calm batch moves at most
+two rows already placed (`SIDEBAR_MOVE_LIMIT`), counting carried and regrouped rows across every
+proposal in the batch; placing new pending work does not count, a request the person made in their
+own words lifts the limit, and further moves are dropped with a note. In the first live run
+Prioritizing still filed related work beside a row in the default Tasks section instead of making
+a topic section; the prompt now says Bots and Tasks are defaults, not topics, and that a placed
+row that clearly belongs in a new topic section may be the batch's one move. The prompt was
+rewritten shorter, from about 9,600 to about 6,500 characters.
 
 ## Prioritizing runs on the default model from Settings
 

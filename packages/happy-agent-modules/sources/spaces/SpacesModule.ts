@@ -126,7 +126,11 @@ import {
 } from "./impl/applyPrioritizingOperations.js";
 import { migrateLegacySidebar } from "./impl/migrateLegacySidebar.js";
 import { recordSidebarAuthorship } from "./impl/recordSidebarAuthorship.js";
-import type { PrioritizingRules } from "./impl/reviewPrioritizingOperation.js";
+import { SIDEBAR_MOVE_LIMIT, type PrioritizingRules } from "./impl/reviewPrioritizingOperation.js";
+import {
+    conversationBriefPrefix,
+    formatConversationBrief,
+} from "./impl/formatConversationBrief.js";
 import {
     isSidebarHeading,
     newSpacePosition,
@@ -156,8 +160,10 @@ const CALM_CHECK_INTERVAL_MS = 15_000;
 const BRIEF_FUNCTION = "spaces.briefPrioritizing";
 /** The opening task of a new Prioritizing; work seeded before it existed waits for it. */
 const PRIORITIZING_OPENING =
-    "Keep this person's sidebar tidy from now on. It was just made to mirror the sidebar they already know, so change nothing in it now: read it with list_sidebar and give rows and sessions icons. From your next notice on, read the conversations with read_row_conversation, then use edit_sidebar to order rows within the visible budget, under titled happy-section headings for subjects or happy-separator rules where only a visual break helps. Keep sessions hidden unless there is a strong reason to show one. Leave new work that has no first message alone. Preserve manual placement and recent work.";
+    "Keep this person's sidebar tidy from now on. It was just made to mirror the sidebar they already know, so change nothing in it now: read it with list_sidebar and give rows and sessions icons. From your next notice on, place new work into topic sections as your instructions say.";
 const MAX_BRIEF_TEXT = 2_000;
+/** How many notices about one conversation wait for the calm brief; older ones are dropped. */
+const CONVERSATION_BRIEFS_KEPT = 3;
 /** Work active this recently is never folded or hidden by Prioritizing. */
 export const SPACE_RECENT_WORK_MS = 2 * 60 * 60_000;
 
@@ -333,12 +339,28 @@ export class SpacesModule implements AgentModule {
         afterAgentSettled: async (ctx, scope) => {
             const owner = (await queryOwnerByPrioritizingAgent(ctx, scope.agent.id))?.ownerUserId;
             if (owner === undefined) {
-                for (const row of await querySpacesByAgent(ctx, scope.agent.id)) {
+                const rows = await querySpacesByAgent(ctx, scope.agent.id);
+                for (const row of rows) {
                     if (row.role === "item")
                         await this.#queueSidebarBrief(
                             ctx,
                             row.ownerUserId,
                             `Work finished or paused in space ${row.id}.`,
+                        );
+                }
+                // A session under new work may now need the person, such as for a review.
+                if (rows.length === 0 && (await this.#startedAsStemCell(ctx, scope.agent.id))) {
+                    const agentText = await this.#lastAgentText(ctx, scope.agent.id);
+                    for (const row of await this.#sessionRows(ctx, scope.agent.id))
+                        await this.#queueSidebarBrief(
+                            ctx,
+                            row.ownerUserId,
+                            formatConversationBrief({
+                                rowId: row.id,
+                                sessionId: scope.agent.id,
+                                agentText,
+                            }),
+                            conversationBriefPrefix(row.id),
                         );
                 }
                 return;
@@ -380,28 +402,50 @@ export class SpacesModule implements AgentModule {
             if (accepted.message.role !== "user" || !isUserOriginMetadata(accepted.metadata)) {
                 return;
             }
-            const rows = await querySpacesByAgent(ctx, scope.agent.id);
+            const own = await querySpacesByAgent(ctx, scope.agent.id);
+            const rows = own.length > 0 ? own : await this.#sessionRows(ctx, scope.agent.id);
+            const text = accepted.message.content
+                .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                .join("\n")
+                .trim();
             const now = Date.now();
+            let forward: boolean | undefined;
             for (const row of rows) {
                 afterCommit(ctx, () => {
                     this.#activeAt.set(row.ownerUserId, now);
                 });
-                // New work is told to Prioritizing once, with what the person first asked.
-                if (row.role !== "item" || row.briefedAt !== undefined) continue;
-                if (row.icon !== undefined && row.icon.type !== "stem_cell") continue;
-                const text = accepted.message.content
-                    .flatMap((block) => (block.type === "text" ? [block.text] : []))
-                    .join("\n")
-                    .trim();
-                if (text.length === 0) continue;
-                await updateSpaceBriefedAt(ctx, row.id, now);
-                const placedByPerson =
-                    (await this.#ownerState(ctx, row.ownerUserId)).sidebarAuthorship?.[row.id]
-                        ?.place === "person";
-                await this.#brief(
+                if (row.role !== "item" || text.length === 0) continue;
+                // New work is told to Prioritizing at once, with what the person first asked.
+                if (
+                    own.length > 0 &&
+                    row.briefedAt === undefined &&
+                    (row.icon === undefined || row.icon.type === "stem_cell")
+                ) {
+                    await updateSpaceBriefedAt(ctx, row.id, now);
+                    const placedByPerson =
+                        (await this.#ownerState(ctx, row.ownerUserId)).sidebarAuthorship?.[row.id]
+                            ?.place === "person";
+                    await this.#brief(
+                        ctx,
+                        row.ownerUserId,
+                        newWorkBrief(row, text, placedByPerson === true),
+                    );
+                    continue;
+                }
+                // Every later message in work started as a stem cell, or in a session under it,
+                // waits for the calm brief with the agent's reply it answers.
+                forward ??= await this.#startedAsStemCell(ctx, scope.agent.id);
+                if (!forward) continue;
+                await this.#queueSidebarBrief(
                     ctx,
                     row.ownerUserId,
-                    newWorkBrief(row, text, placedByPerson === true),
+                    formatConversationBrief({
+                        rowId: row.id,
+                        ...(own.length > 0 ? {} : { sessionId: scope.agent.id }),
+                        agentText: await this.#lastAgentText(ctx, scope.agent.id),
+                        personText: text,
+                    }),
+                    conversationBriefPrefix(row.id),
                 );
             }
         },
@@ -1090,15 +1134,19 @@ export class SpacesModule implements AgentModule {
     async #prioritizingRules(ctx: Context, state: SpaceOwnerState): Promise<PrioritizingRules> {
         const rows = await querySpaces(ctx, state.ownerUserId);
         const recent = new Set<string>();
+        const fresh = new Set<string>();
         for (const row of rows) {
             // New pending work may still receive its first placement.
             const firstPlacement =
                 row.placement === "pending" && state.sidebarPlacedIds?.includes(row.id) !== true;
-            if (!firstPlacement && (await this.#recentWork(ctx, row)) !== undefined)
-                recent.add(row.id);
+            if (firstPlacement) fresh.add(row.id);
+            else if ((await this.#recentWork(ctx, row)) !== undefined) recent.add(row.id);
         }
         const authorship = state.sidebarAuthorship ?? {};
         return {
+            fresh,
+            // A reorganisation the person asked for in their own words is not held to the limit.
+            moveLimit: state.applyRequestedAt === undefined ? SIDEBAR_MOVE_LIMIT : undefined,
             person: (id, aspect) => authorship[id]?.[aspect] === "person",
             rows: new Set(rows.map((row) => row.id)),
             happyId: rows.find((row) => row.role === "happy")?.id,
@@ -1130,11 +1178,20 @@ export class SpacesModule implements AgentModule {
             );
         if (pending.length >= 32)
             throw new SpaceInputError("Apply the pending sidebar batch before adding more edits.");
+        const rules = await this.#prioritizingRules(ctx, state);
+        // Earlier proposals of this batch already spent part of its move limit.
+        const earlier = applyPrioritizingOperations(
+            view.current.document,
+            pending.flatMap((proposal) => proposal.operations),
+            { ...rules, moveLimit: undefined },
+            undefined,
+        );
         const reviewed = applyPrioritizingOperations(
             view.document,
             sidebarDiff(view.document, proposed, { widgets: true }),
-            await this.#prioritizingRules(ctx, state),
+            rules,
             undefined,
+            earlier.moved,
         );
         await this.#checkSidebarIds(
             ctx,
@@ -1361,13 +1418,28 @@ export class SpacesModule implements AgentModule {
         return this.#artifacts?.sidebarTools(agentId) ?? [];
     }
 
-    async #queueSidebarBrief(ctx: Context, ownerUserId: SpaceOwnerId, text: string): Promise<void> {
+    /**
+     * Hold a notice for the next calm brief. Notices starting with `replaces` are one
+     * conversation's: only the latest few are kept, so a busy chat never crowds out the rest.
+     */
+    async #queueSidebarBrief(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        text: string,
+        replaces?: string,
+    ): Promise<void> {
         if (!(await this.#stemCellsEnabled(ctx, ownerUserId))) return;
         const state = await this.#ownerState(ctx, ownerUserId);
         if (state.sidebarArtifactId === undefined) return;
+        let earlier = state.sidebarBrief ?? [];
+        if (replaces !== undefined) {
+            const same = earlier.filter((notice) => notice.startsWith(replaces));
+            const stale = new Set(same.slice(0, -(CONVERSATION_BRIEFS_KEPT - 1)));
+            earlier = earlier.filter((notice) => !stale.has(notice));
+        }
         await writeOwnerState(ctx, {
             ...state,
-            sidebarBrief: [...new Set([...(state.sidebarBrief ?? []), text])].slice(-32),
+            sidebarBrief: [...new Set([...earlier, text])].slice(-32),
         });
     }
 
@@ -1378,7 +1450,7 @@ export class SpacesModule implements AgentModule {
             await this.#brief(
                 txCtx,
                 ownerUserId,
-                "The person is calm. Review these sidebar changes and the current artifact; edit only if needed.",
+                "The person is away. Here is what happened since your last notice; edit only if needed.",
             );
         });
     }
@@ -1945,6 +2017,11 @@ export class SpacesModule implements AgentModule {
 
     /** The people whose rows hold this session: the owners of the rows of its root conversation. */
     async #sessionOwners(ctx: Context, agentId: string): Promise<string[]> {
+        return [...new Set((await this.#sessionRows(ctx, agentId)).map((row) => row.ownerUserId))];
+    }
+
+    /** The rows a session sits under: those of its root conversation, or none for a root. */
+    async #sessionRows(ctx: Context, agentId: string): Promise<SpaceRecord[]> {
         let root = agentId;
         for (let depth = 0; depth < 16; depth++) {
             const parent = await this.#parentOf(ctx, root);
@@ -1952,7 +2029,33 @@ export class SpacesModule implements AgentModule {
             root = parent;
         }
         if (root === agentId) return [];
-        return [...new Set((await querySpacesByAgent(ctx, root)).map((row) => row.ownerUserId))];
+        return await querySpacesByAgent(ctx, root);
+    }
+
+    /**
+     * Whether this conversation, or one above it, began as a stem cell. Making a stem cell marks
+     * its conversation to be named by subject, and only a stem cell does, so that mark says it.
+     */
+    async #startedAsStemCell(ctx: Context, agentId: string): Promise<boolean> {
+        return (await this.#titles.namingStyle(ctx, agentId)) === "subject";
+    }
+
+    /** The agent's latest reply with text, before whatever the person writes next. */
+    async #lastAgentText(ctx: Context, agentId: string): Promise<string | undefined> {
+        const page = await this.#history.read(ctx, agentId, {
+            from: "end",
+            roles: ["assistant"],
+            limit: 20,
+        });
+        for (const { message } of [...page.messages].reverse()) {
+            if (message.hideFromUser === true) continue;
+            const text = message.blocks
+                .flatMap((block) => (block.type === "text" ? [block.text.trim()] : []))
+                .filter((part) => part.length > 0)
+                .join("\n\n");
+            if (text.length > 0) return text;
+        }
+        return undefined;
     }
 
     /**
@@ -2152,6 +2255,7 @@ export class SpacesModule implements AgentModule {
         const notes: string[] = [];
         const applied: SpaceSidebarOperation[] = [];
         let wrote = false;
+        let movedRows = new Set<string>();
         for (const [index, proposal] of pending.entries()) {
             const result = applyPrioritizingOperations(
                 current.document,
@@ -2163,6 +2267,7 @@ export class SpacesModule implements AgentModule {
                     proposal.baseVersion,
                     pending.slice(0, index),
                 ),
+                movedRows,
             );
             try {
                 await this.#checkSidebarIds(
@@ -2193,6 +2298,7 @@ export class SpacesModule implements AgentModule {
                 metadata,
             });
             current = { version, document: result.document };
+            movedRows = result.moved;
             applied.push(...result.operations);
             wrote = true;
         }
@@ -2412,11 +2518,7 @@ export class SpacesModule implements AgentModule {
     ): Promise<void> {
         if ((await this.#livePrioritizing(ctx, ownerUserId)) === undefined) return;
         const state = await this.#ownerState(ctx, ownerUserId);
-        const brief = [
-            text,
-            ...(state.sidebarBrief ?? []),
-            "Read the sidebar with list_sidebar and read_row_conversation before placing or ranking anything, keep within the visible budget, and preserve manual moves and folds.",
-        ]
+        const brief = [text, ...(state.sidebarBrief ?? []), "Start with list_sidebar."]
             .join("\n\n")
             .slice(0, 20_000);
         await this.#durableFunctions.invoke(ctx, {
@@ -3024,7 +3126,7 @@ function newWorkBrief(row: SpaceRecord, text: string, placedByPerson: boolean): 
         `New work started in row ${row.id}. Its first message:`,
         excerpt,
         row.placement === "pending" && !placedByPerson
-            ? "Choose its icon now with set_space_icon, then read the sidebar with list_sidebar and place it with edit_sidebar next to the rows it belongs with. This first placement waits for a calm moment."
+            ? "Choose its icon now with set_space_icon. If its subject is clear, place it into the section it belongs in with edit_sidebar; if not, leave it and place it once later messages make it clear."
             : "The person already placed it. Choose its icon now with set_space_icon; do not move it.",
     ].join("\n\n");
 }

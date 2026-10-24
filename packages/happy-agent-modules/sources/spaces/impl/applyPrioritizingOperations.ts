@@ -7,21 +7,30 @@ import {
 
 import {
     reviewPrioritizingOperation,
+    travelledSidebarIds,
     type PrioritizingRules,
 } from "./reviewPrioritizingOperation.js";
 
 /**
  * Prioritizing's operations, applied one at a time through the same rebase as the person's. An
  * operation that no longer applies, or that the rules refuse, is dropped with a note saying why,
- * and the rest still apply.
+ * and the rest still apply. Rows already in place that an operation moves count against the
+ * batch's move limit, starting from `alreadyMoved`; `moved` returns every one moved so far.
  */
 export function applyPrioritizingOperations(
     document: SpaceSidebarDocument,
     operations: readonly SpaceSidebarOperation[],
     rules: PrioritizingRules,
     base: SpaceSidebarDocument | undefined,
-): { document: SpaceSidebarDocument; operations: SpaceSidebarOperation[]; notes: string[] } {
+    alreadyMoved: ReadonlySet<string> = new Set(),
+): {
+    document: SpaceSidebarDocument;
+    operations: SpaceSidebarOperation[];
+    notes: string[];
+    moved: Set<string>;
+} {
     let working = document;
+    let moved = new Set(alreadyMoved);
     const applied: SpaceSidebarOperation[] = [];
     const notes: string[] = [];
     for (const operation of operations) {
@@ -46,10 +55,20 @@ export function applyPrioritizingOperations(
             notes.push(`Dropped ${describeSidebarOperation(operation)}: ${refusal}`);
             continue;
         }
+        const travelled = new Set(moved);
+        for (const id of travelledSidebarIds(working, step.document, done))
+            if (rules.rows.has(id) && !rules.fresh.has(id)) travelled.add(id);
+        if (rules.moveLimit !== undefined && travelled.size > rules.moveLimit) {
+            notes.push(
+                `Dropped ${describeSidebarOperation(operation)}: one batch moves at most ${String(rules.moveLimit)} rows already in place. Place new work instead, and move another row in a later batch only if it still matters.`,
+            );
+            continue;
+        }
+        moved = travelled;
         working = step.document;
         applied.push(done);
     }
-    return { document: working, operations: applied, notes };
+    return { document: working, operations: applied, notes, moved };
 }
 
 /** The applied operations, ignoring every rule, for drawing what queued proposals will make. */

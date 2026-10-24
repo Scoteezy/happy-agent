@@ -10165,7 +10165,11 @@ compact card says more than a row.
 
 Fold state lives in the document; clients report nothing else about what the person sees.
 Committed manual document changes enter the next calm brief and preserve the person's authority
-over the moved or folded items.
+over the moved or folded items. After new work's first message, every later message the person
+writes in it, or in a session under it, also enters the next calm brief, with the agent's last
+text reply before it; both are shortened, without tool calls, and only the latest three notices
+per row are kept. So does a session under such work that stops, with its last reply. Work that did
+not start as new work through `POST /v0/spaces/stem-cells` is not forwarded.
 
 New spaces are inserted immediately after Happy's top-level `happy-space` element, below everything
 nested in it, or immediately after the section or separator named at creation. When Happy's row is
@@ -10182,7 +10186,11 @@ section or separator counts as moved. Moves are attributed at block level: when 
 changes position, its heading counts as moved and its rows as carried, so a person's section drag
 protects the section, not each row. Prioritizing may not move a block that carries Happy, untouched
 new work, or work active in the last two hours, and may not remove or relabel the default `bots`
-and `tasks` sections. Prioritizing's new or renamed section labels may not name age
+and `tasks` sections. One batch of Prioritizing's may move at most two rows that were already
+placed, counting rows carried with a moved section and rows that come to sit under another
+heading; placing new pending work does not count, and there is no limit when the person asked for
+the change in their own words. Further moves are dropped with a note. Prioritizing's new or
+renamed section labels may not name age
 or whether work is finished (such as Older, Done, Archive, or Stale) and may not repeat another
 section's label ignoring case and spacing; the person may label sections freely.
 

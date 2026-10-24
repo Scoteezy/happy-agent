@@ -12,7 +12,10 @@ import {
     projectSidebar,
 } from "../../../sources/spaces/impl/applyPrioritizingOperations.js";
 import { recordSidebarAuthorship } from "../../../sources/spaces/impl/recordSidebarAuthorship.js";
-import type { PrioritizingRules } from "../../../sources/spaces/impl/reviewPrioritizingOperation.js";
+import {
+    SIDEBAR_MOVE_LIMIT,
+    type PrioritizingRules,
+} from "../../../sources/spaces/impl/reviewPrioritizingOperation.js";
 
 const doc = (...items: string[]) =>
     parseSpaceSidebar(`<nav><happy-search/><happy-create/>${items.join("")}</nav>`);
@@ -39,6 +42,8 @@ function rules(
         untouched: new Set(["fresh"]),
         recent: new Set(["busy"]),
         manual: new Set(),
+        fresh: new Set(["fresh"]),
+        moveLimit: undefined,
         ...overrides,
     };
 }
@@ -106,6 +111,93 @@ describe("Prioritizing's operations", () => {
         expect(refused({ type: "set", id: "desktop", label: " bots " })).toContain(
             'already called "Bots"',
         );
+    });
+
+    it("places new work and adds sections freely, but moves only a few placed rows per batch", () => {
+        const sidebar = doc(
+            '<happy-space id="happy"/>',
+            '<happy-space id="cell"/>',
+            '<happy-section id="desktop" label="Desktop"/>',
+            '<happy-space id="a"/>',
+            '<happy-space id="b"/>',
+            '<happy-space id="c"/>',
+            '<happy-section id="bots" label="Bots"/>',
+            '<happy-space id="helper"/>',
+        );
+        const limited = rules(
+            {},
+            {
+                rows: new Set(["happy", "cell", "a", "b", "c", "helper"]),
+                untouched: new Set(),
+                recent: new Set(),
+                fresh: new Set(["cell"]),
+                moveLimit: SIDEBAR_MOVE_LIMIT,
+            },
+        );
+        const operations: SpaceSidebarOperation[] = [
+            {
+                type: "insert",
+                node: { type: "section", id: "research", label: "Research" },
+                to: { after: "helper" },
+            },
+            { type: "move", id: "cell", to: { after: "research" } },
+            {
+                type: "insert",
+                node: {
+                    type: "section",
+                    id: "distractions",
+                    label: "Distractions",
+                    collapsed: true,
+                },
+                to: { after: "cell" },
+            },
+            { type: "move", id: "a", to: { after: "distractions" } },
+            { type: "move", id: "b", to: { after: "a" } },
+            { type: "move", id: "c", to: { after: "b" } },
+            // A section carries its rows, so moving it moves placed rows too.
+            { type: "move", id: "bots", to: { after: "happy" } },
+        ];
+        const result = applyPrioritizingOperations(sidebar, operations, limited, undefined);
+        expect(result.operations).toEqual(operations.slice(0, 5));
+        expect(result.moved).toEqual(new Set(["a", "b"]));
+        expect(result.notes).toEqual([
+            "Dropped move c after b: one batch moves at most 2 rows already in place. Place new work instead, and move another row in a later batch only if it still matters.",
+            "Dropped move bots after happy: one batch moves at most 2 rows already in place. Place new work instead, and move another row in a later batch only if it still matters.",
+        ]);
+        // Earlier proposals of the same batch already spent the limit.
+        expect(
+            applyPrioritizingOperations(
+                sidebar,
+                [{ type: "move", id: "c", to: { after: "helper" } }],
+                limited,
+                undefined,
+                new Set(["a", "b"]),
+            ).operations,
+        ).toEqual([]);
+        // A heading inserted among placed rows regroups the rows after it, which counts.
+        expect(
+            applyPrioritizingOperations(
+                sidebar,
+                [
+                    {
+                        type: "insert",
+                        node: { type: "section", id: "split", label: "Split" },
+                        to: { after: "a" },
+                    },
+                ],
+                { ...limited, moveLimit: 1 },
+                undefined,
+            ).operations,
+        ).toEqual([]);
+        // When the person asked for the reorganisation, there is no limit.
+        expect(
+            applyPrioritizingOperations(
+                sidebar,
+                operations,
+                { ...limited, moveLimit: undefined },
+                undefined,
+            ).operations,
+        ).toEqual(operations);
     });
 
     it("keeps a widget the person last edited", () => {

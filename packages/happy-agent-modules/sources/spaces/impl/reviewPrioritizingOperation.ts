@@ -26,7 +26,17 @@ export interface PrioritizingRules {
     readonly recent: ReadonlySet<string>;
     /** Rows the person placed through the row route. */
     readonly manual: ReadonlySet<string>;
+    /** New rows waiting for their first placement: placing one is an insertion, not a move. */
+    readonly fresh: ReadonlySet<string>;
+    /**
+     * How many rows already in place one batch may move, or `undefined` when the person asked for
+     * the change in their own words.
+     */
+    readonly moveLimit: number | undefined;
 }
+
+/** Rows already in place that one calm batch may move unless the person asked for more. */
+export const SIDEBAR_MOVE_LIMIT = 2;
 
 /** The seed's default sections, which only the person may remove or rename. */
 export const DEFAULT_SIDEBAR_SECTION_IDS: readonly string[] = ["bots", "tasks"];
@@ -112,6 +122,27 @@ export function reviewPrioritizingOperation(
             return "Leave work active in the last two hours where it is, and shown.";
     }
     return undefined;
+}
+
+/**
+ * The rows one operation moves, carries, or regroups under another heading. Removing a row is not
+ * counted: it leaves rather than moving.
+ */
+export function travelledSidebarIds(
+    before: SpaceSidebarDocument,
+    after: SpaceSidebarDocument,
+    operation: SpaceSidebarOperation,
+): Set<string> {
+    const travelled = new Set<string>(regroupedSidebarIds(before, after));
+    if (operation.type === "move") {
+        const at = locateSpaceSidebarNode(before, operation.id);
+        if (at !== undefined) {
+            const from = at.siblings.indexOf(at.node);
+            const run = at.siblings.slice(from, from + spaceSidebarRunLength(at.siblings, from));
+            for (const node of run) sidebarIds([node]).forEach((id) => travelled.add(id));
+        }
+    }
+    return travelled;
 }
 
 /** An "Older" or "Done" section reads as finished work; sections name subjects instead. */

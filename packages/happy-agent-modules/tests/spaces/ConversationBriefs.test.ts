@@ -1,0 +1,177 @@
+import { expect, it } from "vitest";
+import type { AgentModuleHooks, AgentSystemRef } from "@slopus/happy-agent-base";
+
+import { SpacesModule, spaceMigrations, type SpaceRecord } from "../../sources/spaces/index.js";
+import {
+    insertSpace,
+    queryOwnerState,
+    writeOwnerState,
+} from "../../sources/spaces/persistence/SpacesPersistence.js";
+import { formatConversationBrief } from "../../sources/spaces/impl/formatConversationBrief.js";
+import { moduleDatabase } from "../support/moduleDatabase.js";
+
+const OWNER = "standalone";
+const STEM = "agentstemaaaaaaaaaaaaaaa";
+const REVIEW = "agentreviewaaaaaaaaaaaaa";
+const PLAIN = "agentplainaaaaaaaaaaaaaa";
+const PRIORITIZING = "agentprioaaaaaaaaaaaaaaa";
+
+type Params = ConstructorParameters<typeof SpacesModule>;
+type Accepted = Parameters<NonNullable<AgentModuleHooks["messageAcceptedTransact"]>>[2];
+
+function row(id: string, agentId: string, fresh = false): SpaceRecord {
+    return {
+        id,
+        ownerUserId: OWNER,
+        role: "item",
+        icon: fresh ? { type: "stem_cell" } : { type: "library", slug: "code" },
+        contents: [{ kind: "task", taskId: `task${id.slice(4)}`, agentId }],
+        orderKey: "1",
+        placement: "pending",
+        visibility: "shown",
+        ...(fresh ? {} : { briefedAt: 1 }),
+        version: 1,
+        createdAt: 1,
+        updatedAt: 1,
+    };
+}
+
+/** Spaces with every collaborator stubbed except the database it keeps its own state in. */
+async function setup() {
+    const database = moduleDatabase(spaceMigrations, "conversation-briefs");
+    await database.ready;
+    const invoked: { arguments: { text: string } }[] = [];
+    const replies = new Map<string, string[]>();
+    const parents = new Map<string, string>([[REVIEW, STEM]]);
+    const spaces = new SpacesModule(
+        { configuration: { values: { feature: { team: { enabled: false } } } } } as Params[0],
+        {} as Params[1],
+        {} as Params[2],
+        {} as Params[3],
+        {
+            read: async (_ctx: unknown, agentId: string) => ({
+                messages: (replies.get(agentId) ?? []).map((text) => ({
+                    message: { role: "assistant", blocks: [{ type: "text", text }] },
+                })),
+            }),
+        } as unknown as Params[4],
+        {} as Params[5],
+        {
+            register: () => undefined,
+            invoke: async (_ctx: unknown, call: { arguments: { text: string } }) => {
+                invoked.push(call);
+            },
+        } as unknown as Params[6],
+        {} as Params[7],
+        { enabled: false } as unknown as Params[8],
+        { get: async () => ({ value: true }) } as unknown as Params[9],
+        {
+            // Only work started as a stem cell, and what runs under it, is named by subject.
+            namingStyle: async (_ctx: unknown, agentId: string) =>
+                agentId === STEM || agentId === REVIEW ? "subject" : "standard",
+        } as unknown as Params[10],
+    );
+    const hooks = spaces.beforeStart(database.context, {
+        config: async (_ctx: unknown, id: string) => ({ id, metadata: {} }),
+        parentOf: async (_ctx: unknown, id: string) => parents.get(id) ?? null,
+    } as unknown as AgentSystemRef);
+    await writeOwnerState(database.context, {
+        ownerUserId: OWNER,
+        sidebarArtifactId: "artifactaaaaaaaaaaaaaaaa",
+        prioritizingAgentId: PRIORITIZING,
+    });
+    await insertSpace(database.context, row("spacestemaaaaaaaaaaaaaaa", STEM));
+    await insertSpace(database.context, row("spaceplainaaaaaaaaaaaaaa", PLAIN));
+    const send = async (agentId: string, text: string, origin = "user") =>
+        await hooks.messageAcceptedTransact!(
+            database.context,
+            { agent: { id: agentId } } as Parameters<
+                NonNullable<AgentModuleHooks["messageAcceptedTransact"]>
+            >[1],
+            {
+                message: { role: "user", content: [{ type: "text", text }] },
+                metadata: { messageOrigin: origin },
+            } as unknown as Accepted,
+        );
+    const briefs = async () => (await queryOwnerState(database.context, OWNER))?.sidebarBrief ?? [];
+    return { database, hooks, replies, invoked, send, briefs };
+}
+
+it("forwards the person's messages in stem-cell work with the agent's reply before each", async () => {
+    const h = await setup();
+    try {
+        h.replies.set(STEM, ["Which platform first?", "", "Which platform first, iOS or Android?"]);
+        await h.send(STEM, "Android first, the beta is due Friday.");
+        expect(await h.briefs()).toEqual([
+            [
+                "Conversation in spacestemaaaaaaaaaaaaaaa: the person wrote in row spacestemaaaaaaaaaaaaaaa.",
+                "Agent before it: Which platform first, iOS or Android?",
+                "Person: Android first, the beta is due Friday.",
+            ].join("\n"),
+        ]);
+        // Messages an agent sent, and work that did not start as a stem cell, are not forwarded.
+        await h.send(STEM, "Status of the subtask: done.", "agent");
+        await h.send(PLAIN, "Rename the release branch.");
+        expect(await h.briefs()).toHaveLength(1);
+        // A session under stem-cell work is forwarded under its row.
+        h.replies.set(REVIEW, ["The patch is ready for your review."]);
+        await h.send(REVIEW, "Looks good, merge it.");
+        expect((await h.briefs()).at(-1)).toBe(
+            [
+                "Conversation in spacestemaaaaaaaaaaaaaaa: the person wrote in session agentreviewaaaaaaaaaaaaa under row spacestemaaaaaaaaaaaaaaa.",
+                "Agent before it: The patch is ready for your review.",
+                "Person: Looks good, merge it.",
+            ].join("\n"),
+        );
+        // Calm briefing waits; nothing reached Prioritizing yet.
+        expect(h.invoked).toEqual([]);
+    } finally {
+        h.database.close();
+    }
+});
+
+it("keeps only the latest few notices of one conversation, each bounded", async () => {
+    const h = await setup();
+    try {
+        h.replies.set(STEM, ["x".repeat(5_000)]);
+        for (const n of [1, 2, 3, 4, 5])
+            await h.send(STEM, `Message ${String(n)} ${"y".repeat(5_000)}`);
+        const kept = await h.briefs();
+        expect(kept.map((brief) => /Person: (Message \d)/.exec(brief)?.[1])).toEqual([
+            "Message 3",
+            "Message 4",
+            "Message 5",
+        ]);
+        for (const brief of kept) expect(brief.length).toBeLessThan(1_500);
+    } finally {
+        h.database.close();
+    }
+});
+
+it("tells Prioritizing about new work's first message at once instead of waiting", async () => {
+    const h = await setup();
+    try {
+        await insertSpace(
+            h.database.context,
+            row("spacefreshaaaaaaaaaaaaaa", "agentfreshaaaaaaaaaaaaaa", true),
+        );
+        await h.send("agentfreshaaaaaaaaaaaaaa", "Plan the Android beta.");
+        expect(h.invoked).toHaveLength(1);
+        expect(h.invoked[0]!.arguments.text).toContain("Plan the Android beta.");
+        expect(await h.briefs()).toEqual([]);
+    } finally {
+        h.database.close();
+    }
+});
+
+it("describes a session that stopped with its last reply", () => {
+    expect(
+        formatConversationBrief({
+            rowId: "row",
+            sessionId: "session",
+            agentText: "Ready  for\n your review.",
+        }),
+    ).toBe(
+        "Conversation in row: session session under row row stopped. Its last reply: Ready for your review.",
+    );
+});

@@ -64,7 +64,7 @@ export function prioritizingTools(
             defer: false,
             capabilities: ["Read what was said in a sidebar row's conversation."],
             description:
-                "Read what the person, the agent, and other agents writing to it (such as the task a subtask was given, or a subtask reporting back) said in a row's conversation (its space ID) or a session under a row (its agent ID), newest first. Tool calls, their output and reasoning are left out; long messages are shortened and the whole answer is capped. Read the conversations a decision rests on before placing, ranking, or tucking anything away.",
+                "Read what the person, the agent, and other agents writing to it (such as the task a subtask was given, or a subtask reporting back) said in a row's conversation (its space ID) or a session under a row (its agent ID), newest first. Tool calls, their output and reasoning are left out; long messages are shortened and the whole answer is capped. A last resort: use it only when a decision is genuinely unclear from the notices.",
             parameters: conversationSchema,
             returnType: resultSchema,
             durable: true,
@@ -79,7 +79,7 @@ export function prioritizingTools(
             defer: false,
             capabilities: ["Edit the person's sidebar artifact."],
             description:
-                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Leave Happy, Search, Create, the person's manual moves and folds, their widgets, new work without a first message, and recent work in place: a change that would touch them is dropped, the rest still queues, and the result lists what was dropped. New pending work may receive its first placement.",
+                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Leave Happy, Search, Create, the person's manual moves and folds, their widgets, new work without a first message, and recent work in place, and move at most a couple of placed rows per batch: a change that breaks this is dropped, the rest still queues, and the result lists what was dropped. Placing new pending work is always allowed.",
             parameters: editsSchema,
             returnType: resultSchema,
             durable: true,

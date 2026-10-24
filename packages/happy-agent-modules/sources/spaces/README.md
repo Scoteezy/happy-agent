@@ -31,11 +31,15 @@ shown count against the visible budget of ten), reads threads with `read_row_con
 writes `edit_sidebar` or `update_artifact`, reads the grammar with `get_sidebar_styles`, and sets
 row and session icons with `set_space_icon`. It may not move Happy, Search, or Create, override
 anything the person last set, or move work active in the last two hours, and it may not touch a
-stem cell before its first message; a section it moves carries its rows under the same rules. An
-operation that breaks a rule is dropped with a note and the rest still applies. Its section
+stem cell before its first message; a section it moves carries its rows under the same rules. One
+calm batch moves at most two rows already placed, unless the person asked in their own words;
+placing new work does not count. An operation that breaks a rule is dropped with a note and the
+rest still applies. Its section
 labels name subjects, never age or doneness, and are unique, and it keeps the Bots and Tasks
-sections. Sessions stay hidden unless it has a strong reason to show one, and a shown session
-counts toward the budget.
+sections. Its prompt makes topic sections the layout, with one folded Distractions section for
+work outside the person's focus, and prefers inserting new work over moving anything. Sessions
+stay hidden unless one needs the person, such as for a review, and a shown session counts toward
+the budget.
 One applied batch records one factual note.
 
 One flat sidebar per person, kept tidy by Prioritizing, a subtask of Happy.
@@ -71,8 +75,12 @@ A stem cell is a fresh unnamed task — its own folder, no project, no bot — w
 the same transaction. The client may choose the row's ID and the task, workspace, and agent IDs,
 so it can show the conversation before the daemon answers; the row's ID is the retry key. Without a section it waits right below Happy as `pending`; made under a section or
 separator it is settled right after it. Nothing touches it before its first human message: Prioritizing is not
-briefed, and its icon, moves, and folds are refused. That message briefs Prioritizing, which
-names an icon at once and queues the placement. Removing a stem cell nobody wrote in archives its
+briefed, and its icon, moves, and folds are refused. That message briefs Prioritizing at once,
+which names an icon and places the row when its subject is clear. Every later message the person
+writes in work that started as a stem cell, or in a session under it, waits for the calm brief
+with the agent's last text before it (`formatConversationBrief`, the latest three per row), as
+does a session under it that stops, so Prioritizing can place the row once there is signal
+without reading the thread. Stem-cell origin is the subject-naming mark `createStemCell` sets. Removing a stem cell nobody wrote in archives its
 task.
 
 ## Prioritizing
