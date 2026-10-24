@@ -143,6 +143,7 @@ it("answers a retried batch once, refuses real conflicts by operation, and repor
     try {
         expect((await h.gym.client.getHealth()).capabilities).toMatchObject({
             sidebarOperations: true,
+            sidebarAttachments: true,
         });
         const start = await full(h);
         expect(start.seed).toBe(true);

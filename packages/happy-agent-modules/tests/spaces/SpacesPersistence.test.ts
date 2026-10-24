@@ -166,9 +166,12 @@ describe("spaces persistence", () => {
     });
 
     it("turns the manual lists into authorship and drops queued whole documents with a note", async () => {
-        const migration = spaceMigrations.at(-1)!;
-        expect(migration[0]).toBe("007-sidebar-operations");
-        const database = moduleDatabase(spaceMigrations.slice(0, -1), "spaces-sidebar-operations");
+        const index = spaceMigrations.findIndex(([key]) => key === "007-sidebar-operations");
+        const migration = spaceMigrations[index]!;
+        const database = moduleDatabase(
+            spaceMigrations.slice(0, index),
+            "spaces-sidebar-operations",
+        );
         await database.ready;
         const ctx = database.context;
         const store = async (ownerUserId: string, state: unknown) =>

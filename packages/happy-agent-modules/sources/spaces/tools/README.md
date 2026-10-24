@@ -10,3 +10,7 @@ messages and about 16,000 characters.
 
 `request_space_placement` is offered to every root conversation. It only briefs Prioritizing;
 when the person asked explicitly, Prioritizing's result applies as soon as it finishes.
+
+`attach_to_my_row` is offered to a conversation with a row, or a session under one, in the sidebar of
+a person with Stem Cells on. It attaches one of the person's rows, an existing todo, document,
+calendar, or chat Surface, or a new one, under the caller's row at once, authored as Prioritizing.

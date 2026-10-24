@@ -9433,7 +9433,9 @@ export class ApiModule implements AgentModule {
                 ...(this.#spaces === undefined || this.#tasks === undefined
                     ? {}
                     : { stemCellIdentities: true }),
-                ...(this.#spaces === undefined ? {} : { sidebarOperations: true }),
+                ...(this.#spaces === undefined
+                    ? {}
+                    : { sidebarOperations: true, sidebarAttachments: true }),
                 ...(this.#live === undefined
                     ? {}
                     : { desktopLiveCapabilities: [...this.#live.desktopCapabilities] }),

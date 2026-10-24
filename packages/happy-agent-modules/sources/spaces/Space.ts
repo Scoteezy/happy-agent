@@ -53,8 +53,18 @@ export const spaceSurfaceTypeSchema = Type.Union([
     Type.Literal("todo"),
     Type.Literal("document"),
     Type.Literal("calendar"),
+    Type.Literal("chat"),
     Type.Literal("reference"),
 ]);
+
+/** The Surfaces a conversation may make, or attach, under its own row. */
+export const spaceAttachableSurfaceTypeSchema = Type.Union([
+    Type.Literal("todo"),
+    Type.Literal("document"),
+    Type.Literal("calendar"),
+    Type.Literal("chat"),
+]);
+export type SpaceAttachableSurfaceType = Static<typeof spaceAttachableSurfaceTypeSchema>;
 
 /** One thing a space holds. The first entry is the one a click opens. */
 export const spaceRefSchema = Type.Union([
@@ -251,6 +261,11 @@ export const spaceOwnerStateSchema = Type.Object(
         sidebarPlacedIds: Type.Optional(
             Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 1000 }),
         ),
+        /**
+         * Surfaces someone attached under a row: their rows stay while the Surface holds no
+         * content, until the person leaves it.
+         */
+        attachedSurfaceIds: Type.Optional(Type.Array(cuid2Schema, { maxItems: 1000 })),
         /** The document is still the classic-sidebar seed nobody has written to yet. */
         sidebarSeed: Type.Optional(Type.Literal(true)),
         /** Icons Prioritizing chose for sessions under the person's rows, by agent ID. */

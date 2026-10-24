@@ -97,6 +97,28 @@ setup must use manager placement, not the person-only legacy PATCH route, which 
 Maintenance notes have durable runs without provider events. Live API delivery must announce the
 terminal run as well as its message so an open chat can render exactly the note found after reload.
 
+## Work carries its lists, and its subtasks only show
+
+Kirill wanted a task's own agent, and Prioritizing, to "add stuff to the sidebar as subsections",
+such as a todo list or a chat with another person under the work it belongs to. A nested
+`happy-space` may now also name one of the person's rows, an attachment. IDs are unique, so a
+space stands in one place only and attaching moves it. Taking an attachment out never deletes it:
+the daemon rewrites that `remove` into a move to the top level right after its row, for the
+person, Prioritizing, and whole-document writes alike, and a leaving row lifts its attachments
+out before its sessions go with it. An attached todo, document, or calendar Surface keeps its row
+while empty (`attachedSurfaceIds`) until the person leaves it; chat Surfaces have rows on
+membership. `attach_to_my_row` is the conversation's tool, offered only when its person has Stem
+Cells on; it applies at once as Prioritizing's write, so the person's placements still win and a
+dragged-out attachment is never put back. People outside the installation cannot be invited, so a
+chat with someone is a chat Surface they are a member of.
+
+Steve likes reviewing the code a subtask changes, so subtasks must be easy to see, but a subtask
+must never move to another row. Sessions still stand only under their own parent on every write
+path. Prioritizing now shows a session the person likely wants (one changing code, or one waiting
+for review), not only one blocked on them. The person reveals a row's sessions with an ordinary
+insert batch; that records the sessions' place as theirs, and Prioritizing may not take them out,
+fold the row, or fold a section over them.
+
 ## Turning Spaces on moves nothing
 
 Kirill asked that new people start from the sidebar they already know, with Prioritizing proposing

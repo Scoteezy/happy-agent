@@ -18,6 +18,8 @@
   override the person's authorship or move Happy, new work, or recent work.
 - `recordSidebarAuthorship` — who last set each node's place, fold, label, fold ribbon, and
   widget content after a batch.
+- `liftSidebarAttachments` — keeps attachments in the sidebar: a removed one moves to the top
+  level after its row, and a leaving row's attachments move out before it goes.
 - `migrateLegacySidebar` — the one-time rewrite of a first-grammar document.
 - `sidebarStyles` — the grammar as `get_sidebar_styles` returns it.
 - `spaceIconSlugs` — the bundled icon library's slugs; clients ship the artwork.

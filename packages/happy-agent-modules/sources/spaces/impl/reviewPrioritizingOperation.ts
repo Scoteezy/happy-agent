@@ -121,6 +121,15 @@ export function reviewPrioritizingOperation(
         if ((travelled || tucked) && rules.recent.has(row))
             return "Leave work active in the last two hours where it is, and shown.";
     }
+    // A session the person revealed stays in view; rows the person placed may still fold.
+    for (const id of shownBefore)
+        if (
+            !rules.rows.has(id) &&
+            !shownAfter.has(id) &&
+            rules.person(id, "place") &&
+            locateSpaceSidebarNode(before, id)?.node.type === "space"
+        )
+            return "Keep the sessions the person revealed in view.";
     return undefined;
 }
 

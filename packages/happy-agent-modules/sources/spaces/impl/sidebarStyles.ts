@@ -1,6 +1,6 @@
 /** The sidebar grammar as Prioritizing reads it from `get_sidebar_styles`. */
 export const SIDEBAR_STYLES = {
-    version: 3,
+    version: 4,
     elements: {
         nav: {
             attributes: { "fold-ribbon": '"hover" (default) or "always"' },
@@ -29,7 +29,7 @@ export const SIDEBAR_STYLES = {
         },
         "happy-space": {
             attributes: {
-                id: "a space ID at the top level, a session's agent ID when nested",
+                id: "a space ID at the top level; when nested, a session's agent ID or an attached space ID",
                 expanded: '"true" or "false" (default)',
                 "fold-ribbon": '"hover" (default) or "always"',
             },
@@ -44,8 +44,8 @@ export const SIDEBAR_STYLES = {
         "nav is the one root and holds a flat ordered list of items.",
         "happy-search and happy-create appear exactly once each.",
         "Every node has a stable ID; happy-search, happy-create, and nav are reserved names, not id values. IDs are unique across the document.",
-        "A top-level happy-space id is a space ID; a nested happy-space id is a session (agent) ID whose parent is the enclosing happy-space.",
-        'A happy-space draws its nested sessions only when expanded="true".',
+        "A top-level happy-space id is a space ID. A nested happy-space id is a session (agent) ID whose parent is the enclosing happy-space, or a space ID attached there; a session never stands under another row, and a space stands in one place only.",
+        'A happy-space draws what is nested in it only when expanded="true".',
         'A happy-section is a titled heading item; collapsed="true" folds the items after it up to the next happy-section or happy-separator. Its label names a subject, never age or whether work is finished.',
         "A happy-separator is a purely visual rule with no title; it cannot fold and it ends a section's run.",
         "A happy-widget is a compact card of free-form HTML, drawn isolated with no access to the app. Use one rarely, only where a card says more than a row, such as a short status summary. It never nests and nothing nests in it; it folds inside a collapsed section and counts toward the visible budget while shown. Its content may not contain </happy-widget.",

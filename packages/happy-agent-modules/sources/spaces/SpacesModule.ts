@@ -61,6 +61,7 @@ import {
     SpaceStorageError,
     SpaceInputError,
     type SidebarAuthor,
+    type SpaceAttachableSurfaceType,
     type SpaceBatch,
     type SpaceDescription,
     type SpaceIconSlug,
@@ -117,6 +118,7 @@ import {
     writeOwnerState,
     deleteSection,
 } from "./persistence/SpacesPersistence.js";
+import { attachToMyRowTool } from "./tools/attach_to_my_row.js";
 import { requestSpacePlacementTool } from "./tools/request_space_placement.js";
 import { prioritizingTools } from "./tools/prioritizingTools.js";
 import {
@@ -124,6 +126,7 @@ import {
     placedSidebarIds,
     projectSidebar,
 } from "./impl/applyPrioritizingOperations.js";
+import { liftAttachmentsOut, liftRemovedAttachments } from "./impl/liftSidebarAttachments.js";
 import { migrateLegacySidebar } from "./impl/migrateLegacySidebar.js";
 import { recordSidebarAuthorship } from "./impl/recordSidebarAuthorship.js";
 import { SIDEBAR_MOVE_LIMIT, type PrioritizingRules } from "./impl/reviewPrioritizingOperation.js";
@@ -303,10 +306,14 @@ export class SpacesModule implements AgentModule {
                 ? input.instructions
                 : formatPrioritizingInstructions(),
         tools: async (ctx, scope): Promise<readonly AnyAgentTool[]> => {
+            // Only people who opted into Stem Cells have a sidebar their conversations attach
+            // to, or a Prioritizing to ask; nobody else's conversations change.
+            const tools: AnyAgentTool[] =
+                (await this.#attachHosts(ctx, scope.agent.id)).length > 0
+                    ? [attachToMyRowTool(this, scope.agent.id)]
+                    : [];
             // People ask for sidebar changes in the conversations they have, not in helpers.
-            if ((await this.#requireAgents().parentOf(ctx, scope.agent.id)) !== null) return [];
-            // Only people who opted into the sidebar have a Prioritizing to ask; nobody else's
-            // conversations change.
+            if ((await this.#requireAgents().parentOf(ctx, scope.agent.id)) !== null) return tools;
             const owners = new Set(
                 (await querySpacesByAgent(ctx, scope.agent.id)).map((row) => row.ownerUserId),
             );
@@ -314,8 +321,8 @@ export class SpacesModule implements AgentModule {
                 owners.add(SPACE_STANDALONE_OWNER);
             for (const owner of owners)
                 if ((await this.#livePrioritizing(ctx, owner)) !== undefined)
-                    return [requestSpacePlacementTool(this, scope.agent.id)];
-            return [];
+                    return [...tools, requestSpacePlacementTool(this, scope.agent.id)];
+            return tools;
         },
         // Prioritizing is one job with one tool array and nothing else.
         overrideTools: async (ctx, scope, input) => {
@@ -707,9 +714,11 @@ export class SpacesModule implements AgentModule {
     }
 
     /**
-     * A top-level happy-space names one of the person's rows; a nested one names a session whose
-     * parent is the conversation it sits under. With `only`, just those nodes are checked: the
-     * ones a batch placed, so a stale node nobody touched never blocks the person's change.
+     * A top-level happy-space names one of the person's rows. A nested one names either a session
+     * whose parent is the conversation it sits under, or one of the person's rows attached there;
+     * a session never stands under another conversation. With `only`, just those nodes are
+     * checked: the ones a batch placed, so a stale node nobody touched never blocks the person's
+     * change.
      */
     async #checkSidebarIds(
         ctx: Context,
@@ -723,21 +732,21 @@ export class SpacesModule implements AgentModule {
             node: SpaceSidebarSpaceNode,
             parentAgent: string | undefined | null,
         ): Promise<void> => {
+            const row = byId.has(node.id);
             if (only === undefined || only.has(node.id)) {
-                if (parentAgent === null) {
-                    if (!byId.has(node.id))
-                        throw new SidebarValidationError(`Unknown space ${node.id}.`);
+                if (parentAgent === null || row) {
+                    if (!row) throw new SidebarValidationError(`Unknown space ${node.id}.`);
                 } else if (
                     parentAgent === undefined ||
                     (await this.#parentOf(ctx, node.id)) !== parentAgent
                 ) {
                     throw new SidebarValidationError(
-                        `${node.id} is not a session of the happy-space it is nested in.`,
+                        `${node.id} is not a session of the happy-space it is nested in, nor one of the person's spaces.`,
                     );
                 }
             }
             let agent: string | undefined = node.id;
-            if (parentAgent === null) {
+            if (row) {
                 const content = byId.get(node.id)?.contents[0];
                 agent =
                     content === undefined || content.kind === "surface"
@@ -747,6 +756,22 @@ export class SpacesModule implements AgentModule {
             for (const child of node.children) await check(child, agent);
         };
         for (const item of document.items) if (item.type === "space") await check(item, null);
+    }
+
+    async #rowIds(ctx: Context, ownerUserId: SpaceOwnerId): Promise<Set<string>> {
+        return new Set((await querySpaces(ctx, ownerUserId)).map((row) => row.id));
+    }
+
+    /** An attachment someone takes out goes back to the top level, after the row that held it. */
+    async #liftRemoved(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        document: SpaceSidebarDocument,
+        operations: readonly SpaceSidebarOperation[],
+    ): Promise<SpaceSidebarOperation[]> {
+        if (!operations.some((operation) => operation.type === "remove")) return [...operations];
+        const rows = await this.#rowIds(ctx, ownerUserId);
+        return liftRemovedAttachments(document, operations, (id) => rows.has(id));
     }
 
     /**
@@ -796,9 +821,15 @@ export class SpacesModule implements AgentModule {
                 }
             let applied: ReturnType<typeof applySpaceSidebarOperations>;
             try {
+                const rows = await this.#rowIds(txCtx, ownerUserId);
                 applied = applySpaceSidebarOperations(
                     current.document,
-                    input.operations,
+                    liftRemovedAttachments(
+                        current.document,
+                        input.operations,
+                        (id) => rows.has(id),
+                        base,
+                    ),
                     base === undefined ? {} : { base },
                 );
             } catch (error: unknown) {
@@ -851,9 +882,14 @@ export class SpacesModule implements AgentModule {
             const current = await this.#sidebarDocument(txCtx, artifactId);
             if (current.version !== input.baseVersion)
                 throw new SidebarConflictError(current.version);
-            const operations = sidebarDiff(current.document, readSidebarDocument(input.html), {
-                widgets: false,
-            });
+            const operations = await this.#liftRemoved(
+                txCtx,
+                ownerUserId,
+                current.document,
+                sidebarDiff(current.document, readSidebarDocument(input.html), {
+                    widgets: false,
+                }),
+            );
             const version = await this.#commitPersonBatch(txCtx, ownerUserId, {
                 artifactId,
                 current,
@@ -893,9 +929,14 @@ export class SpacesModule implements AgentModule {
             const operations =
                 input.html === undefined
                     ? []
-                    : sidebarDiff(current.document, readSidebarDocument(input.html), {
-                          widgets: true,
-                      });
+                    : await this.#liftRemoved(
+                          ctx,
+                          owner.ownerUserId,
+                          current.document,
+                          sidebarDiff(current.document, readSidebarDocument(input.html), {
+                              widgets: true,
+                          }),
+                      );
             await this.#commitPersonBatch(ctx, owner.ownerUserId, {
                 artifactId,
                 current,
@@ -1188,7 +1229,12 @@ export class SpacesModule implements AgentModule {
         );
         const reviewed = applyPrioritizingOperations(
             view.document,
-            sidebarDiff(view.document, proposed, { widgets: true }),
+            await this.#liftRemoved(
+                ctx,
+                state.ownerUserId,
+                view.document,
+                sidebarDiff(view.document, proposed, { widgets: true }),
+            ),
             rules,
             undefined,
             earlier.moved,
@@ -1457,7 +1503,8 @@ export class SpacesModule implements AgentModule {
 
     /**
      * The daemon's own change: new work is inserted where it is expected, and work that left is
-     * removed with everything nested in it. Nobody is recorded as its author.
+     * removed with its sessions, after the spaces attached under it move out to the top level.
+     * Nobody is recorded as its author.
      */
     async #sidebarLifecycle(
         ctx: Context,
@@ -1469,8 +1516,14 @@ export class SpacesModule implements AgentModule {
         if (state.sidebarArtifactId === undefined) return;
         await this.#migrateSidebar(ctx, ownerUserId, state.sidebarArtifactId);
         const current = await this.#sidebarDocument(ctx, state.sidebarArtifactId);
+        const rows = change.remove === undefined ? undefined : await this.#rowIds(ctx, ownerUserId);
         const operations: SpaceSidebarOperation[] =
-            change.remove === undefined ? [] : [{ type: "remove", id: change.remove }];
+            change.remove === undefined
+                ? []
+                : [
+                      ...liftAttachmentsOut(current.document, change.remove, (id) => rows!.has(id)),
+                      { type: "remove", id: change.remove },
+                  ];
         const cleared = applySpaceSidebarOperations(current.document, operations).document;
         if (change.add !== undefined && locateSpaceSidebarNode(cleared, change.add) === undefined) {
             const happyId = (await querySpaces(ctx, ownerUserId)).find(
@@ -2056,6 +2109,188 @@ export class SpacesModule implements AgentModule {
             if (text.length > 0) return text;
         }
         return undefined;
+    }
+
+    /**
+     * The people whose sidebar a conversation can attach to: the owners, with Stem Cells on, of
+     * its own rows or, for a session, of its root conversation's rows, each with that row.
+     */
+    async #attachHosts(ctx: Context, agentId: string): Promise<SpaceRecord[]> {
+        const own = await querySpacesByAgent(ctx, agentId);
+        const rows = own.length > 0 ? own : await this.#sessionRows(ctx, agentId);
+        const hosts: SpaceRecord[] = [];
+        for (const row of rows)
+            if (await this.#stemCellsEnabled(ctx, row.ownerUserId)) hosts.push(row);
+        return hosts;
+    }
+
+    /**
+     * A conversation puts a space under its own row: one of the person's rows, an existing
+     * Surface, or a new one. It applies at once as Prioritizing's write, so it never overrides
+     * what the person placed, and the row is expanded unless the person set its fold.
+     */
+    async attachToRow(
+        ctx: Context,
+        agentId: string,
+        input: {
+            readonly spaceId?: string;
+            readonly surfaceId?: string;
+            readonly create?: { readonly kind: SpaceAttachableSurfaceType; readonly name: string };
+        },
+        ids: { readonly surfaceId: string; readonly operationId: string },
+    ): Promise<string> {
+        if (
+            [input.spaceId, input.surfaceId, input.create].filter((given) => given !== undefined)
+                .length !== 1
+        )
+            throw new SpaceInputError("Give exactly one of spaceId, surfaceId, or create.");
+        return await ctx.inTx(async (txCtx) => {
+            const hosts = await this.#attachHosts(txCtx, agentId);
+            if (hosts.length === 0)
+                throw new SpaceInputError(
+                    "This conversation has no row in a sidebar with Stem Cells turned on.",
+                );
+            let surfaceId = input.surfaceId;
+            if (input.create !== undefined) {
+                const creator = hosts[0]!.ownerUserId;
+                const creatorUserId = creator === SPACE_STANDALONE_OWNER ? null : creator;
+                surfaceId = (
+                    await this.#surfaces.create(
+                        txCtx,
+                        { id: ids.surfaceId, type: input.create.kind, name: input.create.name },
+                        creatorUserId,
+                        undefined,
+                        { userId: creatorUserId, agentId },
+                    )
+                ).id;
+            }
+            const results: string[] = [];
+            for (const host of hosts) {
+                const owner = host.ownerUserId;
+                let space: SpaceRecord | undefined;
+                if (input.spaceId !== undefined) {
+                    space = await querySpace(txCtx, input.spaceId);
+                    if (space?.ownerUserId !== owner) continue;
+                } else {
+                    space = await this.#attachableSurfaceRow(txCtx, owner, surfaceId!);
+                    if (space === undefined) continue;
+                }
+                results.push(await this.#attachUnder(txCtx, owner, host, space, ids.operationId));
+            }
+            if (results.length === 0)
+                throw new SpaceNotFoundError(
+                    input.spaceId !== undefined
+                        ? "That space is not in this person's sidebar."
+                        : "That Surface is not one the person has joined, or its kind cannot be attached.",
+                );
+            if (surfaceId === undefined) return results.join("\n");
+            const surface = await this.#surfaces.get(txCtx, surfaceId);
+            return [
+                ...results,
+                `Surface ${surfaceId} (${surface?.type ?? "surface"}): <happy-surface id="${surfaceId}"/>. Fill it with the ordinary Surface tools.`,
+            ].join("\n");
+        });
+    }
+
+    /** The person's row for a Surface they joined, made now when they have none, and kept while empty. */
+    async #attachableSurfaceRow(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        surfaceId: string,
+    ): Promise<SpaceRecord | undefined> {
+        const surface = await this.#surfaces.get(ctx, surfaceId);
+        const surfaceType = surface === undefined ? undefined : surfaceTypeOf(surface.type);
+        if (
+            surface === undefined ||
+            surfaceType === undefined ||
+            surfaceType === "reference" ||
+            !joinedBy(surface.members, ownerUserId)
+        )
+            return undefined;
+        const state = await this.#ownerState(ctx, ownerUserId);
+        if (state.attachedSurfaceIds?.includes(surfaceId) !== true)
+            await writeOwnerState(ctx, {
+                ...state,
+                attachedSurfaceIds: [...(state.attachedSurfaceIds ?? []), surfaceId].slice(-1000),
+            });
+        await this.#addWork(
+            ctx,
+            ownerUserId,
+            { kind: "surface", surfaceId, surfaceType },
+            surface.image === null ? undefined : { type: "image" },
+        );
+        return await querySpaceByRef(ctx, ownerUserId, `surface:${surfaceId}`);
+    }
+
+    /** One person's attachment of `space` under `host`, committed as its own version. */
+    async #attachUnder(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        host: SpaceRecord,
+        space: SpaceRecord,
+        operationId: string,
+    ): Promise<string> {
+        const title = (await this.describe(ctx, space)).title;
+        if (space.id === host.id)
+            throw new SpaceInputError("A row cannot be attached under itself.");
+        const { artifactId } = await this.sidebar(ctx, ownerUserId);
+        const current = await this.#sidebarDocument(ctx, artifactId);
+        const at = locateSpaceSidebarNode(current.document, host.id);
+        if (at === undefined || at.node.type !== "space")
+            throw new SpaceConflictError(
+                "This conversation's row is not in the sidebar right now, so nothing can go under it.",
+            );
+        const placed = locateSpaceSidebarNode(current.document, space.id);
+        if (placed?.parentId === host.id) return `"${title}" is already under this row.`;
+        const operations: SpaceSidebarOperation[] = [
+            placed === undefined
+                ? {
+                      type: "insert",
+                      node: { type: "space", id: space.id },
+                      to: { parent: host.id },
+                  }
+                : { type: "move", id: space.id, to: { parent: host.id } },
+        ];
+        const state = await this.#ownerState(ctx, ownerUserId);
+        if (!at.node.expanded && state.sidebarAuthorship?.[host.id]?.fold !== "person")
+            operations.push({ type: "set", id: host.id, expanded: true });
+        // The person asked their conversation for this, so recent work and the move limit do not
+        // hold it back; what the person placed still does.
+        const reviewed = applyPrioritizingOperations(
+            current.document,
+            operations,
+            {
+                ...(await this.#prioritizingRules(ctx, state)),
+                recent: new Set(),
+                moveLimit: undefined,
+            },
+            undefined,
+        );
+        if (reviewed.operations[0]?.type === "set" || reviewed.operations.length === 0)
+            throw new SpaceConflictError(
+                `"${title}" stays where it is. ${reviewed.notes.join(" ").replace(/^Dropped [^:]*: /, "")}`.trim(),
+            );
+        await this.#checkSidebarIds(
+            ctx,
+            ownerUserId,
+            reviewed.document,
+            placedSidebarIds(reviewed.operations),
+        );
+        await this.#commitSidebarVersion(ctx, ownerUserId, {
+            artifactId,
+            previousVersion: current.version,
+            before: current.document,
+            after: reviewed.document,
+            operations: reviewed.operations,
+            author: "prioritizing",
+            operationId: `${operationId}:${ownerUserId}`,
+        });
+        await this.#queueSidebarBrief(
+            ctx,
+            ownerUserId,
+            `The conversation of row ${host.id} attached ${space.id} under it.`,
+        );
+        return `Attached "${title}" under this conversation's row in the sidebar.`;
     }
 
     /**
@@ -2903,11 +3138,16 @@ export class SpacesModule implements AgentModule {
         );
     }
 
-    /** Eligibility is current content plus membership; existing placement remains the person's. */
+    /**
+     * Eligibility is current content plus membership, or membership alone for a Surface someone
+     * attached under a row; existing placement remains the person's.
+     */
     async #reconcileSurfaces(ctx: Context, onlySurfaceId?: string): Promise<void> {
-        const ownerIds = (await queryOwnerStates(ctx)).map((state) => state.ownerUserId);
+        const owners = await queryOwnerStates(ctx);
+        const ownerIds = owners.map((state) => state.ownerUserId);
         if (ownerIds.length === 0) return;
         const eligible = new Map<string, SpaceRef & { kind: "surface" }>();
+        const attachable = new Map<string, SpaceRef & { kind: "surface" }>();
         const surfaces = (await this.#surfaces.list(ctx)).filter(
             (surface) => onlySurfaceId === undefined || surface.id === onlySurfaceId,
         );
@@ -2918,13 +3158,20 @@ export class SpacesModule implements AgentModule {
                 !ownerIds.some((owner) => joinedBy(surface.members, owner))
             )
                 continue;
+            const content = { kind: "surface" as const, surfaceId: surface.id, surfaceType };
+            attachable.set(surface.id, content);
             if (
                 !surfaceNeedsContent(surfaceType) ||
                 (await this.#surfaces.hasContent(ctx, surface.id))
             )
-                eligible.set(surface.id, { kind: "surface", surfaceId: surface.id, surfaceType });
+                eligible.set(surface.id, content);
         }
-        for (const owner of ownerIds) {
+        for (const state of owners) {
+            const owner = state.ownerUserId;
+            const attached = new Set(state.attachedSurfaceIds ?? []);
+            const eligibleFor = (surfaceId: string) =>
+                eligible.get(surfaceId) ??
+                (attached.has(surfaceId) ? attachable.get(surfaceId) : undefined);
             for (const row of await querySpaces(ctx, owner)) {
                 const content = row.contents[0];
                 if (
@@ -2934,14 +3181,27 @@ export class SpacesModule implements AgentModule {
                     continue;
                 const surface = surfaces.find((candidate) => candidate.id === content.surfaceId);
                 if (
-                    !eligible.has(content.surfaceId) ||
+                    eligibleFor(content.surfaceId) === undefined ||
                     surface === undefined ||
                     !joinedBy(surface.members, owner)
                 )
                     await this.#closeWork(ctx, `surface:${content.surfaceId}`, [owner]);
             }
+            // Leaving an attached Surface ends its exemption; joining again waits for content.
+            const left = surfaces.filter(
+                (surface) => attached.has(surface.id) && !joinedBy(surface.members, owner),
+            );
+            if (left.length > 0) {
+                const fresh = await this.#ownerState(ctx, owner);
+                await writeOwnerState(ctx, {
+                    ...fresh,
+                    attachedSurfaceIds: (fresh.attachedSurfaceIds ?? []).filter(
+                        (id) => !left.some((surface) => surface.id === id),
+                    ),
+                });
+            }
             for (const surface of surfaces) {
-                const content = eligible.get(surface.id);
+                const content = eligibleFor(surface.id);
                 if (content !== undefined && joinedBy(surface.members, owner))
                     await this.#addWork(
                         ctx,
@@ -3193,8 +3453,14 @@ function joinedBy(
     return members.some((member) => member.userId === userId);
 }
 
-function surfaceTypeOf(type: string): "todo" | "document" | "calendar" | "reference" | undefined {
-    return type === "todo" || type === "document" || type === "calendar" || type === "reference"
+function surfaceTypeOf(
+    type: string,
+): "todo" | "document" | "calendar" | "chat" | "reference" | undefined {
+    return type === "todo" ||
+        type === "document" ||
+        type === "calendar" ||
+        type === "chat" ||
+        type === "reference"
         ? type
         : undefined;
 }

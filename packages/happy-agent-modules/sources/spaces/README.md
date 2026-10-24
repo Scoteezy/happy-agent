@@ -5,7 +5,8 @@ The experimental sidebar is a `sidebar` artifact, and the artifact is the sideba
 `<happy-section id label collapsed?/>`, `<happy-separator id/>`, `<happy-space id expanded?>`, and
 `<happy-widget id>…</happy-widget>`, every one of which the person can drag. A top-level
 `happy-space` names a row; a nested one names a session (subtask or collaborator) by agent ID,
-under the conversation that is its parent. A section is a titled heading over the rows after it,
+under the conversation that is its parent and nowhere else, or an attachment: another of the
+person's rows, such as a Surface's, standing there instead of at the top level. A section is a titled heading over the rows after it,
 up to the next section or separator, folds them, and moves with them as one block; a separator is
 an untitled rule that cannot fold; a widget is a leaf of opaque HTML that clients draw isolated.
 Anything absent is not shown. `fold-ribbon` on the nav or a row chooses whether a foldable row's
@@ -24,7 +25,10 @@ updates are diffed into operations queued for the calm batch, one version per pr
 version records who set each node's place, fold, label, fold ribbon, and widget content, and is
 announced with its operations. New rows go right below Happy (or after the section or separator
 they were made under, or after Create when Happy is gone or folded away); archived rows and
-sessions leave with everything nested under them.
+sessions leave with their sessions, after their attachments move out to the top level right after
+them; an attachment someone takes out goes back there too, as a move. `attach_to_my_row`, offered
+to conversations of a person with Stem Cells, attaches a row, a Surface, or a new todo, document,
+calendar, or chat Surface under the caller's own row at once, as Prioritizing's write.
 
 Prioritizing reads `list_sidebar` (the document, row facts, every session under the rows, and the
 shown count against the visible budget of ten), reads threads with `read_row_conversation`,

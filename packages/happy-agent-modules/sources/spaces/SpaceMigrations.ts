@@ -246,4 +246,11 @@ export const spaceMigrations = [
             }
         },
     ],
+    [
+        // A row may now hold a chat Surface, which builds before attachments refuse to read, so
+        // this migration marks the change and such a build refuses the database cleanly. Stored
+        // data needs no rewrite: attachments are ordinary nested nodes of the same document.
+        "008-sidebar-attachments",
+        async (_ctx: Context, _database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {},
+    ],
 ] as const;
