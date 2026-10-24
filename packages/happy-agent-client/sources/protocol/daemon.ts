@@ -87,6 +87,8 @@ export const healthResponseSchema = Type.Object({
             chatSurfaces: Type.Optional(Type.Boolean()),
             /** True when the daemon can rename Surfaces and change their images. */
             surfaceEditing: Type.Optional(Type.Boolean()),
+            /** True when new work accepts client-supplied `taskId`, `workspaceId`, and `agentId`. */
+            stemCellIdentities: Type.Optional(Type.Boolean()),
         }),
     ),
     /** Always `true`; a daemon that cannot answer does not answer. */

@@ -139,6 +139,14 @@ export type SpaceBatchListResponse = Static<typeof spaceBatchListResponseSchema>
 export const createStemCellRequestSchema = Type.Object({
     /** The retry key: repeating it answers `200` with the existing row and conversation. */
     id: Type.Optional(cuid2Schema),
+    /**
+     * Optional IDs for the new task, its workspace, and its agent, so the conversation can be
+     * shown before the daemon answers. Send them only when health reports
+     * `capabilities.stemCellIdentities`; older daemons reject them with `400`.
+     */
+    taskId: Type.Optional(cuid2Schema),
+    workspaceId: Type.Optional(cuid2Schema),
+    agentId: Type.Optional(cuid2Schema),
     mutationId: Type.Optional(mutationIdSchema),
     sectionId: Type.Optional(Nullable(Type.String({ minLength: 1, maxLength: 128 }))),
 });

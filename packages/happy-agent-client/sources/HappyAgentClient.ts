@@ -1664,7 +1664,8 @@ export class HappyAgentClient {
 
     /**
      * `POST /v0/spaces/stem-cells` — new work: a fresh unnamed task and its row. Repeating `id`
-     * returns the existing row and conversation.
+     * returns the existing row and conversation. `taskId`, `workspaceId`, and `agentId` name the
+     * new conversation up front when health reports `capabilities.stemCellIdentities`.
      */
     async createStemCell(
         request: CreateStemCellRequest = {},

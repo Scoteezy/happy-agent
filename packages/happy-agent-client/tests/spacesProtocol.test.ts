@@ -2,6 +2,7 @@ import { Value } from "@sinclair/typebox/value";
 import { describe, expect, it } from "vitest";
 
 import { HappyAgentClient } from "../sources/HappyAgentClient.js";
+import { healthResponseSchema } from "../sources/protocol/daemon.js";
 import {
     spaceBatchAppliedPayloadSchema,
     spacePayloadSchema,
@@ -113,6 +114,23 @@ describe("spaces protocol", () => {
         expect(Value.Check(createStemCellRequestSchema, { sectionId: null, id: "space1" })).toBe(
             true,
         );
+        expect(
+            Value.Check(createStemCellRequestSchema, {
+                id: "space1",
+                taskId: "task1",
+                workspaceId: "workspace1",
+                agentId: "agent1",
+            }),
+        ).toBe(true);
+        expect(
+            Value.Check(healthResponseSchema, {
+                healthy: true,
+                ready: true,
+                status: "ready",
+                version: { protocol: 32, daemon: "1.0.0" },
+                capabilities: { stemCellIdentities: true },
+            }),
+        ).toBe(true);
         expect(Value.Check(updateSpaceRequestSchema, { sectionId: null, afterId: null })).toBe(
             true,
         );
@@ -189,6 +207,12 @@ describe("spaces protocol", () => {
             batches: [batch],
         });
         await client.createStemCell({ sectionId: "section1" });
+        await client.createStemCell({
+            id: "space2",
+            taskId: "task2",
+            workspaceId: "workspace2",
+            agentId: "agent2",
+        });
         await expect(
             client.updateSpace("space1", { afterId: null, sectionId: null, mutationId: "m1" }),
         ).resolves.toEqual({ space });
@@ -205,6 +229,16 @@ describe("spaces protocol", () => {
             { body: null, method: "GET", url: "http://agent.local/v0/spaces/batches?limit=100" },
             {
                 body: JSON.stringify({ sectionId: "section1" }),
+                method: "POST",
+                url: "http://agent.local/v0/spaces/stem-cells",
+            },
+            {
+                body: JSON.stringify({
+                    id: "space2",
+                    taskId: "task2",
+                    workspaceId: "workspace2",
+                    agentId: "agent2",
+                }),
                 method: "POST",
                 url: "http://agent.local/v0/spaces/stem-cells",
             },

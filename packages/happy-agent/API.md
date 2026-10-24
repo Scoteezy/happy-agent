@@ -332,6 +332,10 @@ Spaces are additive and do not increment the protocol version. Clients detect th
 `GET /v0/spaces`: `404` means the daemon has no Spaces. The `space.*` events are absent on older
 compatible daemons. Archiving or leaving a task or bot now also removes its row with
 `space.removed`; clients that do not know Spaces never see it.
+Client-supplied conversation IDs on new work are additive on the same terms. A daemon that accepts
+`taskId`, `workspaceId`, and `agentId` on `POST /v0/spaces/stem-cells` reports
+`capabilities.stemCellIdentities: true` from health. Older daemons omit it and reject those
+fields with `400`; clients then send only the space `id` and learn the rest from the response.
 
 Surfaces are additive and do not increment the protocol version. Clients detect them through
 `GET /v0/surfaces`: `404` or `501` means Surface support is unavailable. The desktop bootstrap
@@ -1101,7 +1105,8 @@ Fields:
   Calendar Surfaces. `systemMonitorSurfaces: true` advertises System Monitor Surfaces.
   `chatSurfaces: true` advertises chat Surfaces, described under Chat Surfaces.
   `surfaceEditing: true` advertises renaming Surfaces and changing their images, described under
-  Surface catalog and members.
+  Surface catalog and members. `stemCellIdentities: true` advertises client-supplied `taskId`,
+  `workspaceId`, and `agentId` on `POST /v0/spaces/stem-cells`, described under Spaces.
 - `ready` — `false` while starting, `true` once the agent system is loaded.
 - `status` — `"starting"` or `"ready"`; the human-readable form of `ready`.
 - `version` — one identity object. `protocol` is the wire protocol number, the client's
@@ -9988,19 +9993,47 @@ conversation's first user message.
 Starts new work: a fresh conversation with no project or bot — an unnamed task with its own
 folder, as `POST /v0/tasks` creates — and a row for it with the stem-cell icon.
 
-Request: `{ "id": "s3k8m2q9w1e5r7y3u6i0o2p4", "sectionId": "c2n4b6v8m0q1w3e5r7t9y1u3", "mutationId": "..." }`
+Request:
+
+```json
+{
+    "id": "s3k8m2q9w1e5r7y3u6i0o2p4",
+    "taskId": "t4k8m2q9w1e5r7y3u6i0o2p4",
+    "workspaceId": "w5v4u3t2s1r0q9p8o7n6m5l4",
+    "agentId": "a9b8c7d6e5f4g3h2i1j0k9l8",
+    "sectionId": "c2n4b6v8m0q1w3e5r7t9y1u3",
+    "mutationId": "..."
+}
+```
 
 - `id` — optional client-supplied space ID; the retry key. Repeating it answers `200` with the
   existing row and conversation and changes nothing, including concurrent retries. An ID already
   owned by another person answers `404`; no additional task is created.
+- `taskId`, `workspaceId`, `agentId` — optional client-supplied IDs for the new task, its
+  dedicated workspace, and its one agent, so a client can show, select, and address the new
+  conversation before the daemon answers. They follow `POST /v0/tasks`: malformed IDs are
+  `400 invalid_request`; omitted IDs are generated independently; for new work the three must be
+  distinct and unused by any task, bot, workspace or project root, or agent, archived and hidden
+  included, or the request is `409 conflict` and nothing is created. The space `id` is a separate
+  namespace and may be any unused space ID. On a repeated `id`, omitted child IDs match the
+  stored ones, and a supplied child ID that differs from the stored conversation's is
+  `409 conflict` after the ownership check, so another person's row is still `404`. A child ID
+  repeated without its space `id` is not a retry: it is already in use, so the request is
+  `409 conflict`. Daemons that accept these fields report `capabilities.stemCellIdentities: true`
+  from health; older compatible daemons omit it and reject the fields with `400 invalid_request`,
+  so clients send them only when the capability is present and otherwise wait for the response's
+  IDs. The conversation does not exist until the request commits: a send to the supplied
+  `agentId` before then is `404`, so clients hold the first message until creation answers.
 - `sectionId` — optional. Omitted or `null` (a new chat from anywhere), the row is
   `placement: "pending"` among the unsectioned rows, right after Happy, and Prioritizing places it
   after the first message. A section ID (that section's `+`) puts the row at the top of that section,
   already settled. An unknown section is `404`.
 
-Response — `201`: `{ "space": { ... }, "agent": { ... } }`, the full agent object. Send the first
-message through `POST /v0/agents/:agentId/send`. Creation emits `task.created`, `task.joined`,
-`agent.created`, and `space.created` after commit, echoing `mutationId`.
+Response — `201`: `{ "space": { ... }, "agent": { ... } }`, the full agent object. Supplied IDs
+appear as `space.id`, `space.target.id`, `space.target.workspaceId`, and `space.target.agentId`
+(and `agent.id`). Send the first message through `POST /v0/agents/:agentId/send`. Creation emits
+`task.created`, `task.joined`, `agent.created`, and `space.created` after commit, echoing
+`mutationId`.
 
 ### `PATCH /v0/spaces/:spaceId`
 

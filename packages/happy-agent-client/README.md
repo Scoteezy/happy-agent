@@ -383,7 +383,10 @@ left to name itself from its first message, and `renameTask()` renames it. A tas
 
 Spaces, the sidebar, are additive without a protocol bump. Detect support through `listSpaces()`:
 `404` means the daemon has no Spaces. It returns the caller's rows, sections, and the event cursor
-to follow `space.*` events from. `createStemCell()` starts new work, `updateSpace()` and
+to follow `space.*` events from. `createStemCell()` starts new work; when `getHealth()` reports
+`capabilities.stemCellIdentities`, it also takes the new conversation's `taskId`, `workspaceId`,
+and `agentId`, so a client can show and select it before the daemon answers, and repeating the
+same `id` with the same IDs is a safe retry. `updateSpace()` and
 `updateSpaceSection()` apply the person's own changes at once, and `removeSpace()` drops new work
 nobody wrote in. Prioritizing, a subtask of Happy, organises the rest; its changes apply in
 batches. `reportSpaceAttention()` holds them back while the person is `interacting` and lets one
