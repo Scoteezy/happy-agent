@@ -191,3 +191,18 @@ export function sidebarPlacement(document: SpaceSidebarDocument, key: string) {
         visibility: folded ? ("folded" as const) : ("shown" as const),
     };
 }
+
+/** The top-level rows above the first separator that the person placed: what they keep at the top. */
+export function keptAboveSeparator(
+    document: SpaceSidebarDocument,
+    placedByPerson: (id: string) => boolean,
+): Set<string> {
+    const end = document.items.findIndex((item) => item.type === "separator");
+    if (end < 0) return new Set();
+    return new Set(
+        document.items
+            .slice(0, end)
+            .filter((item) => item.type === "space" && placedByPerson(item.id))
+            .map((item) => item.id),
+    );
+}

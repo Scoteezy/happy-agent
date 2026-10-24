@@ -148,6 +148,7 @@ import {
 } from "./impl/formatConversationBrief.js";
 import {
     isSidebarHeading,
+    keptAboveSeparator,
     newSpacePosition,
     regroupedSidebarIds,
     seedSidebar,
@@ -1342,6 +1343,13 @@ export class SpacesModule implements AgentModule {
         const state = await this.#ownerState(ctx, ownerUserId);
         const view = await this.#prioritizingView(ctx, state);
         const authorship = state.sidebarAuthorship ?? {};
+        // Information for the prompt only; nothing refuses an edit because of it.
+        const kept = keptAboveSeparator(
+            view.current.document,
+            (id) =>
+                authorship[id]?.place === "person" ||
+                current.spaces.some((space) => space.id === id && space.manualAt !== undefined),
+        );
         const now = Date.now();
         const age = (at: number | undefined) =>
             at === undefined ? undefined : `${formatAge(now - at)} ago`;
@@ -1397,6 +1405,7 @@ export class SpacesModule implements AgentModule {
                       ? { newWork: "not placed yet" }
                       : {}),
                 ...(placedByPerson ? { placedByPerson: true } : {}),
+                ...(kept.has(space.id) ? { keepInPlace: true } : {}),
                 // Nothing to read with read_conversations.
                 ...(space.role === "focus" || space.contents[0]?.kind === "surface"
                     ? { noConversation: true }

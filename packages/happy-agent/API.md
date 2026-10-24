@@ -10222,7 +10222,10 @@ session under the person's rows with its parent, whether or not it is shown, and
 `visibleRows: {shown, budget}`. `shown` counts the top-level rows and widgets outside collapsed
 sections plus the sessions drawn under expanded rows, excluding Happy, new work before its first
 message, and Prioritizing's own row; `budget` is 10, a target Prioritizing aims to stay within
-rather than a limit the daemon enforces. `read_conversations {ids, turns?, replies?}` reads up to 12 conversations at once:
+rather than a limit the daemon enforces. A top-level row above the first separator whose place the
+person last set is marked `keepInPlace: true`: what the person keeps at the top. The mark is
+information for Prioritizing's instructions only; no edit or proposal is refused because of it.
+`read_conversations {ids, turns?, replies?}` reads up to 12 conversations at once:
 each ID is a space ID or a session's agent ID. For each it returns the row's title and when it was
 last active, then its latest `turns` turns (default 4, at most 20), oldest first. A turn is one
 message from the person or from another agent (such as a subtask's task or report) and the agent's

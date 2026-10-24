@@ -65,7 +65,7 @@ export function prioritizingTools(
             defer: false,
             capabilities: ["Read the person's sidebar artifact and live spaces."],
             description:
-                "Read {artifactId, version, html, spaces, sessions, visibleRows, manualIds}. The html is the sidebar exactly as the person sees it. spaces describe each row; sessions list every session under the rows with its parent, whether or not it is shown. visibleRows counts the rows and widgets shown outside collapsed sections and the sessions shown under them, not counting Happy and new work waiting for its first message, against the budget to stay within. manualIds are the items whose place, fold, name, or content the person last set. Pending edits are included with the version your next edit must use.",
+                "Read {artifactId, version, html, spaces, sessions, visibleRows, manualIds}. The html is the sidebar exactly as the person sees it. spaces describe each row; sessions list every session under the rows with its parent, whether or not it is shown. visibleRows counts the rows and widgets shown outside collapsed sections and the sessions shown under them, not counting Happy and new work waiting for its first message, against the budget to stay within. manualIds are the items whose place, fold, name, or content the person last set; keepInPlace marks the rows they keep above the first separator. Pending edits are included with the version your next edit must use.",
             parameters: emptySchema,
             returnType: resultSchema,
             durable: true,

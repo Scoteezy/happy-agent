@@ -280,9 +280,12 @@ With the prompt alone (18 runs), proposals took one version each with no dropped
 half the time and tokens. Three lines needed sharpening. "Keeps rows below every separator" froze
 the rows under the person's separator, which were the Archive and Stale candidates, so offers
 nearly vanished; the prompt now keeps at least one row below each separator and lets the others go
-under Archive or Stale. "Where it is and shown" kept a kept row in place but let it be folded with
-a quiet neighbour; the prompt now says never in a folded section. "A busy bot may sit above Bots"
-let it fold Bots over a busy bot; the prompt now says to move such a bot above Bots first.
+under Archive or Stale. "A busy bot may sit above Bots" let it fold Bots over a busy bot; the
+prompt now says to move such a bot above Bots first. A row the person kept above the separator was
+still folded with a quiet neighbour in 5 of 18 runs, even with "never in a folded section", because
+the model had to work out which rows the line meant from authorship and document order.
+`list_sidebar` marks them `keepInPlace: true` again, as information only, and the prompt names the
+mark: never move or fold a row marked keepInPlace, even a shared list.
 
 ## Prioritizing shows its own row, once
 
