@@ -265,9 +265,15 @@ Happy, as any change of its section, backfired: the catch-all "Active" heading i
 no longer be renamed or removed, and inserted headings above it were refused, so one run took 7
 revisions and 31 dropped edits. Only the row is guarded now: it may not be moved, hidden, offered
 for Archive or Stale, or left below the separator, and the headings around it may change.
-`propose_sidebar` returns the proposal's ID without its reference tag, and says when the proposal
-leaves the visible budget exceeded, without refusing it, naming the open sections with nothing
-recent or kept, since a bare "fold quiet sections" produced revisions that changed nothing. The prompt says finished work goes under Archive and Stale is
+That still cost up to 8 revisions a run: every case got one refusal that ended by inviting heading
+edits, so the refused fold was retried verbatim, and checking each edit alone refused a folded
+heading that a later edit in the same call closed off. Each case now has its own refusal saying
+what to do instead, and kept rows are checked against the whole proposal: the edit from which a
+row stays out of place is dropped and the rest reviewed again. The prompt says a kept shared list
+or finished task stays too, since "shared lists go with their topic" kept pulling one away.
+`propose_sidebar` returns the proposal's ID without its reference tag. Over the budget it is never
+refused; the call names the open sections with nothing recent or kept to fold, and says nothing
+when there are none, since a bare "fold quiet sections" brought revisions that changed nothing. The prompt says finished work goes under Archive and Stale is
 for unfinished work, and that a reply says what changed, never what did not.
 
 ## Prioritizing shows its own row, once

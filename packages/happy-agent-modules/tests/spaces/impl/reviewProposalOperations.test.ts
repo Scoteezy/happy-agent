@@ -33,7 +33,7 @@ describe("sidebar proposals", () => {
         mayNotHide: (id: string) =>
             id === "busy" ? "busy was active in the last two hours; keep it shown." : undefined,
         mayNotStale: (id: string) => (id === "helper" ? "helper is a bot." : undefined),
-        mayNotLeaveTop: () => undefined,
+        keptAtTop: () => false,
     };
 
     it("offers finished work under Archive and quiet work under Stale, and keeps what may not move", () => {
@@ -132,13 +132,19 @@ describe("sidebar proposals", () => {
         const result = reviewProposalOperations(
             pinned,
             [
-                // Renaming, removing, or adding the headings around the row leaves it in place.
+                // Renaming, removing, or adding the headings around the row leaves it in place,
+                // even when an edit on the way there folds it for a moment.
                 { type: "set", id: "active", label: "Libraries" },
                 { type: "remove", id: "active" },
                 {
                     type: "insert",
-                    node: { type: "section", id: "tools", label: "Tools" },
+                    node: { type: "section", id: "notes", label: "Notes", collapsed: true },
                     to: { after: "happy" },
+                },
+                {
+                    type: "insert",
+                    node: { type: "section", id: "tools", label: "Tools" },
+                    to: { after: "notes" },
                 },
                 { type: "move", id: "drafted", to: { after: "below" } },
                 // Moving, folding away, archiving, or dropping below the separator is refused.
@@ -154,23 +160,36 @@ describe("sidebar proposals", () => {
             {
                 ...rules,
                 person: () => false,
-                mayNotLeaveTop: (id) =>
-                    kept.has(id) ? `The person keeps ${id} above the separator.` : undefined,
+                keptAtTop: (id) => kept.has(id),
             },
         );
         expect(result.operations.map((operation) => operation.type)).toEqual([
             "set",
             "remove",
             "insert",
+            "insert",
             "move",
         ]);
-        expect(result.notes).toHaveLength(4);
-        for (const note of result.notes)
-            expect(note).toMatch(/: The person keeps libraries above the separator\.$/);
+        // Each refusal says what to do instead.
+        expect(result.notes).toEqual([
+            expect.stringMatching(
+                /: The person keeps libraries above the separator; do not move it\.$/,
+            ),
+            expect.stringMatching(
+                /: Section "Tools" is folded and would fold libraries, which the person keeps shown; leave it open, or add a heading right above libraries\.$/,
+            ),
+            expect.stringMatching(
+                /: This would put libraries below the separator, where the person keeps it above\.$/,
+            ),
+            expect.stringMatching(
+                /: libraries stays shown where the person keeps it; do not offer it for archiving\.$/,
+            ),
+        ]);
         expect(formatSpaceSidebar(result.document)).toBe(
             formatSpaceSidebar(
                 doc(
                     '<happy-space id="happy"/>',
+                    '<happy-section id="notes" label="Notes" collapsed="true"/>',
                     '<happy-section id="tools" label="Tools"/>',
                     '<happy-space id="libraries"/>',
                     '<happy-separator id="top"/>',

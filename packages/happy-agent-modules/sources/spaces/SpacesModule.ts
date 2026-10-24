@@ -1690,10 +1690,7 @@ export class SpacesModule implements AgentModule {
                             return "Leave new work alone until the person sends its first message.";
                         return undefined;
                     },
-                    mayNotLeaveTop: (id) =>
-                        kept.has(id)
-                            ? `The person keeps ${id} above the separator; leave the row where it is, though you may add, rename, or remove the headings around it.`
-                            : undefined,
+                    keptAtTop: (id) => kept.has(id),
                     mayNotHide: (id) =>
                         rules.recent.has(id)
                             ? `${id} was active in the last two hours; keep it shown.`
@@ -1723,7 +1720,8 @@ export class SpacesModule implements AgentModule {
                 reviewed.document,
                 placedSidebarIds(reviewed.operations),
             );
-            // Over the budget is allowed in a proposal, but Prioritizing hears it.
+            // Over the budget is allowed in a proposal; Prioritizing hears it when there is a
+            // section it could fold, since a bare reminder only brings revisions that change nothing.
             const exempt = new Set([
                 ...[rules.happyId, rules.focusId].filter((id) => id !== undefined),
                 ...rules.untouched,
@@ -1736,13 +1734,9 @@ export class SpacesModule implements AgentModule {
                 new Set([...rules.recent, ...kept]),
             );
             const overBudget =
-                shown <= SIDEBAR_VISIBLE_BUDGET
+                shown <= SIDEBAR_VISIBLE_BUDGET || foldable.length === 0
                     ? ""
-                    : ` It leaves ${String(shown)} rows shown, over the budget of ${String(SIDEBAR_VISIBLE_BUDGET)}; ${
-                          foldable.length === 0
-                              ? "fold quiet sections in a revision."
-                              : `revise it to fold sections with nothing recent: ${foldable.map((label) => `"${label}"`).join(", ")}.`
-                      }`;
+                    : ` It leaves ${String(shown)} rows shown, over the budget of ${String(SIDEBAR_VISIBLE_BUDGET)}; revise it to fold sections with nothing recent: ${foldable.map((label) => `"${label}"`).join(", ")}.`;
             const actor = await artifacts.actorFor(txCtx, agentId);
             let record = open;
             if (record === undefined) {

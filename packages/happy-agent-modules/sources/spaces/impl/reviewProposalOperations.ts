@@ -93,43 +93,69 @@ export function withoutArchive(
     };
 }
 
+type ProposalRules = {
+    /** Whether the person set this aspect of the node in this proposal. */
+    readonly person: (id: string, aspect: SidebarAspect) => boolean;
+    /** Why this item may not be offered for archiving, or `undefined` when it may. */
+    readonly mayNotArchive: (id: string) => string | undefined;
+    /** Why this item may not change section, leave, or fold out of view, such as Happy. */
+    readonly mayNotMove: (id: string) => string | undefined;
+    /**
+     * Why this item may not leave or fold out of view, though it may change section, such as
+     * work active in the last two hours: accepting the proposal is the person's consent to
+     * regroup it, never to hide what they are working on.
+     */
+    readonly mayNotHide: (id: string) => string | undefined;
+    /** Why this item may not go into Stale, or `undefined` when it may. */
+    readonly mayNotStale: (id: string) => string | undefined;
+    /**
+     * Whether the person keeps this row above the separator. It may not be moved, and the
+     * proposal as a whole may not hide it, offer it for Archive or Stale, or leave it below the
+     * first separator; the headings around it may still be inserted, renamed, or removed.
+     */
+    readonly keptAtTop: (id: string) => boolean;
+};
+
 /**
  * Prioritizing's revision of a proposal, applied one operation at a time. An operation is dropped
  * with a note when it would change what the person set in this proposal, name a section by age or
- * status, move what may not move or fold away what must stay in view, or offer something for archiving or Stale that may
- * not go there; the rest still apply.
+ * status, move what may not move or fold away what must stay in view, or offer something for
+ * archiving or Stale that may not go there; the rest still apply. A row the person keeps above
+ * the separator is checked against the whole proposal, so the order of the edits does not
+ * matter: the edit that leaves it out of place for good is dropped, and the rest are reviewed
+ * again.
  */
 export function reviewProposalOperations(
     document: SpaceSidebarDocument,
     operations: readonly SpaceSidebarOperation[],
-    rules: {
-        /** Whether the person set this aspect of the node in this proposal. */
-        readonly person: (id: string, aspect: SidebarAspect) => boolean;
-        /** Why this item may not be offered for archiving, or `undefined` when it may. */
-        readonly mayNotArchive: (id: string) => string | undefined;
-        /** Why this item may not change section, leave, or fold out of view, such as Happy. */
-        readonly mayNotMove: (id: string) => string | undefined;
-        /**
-         * Why this item may not leave or fold out of view, though it may change section, such as
-         * work active in the last two hours: accepting the proposal is the person's consent to
-         * regroup it, never to hide what they are working on.
-         */
-        readonly mayNotHide: (id: string) => string | undefined;
-        /** Why this item may not go into Stale, or `undefined` when it may. */
-        readonly mayNotStale: (id: string) => string | undefined;
-        /**
-         * Why this row must stay where the person keeps it above the separator, or `undefined`.
-         * The headings around it may still be inserted, renamed, or removed: that changes its
-         * section, not its place. Moving, hiding, offering it for Archive or Stale, or leaving it
-         * below the first separator are refused.
-         */
-        readonly mayNotLeaveTop: (id: string) => string | undefined;
-    },
+    rules: ProposalRules,
 ): { document: SpaceSidebarDocument; operations: SpaceSidebarOperation[]; notes: string[] } {
+    const dropped = new Map<number, string>();
+    for (;;) {
+        const run = applyReviewed(document, operations, rules, dropped);
+        const breach = keptBreach(document, run.states, rules);
+        if (breach === undefined)
+            return { document: run.document, operations: run.operations, notes: run.notes };
+        dropped.set(breach.index, breach.reason);
+    }
+}
+
+function applyReviewed(
+    document: SpaceSidebarDocument,
+    operations: readonly SpaceSidebarOperation[],
+    rules: ProposalRules,
+    dropped: ReadonlyMap<number, string>,
+) {
     let working = document;
     const applied: SpaceSidebarOperation[] = [];
     const notes: string[] = [];
-    for (const operation of operations) {
+    const states: { index: number; document: SpaceSidebarDocument }[] = [];
+    for (const [index, operation] of operations.entries()) {
+        const reason = dropped.get(index);
+        if (reason !== undefined) {
+            notes.push(`Dropped ${describeSidebarOperation(operation)}: ${reason}`);
+            continue;
+        }
         let step: ReturnType<typeof applySpaceSidebarOperations>;
         try {
             step = applySpaceSidebarOperations(working, [operation]);
@@ -147,15 +173,67 @@ export function reviewProposalOperations(
         }
         working = step.document;
         applied.push(done);
+        states.push({ index, document: working });
     }
-    return { document: working, operations: applied, notes };
+    return { document: working, operations: applied, notes, states };
+}
+
+/**
+ * The first kept row the proposal leaves out of place, and the edit from which it stays so: the
+ * earliest one after which every document leaves it out of place. Nothing when every kept row is
+ * where the person keeps it, or was already out of place in the draft it revises.
+ */
+function keptBreach(
+    document: SpaceSidebarDocument,
+    states: readonly { index: number; document: SpaceSidebarDocument }[],
+    rules: ProposalRules,
+): { index: number; reason: string } | undefined {
+    for (const { id } of document.items) {
+        if (!rules.keptAtTop(id) || keptOutOfPlace(document, document, id) !== undefined) continue;
+        let breach: { index: number; reason: string } | undefined;
+        for (let at = states.length - 1; at >= 0; at--) {
+            const reason = keptOutOfPlace(document, states[at]!.document, id);
+            if (reason === undefined) break;
+            breach = { index: states[at]!.index, reason };
+        }
+        if (breach !== undefined) return breach;
+    }
+    return undefined;
+}
+
+/** Why `document` leaves a row the person keeps above the separator out of place, if it does. */
+function keptOutOfPlace(
+    base: SpaceSidebarDocument,
+    document: SpaceSidebarDocument,
+    id: string,
+): string | undefined {
+    if (locateSpaceSidebarNode(document, id) === undefined)
+        return `The person keeps ${id} above the separator; do not remove it.`;
+    const at = document.items.findIndex((item) => item.id === id);
+    if (at < 0) return `The person keeps ${id} above the separator; do not move it.`;
+    const end = document.items.findIndex((item) => item.type === "separator");
+    if (end < 0 || at > end)
+        return `This would put ${id} below the separator, where the person keeps it above.`;
+    if (archiveOffers(document).includes(id) && !archiveOffers(base).includes(id))
+        return `${id} stays shown where the person keeps it; do not offer it for archiving.`;
+    if (staleRows(document).includes(id) && !staleRows(base).includes(id))
+        return `${id} stays shown where the person keeps it; do not put it in Stale.`;
+    if (!shownSidebarRows(document).includes(id)) {
+        const heading = document.items
+            .slice(0, at)
+            .findLast((item) => item.type === "section" || item.type === "separator");
+        return heading?.type === "section" && heading.collapsed
+            ? `Section "${heading.label}" is folded and would fold ${id}, which the person keeps shown; leave it open, or add a heading right above ${id}.`
+            : `${id} stays shown where the person keeps it.`;
+    }
+    return undefined;
 }
 
 function review(
     before: SpaceSidebarDocument,
     after: SpaceSidebarDocument,
     operation: SpaceSidebarOperation,
-    rules: Parameters<typeof reviewProposalOperations>[2],
+    rules: ProposalRules,
 ): string | undefined {
     const target = operation.type === "insert" ? operation.node.id : operation.id;
     const kept = "Keep the person's edit of this proposal.";
@@ -170,6 +248,8 @@ function review(
         if (operation.foldRibbon !== undefined && rules.person(target, "foldRibbon")) return kept;
         if (operation.html !== undefined && rules.person(target, "html")) return kept;
     }
+    if (operation.type === "move" && rules.keptAtTop(target))
+        return `The person keeps ${target} above the separator; do not move it.`;
     const label =
         operation.type === "set"
             ? operation.label
@@ -198,28 +278,14 @@ function review(
         if (refusal !== undefined) return refusal;
     }
     const offered = new Set(archiveOffers(before));
-    const stale = new Set(staleRows(before));
-    const newlyOffered = archiveOffers(after).filter((id) => !offered.has(id));
-    const newlyStale = staleRows(after).filter((id) => !stale.has(id));
-    const end = after.items.findIndex((item) => item.type === "separator");
-    const top = new Set(after.items.slice(0, Math.max(end, 0)).map((item) => item.id));
-    for (const { id } of before.items) {
-        const refusal = rules.mayNotLeaveTop(id);
-        if (refusal === undefined) continue;
-        if (
-            (operation.type === "move" && target === id) ||
-            hidden.has(id) ||
-            !top.has(id) ||
-            newlyOffered.includes(id) ||
-            newlyStale.includes(id)
-        )
-            return refusal;
-    }
-    for (const id of newlyOffered) {
+    for (const id of archiveOffers(after)) {
+        if (offered.has(id)) continue;
         const refusal = rules.mayNotArchive(id);
         if (refusal !== undefined) return refusal;
     }
-    for (const id of newlyStale) {
+    const stale = new Set(staleRows(before));
+    for (const id of staleRows(after)) {
+        if (stale.has(id)) continue;
         const refusal = rules.mayNotStale(id);
         if (refusal !== undefined) return refusal;
     }

@@ -10296,7 +10296,10 @@ move, fold away, or remove Search, Create, Happy, its own row, or new work befor
 message. A top-level row above the sidebar's first separator whose place the person last set is
 what the person keeps at the top, and `list_sidebar` marks it `keepInPlace`: a proposal may not
 move it, fold it away, remove it, offer it under Archive or Stale, or leave it below the first
-separator, though it may add, rename, or remove the headings around it. It may group but never
+separator, though it may add, rename, or remove the headings around it. Kept rows are checked
+against the proposal as a whole, so an edit that leaves one out of place only on the way to the
+final document stands; the edit from which it stays out of place is dropped, with a note saying
+what to do instead. It may group but never
 fold away or remove work running or active in the last two hours; its new or renamed section
 labels follow the
 label rules under "Authorship"; such edits are dropped with a note. In a proposal, the rows of a
@@ -10305,8 +10308,8 @@ work active more recently is dropped from it with a note. The call presents the 
 presentation with `shows: "latest"`), so the proposal appears inline in Prioritizing's
 conversation at its full height and again after every revision. The call returns the proposal's
 artifact ID and version, not its reference tag, so that Prioritizing does not repeat the card in its
-reply. A proposal may leave more rows shown than the visible budget; the call then says so and
-names the open sections holding no recent or kept row, so that Prioritizing can fold them in a
+reply. A proposal may leave more rows shown than the visible budget; when open sections hold no
+recent or kept row, the call says so and names them, so that Prioritizing can fold them in a
 revision. `list_sidebar`
 also returns the open proposal, its document, the nodes the person last set in it, and the
 decisions on the person's last proposals.
