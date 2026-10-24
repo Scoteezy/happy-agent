@@ -291,6 +291,13 @@ now "never folds a row marked keepInPlace or moves it below the separator". One 
 active 1.7 hours ago that `list_sidebar` rounded to "2 h ago", right at the two hours the prompt
 counts from; ages now read in minutes up to three hours.
 
+The first `read_conversations` batch of a large sidebar passes its 24,000-character bound, and in
+some runs Prioritizing never read the left-out rows again despite "read again any it left out";
+those were the quiet rows below the separator, so it offered no Archive or Stale. The answer now
+ends with one line naming every left-out row by its heading and saying to read them before deciding
+where they go. Another run moved a bot active an hour ago into a folded section, so the prompt says
+never to fold away recent work "even when you move it into a section".
+
 ## Prioritizing shows its own row, once
 
 Notes in Happy's chat interrupted the main agent: "the focus agent normally should never bother the

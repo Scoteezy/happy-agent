@@ -85,6 +85,7 @@ import {
     rowKeyAtTop,
 } from "./impl/applySpaceChanges.js";
 import { composeSpaceBatchNote } from "./impl/composeSpaceBatchNote.js";
+import { formatConversationReads } from "./impl/formatConversationReads.js";
 import { formatConversationAge, formatConversationTurns } from "./impl/formatConversationTurns.js";
 import { formatPrioritizingInstructions } from "./impl/formatPrioritizingInstructions.js";
 import {
@@ -1484,18 +1485,10 @@ export class SpacesModule implements AgentModule {
             readonly replies: number;
         },
     ): Promise<string> {
-        const parts: string[] = [];
-        let size = 0;
-        for (const id of input.ids) {
-            const part = await this.#readConversation(ctx, ownerUserId, id, input);
-            if (size + part.length > CONVERSATIONS_TEXT_LIMIT) {
-                parts.push(`${id}: left out to keep this answer short; read it on its own.`);
-                continue;
-            }
-            parts.push(part);
-            size += part.length;
-        }
-        return parts.join("\n\n---\n\n");
+        const reads = [];
+        for (const id of input.ids)
+            reads.push({ id, text: await this.#readConversation(ctx, ownerUserId, id, input) });
+        return formatConversationReads(reads, CONVERSATIONS_TEXT_LIMIT);
     }
 
     async #readConversation(

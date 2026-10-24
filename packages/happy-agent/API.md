@@ -10231,7 +10231,9 @@ last active, then its latest `turns` turns (default 4, at most 20), oldest first
 message from the person or from another agent (such as a subtask's task or report) and the agent's
 last `replies` text replies that answered it (default 1, at most 3); tool calls, their output,
 reasoning, and hidden messages are left out. Each message is shortened to 1,200 characters, each
-conversation to about 4,000, and the whole answer to about 24,000. `set_space_icon` takes a
+conversation to about 4,000, and the whole answer to about 24,000; conversations past that are
+left out, and the answer ends with one line naming each of them by its heading, to be read again.
+`set_space_icon` takes a
 space ID or a session's agent ID.
 Prioritizing runs on the person's default model from Settings at that model's default effort. It
 gives every session an icon but leaves sessions out of the document unless the person is likely to
