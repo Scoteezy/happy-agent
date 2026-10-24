@@ -395,6 +395,18 @@ apply when `calm`, and `tidySpaces()` posts "Tidy the sidebar now" into its conv
 (`agentIcons`, empty when an older daemon omits it) and `seed: true` while it still mirrors the
 classic sidebar.
 
+When `getHealth()` reports `capabilities.sidebarOperations`, change the document with
+`applySpaceSidebarOperations()`: a batch of `insert`, `move`, `remove`, and `set` operations keyed
+by node ID, sent with a `mutationId` retry key and the `baseVersion` it was made against. The
+daemon rebases it onto the current version and answers `409` with `operationIndex` only for a real
+conflict. Read with `getSpaceSidebar({ widgets: true })` to receive `<happy-widget>` cards, and
+follow `space.sidebar.changed`, which carries each new version's operations. The package exports
+the very functions the daemon uses: `parseSpaceSidebar()` and `formatSpaceSidebar()` read and write
+the document's canonical form, `applySpaceSidebarOperations()` applies a batch (apply unconfirmed
+batches on top of the last confirmed version to draw optimistically, and replay change events with
+it), and `diffSpaceSidebar()` turns a whole edited document into operations. Older daemons take
+whole documents through `updateSpaceSidebar()`.
+
 Artifacts are additive without a protocol bump. Detect support through `listArtifacts()`: `404`
 means the daemon has no artifacts. The catalog is global and pages newest-created first; filter it by
 `type`, `sourceKind`/`sourceId`, `agentId`, or `authorKind`/`authorId`, and follow

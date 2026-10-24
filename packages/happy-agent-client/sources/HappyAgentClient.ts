@@ -88,6 +88,8 @@ import type {
     SpaceListResponse,
     SpaceResponse,
     SpaceSectionResponse,
+    SpaceSidebarOperationsRequest,
+    SpaceSidebarOperationsResponse,
     SpaceSidebarResponse,
     UpdateSpaceSidebarRequest,
     UpdateSpaceRequest,
@@ -1623,16 +1625,40 @@ export class HappyAgentClient {
 
     // Spaces
 
-    /** Read (and lazily create) the person's sidebar artifact. */
-    async getSpaceSidebar(options: RequestOptions = {}): Promise<SpaceSidebarResponse> {
+    /**
+     * Read (and lazily create) the person's sidebar artifact. `widgets: true` includes
+     * `happy-widget` elements; send it only when health reports `capabilities.sidebarOperations`.
+     */
+    async getSpaceSidebar(
+        options: RequestOptions & { readonly widgets?: boolean } = {},
+    ): Promise<SpaceSidebarResponse> {
         return await this.#json({
             method: "GET",
             path: "v0/spaces/sidebar",
+            query: { widgets: options.widgets === true ? "true" : undefined },
             signal: options.signal,
         });
     }
 
-    /** Commit one version. Retry with the same mutation ID; reload on a 409. */
+    /**
+     * `POST /v0/spaces/sidebar/operations` — the person's batch of operations by node ID, made
+     * against `baseVersion` and rebased onto the current version. Retry with the same mutation ID;
+     * a `409` names the operation that no longer applies in `operationIndex`. Send it only when
+     * health reports `capabilities.sidebarOperations`.
+     */
+    async applySpaceSidebarOperations(
+        request: SpaceSidebarOperationsRequest,
+        options: RequestOptions = {},
+    ): Promise<SpaceSidebarOperationsResponse> {
+        return await this.#json({
+            method: "POST",
+            path: "v0/spaces/sidebar/operations",
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /** Commit one whole document. Retry with the same mutation ID; reload on a 409. */
     async updateSpaceSidebar(
         request: UpdateSpaceSidebarRequest,
         options: RequestOptions = {},

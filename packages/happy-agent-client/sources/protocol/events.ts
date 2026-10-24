@@ -44,7 +44,13 @@ import {
     secretEnvironmentVariableNameSchema,
     secretSchema,
 } from "./secrets.js";
-import { spaceBatchSchema, spaceSchema, spaceSectionSchema } from "./spaces.js";
+import {
+    spaceBatchSchema,
+    spaceSchema,
+    spaceSectionSchema,
+    spaceSidebarAuthorSchema,
+    spaceSidebarOperationSchema,
+} from "./spaces.js";
 import { taskMembershipSchema, taskSchema } from "./tasks.js";
 import {
     surfaceIdSchema,
@@ -244,6 +250,20 @@ export const spaceBatchAppliedPayloadSchema = Type.Object({
     mutationId: Type.Optional(mutationIdSchema),
 });
 export type SpaceBatchAppliedPayload = Static<typeof spaceBatchAppliedPayloadSchema>;
+
+/**
+ * The sidebar document has a new version. Applying `operations` to `previousVersion` with
+ * `applySpaceSidebarOperations` gives `version`; a client holding another version reads it again.
+ */
+export const spaceSidebarChangedPayloadSchema = Type.Object({
+    artifactId: cuid2Schema,
+    author: spaceSidebarAuthorSchema,
+    mutationId: Type.Optional(mutationIdSchema),
+    operations: Type.Array(spaceSidebarOperationSchema),
+    previousVersion: Type.Integer({ minimum: 1 }),
+    version: Type.Integer({ minimum: 1 }),
+});
+export type SpaceSidebarChangedPayload = Static<typeof spaceSidebarChangedPayloadSchema>;
 
 /**
  * Members stay present on chat-only and edit-only changes. Chat association, `name`, and `image`
@@ -637,6 +657,7 @@ export type HappyAgentEvent =
     | EventEnvelope<"space.section.updated", SpaceSectionPayload>
     | EventEnvelope<"space.section.removed", SpaceSectionRemovedPayload>
     | EventEnvelope<"space.batch.applied", SpaceBatchAppliedPayload>
+    | EventEnvelope<"space.sidebar.changed", SpaceSidebarChangedPayload>
     | EventEnvelope<"surface.updated", SurfaceUpdatedPayload>
     | EventEnvelope<"surface.created", SurfaceCreatedPayload>
     | EventEnvelope<"todo.created", TodoCreatedPayload>

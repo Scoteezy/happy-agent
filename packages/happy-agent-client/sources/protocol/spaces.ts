@@ -196,6 +196,193 @@ export const sidebarDiagnosticSchema = Type.Object({
 export type SidebarDiagnostic = Static<typeof sidebarDiagnosticSchema>;
 
 /**
+ * A node's stable ID in the sidebar document. Search, Create, and the root are named by their tags,
+ * `happy-search`, `happy-create`, and `nav`, which no other node may use.
+ */
+export const spaceSidebarIdSchema = Type.String({
+    minLength: 1,
+    maxLength: 128,
+    pattern: "^[^\\s\\x00-\\x1f\\x7f]+$",
+});
+export type SpaceSidebarId = Static<typeof spaceSidebarIdSchema>;
+
+/** Where a foldable row's fold ribbon sits: shown on hover only, or always at the far right. */
+export const spaceSidebarFoldRibbonSchema = Type.Union([
+    Type.Literal("hover"),
+    Type.Literal("always"),
+]);
+export type SpaceSidebarFoldRibbon = Static<typeof spaceSidebarFoldRibbonSchema>;
+
+/** A section heading's title: 1–256 characters, not only whitespace. */
+export const spaceSidebarLabelSchema = Type.String({
+    minLength: 1,
+    maxLength: 256,
+    pattern: "\\S",
+});
+
+/** A widget's arbitrary HTML, at most 16 KiB of UTF-8, which is also checked as it applies. */
+export const spaceSidebarWidgetHtmlSchema = Type.String({ maxLength: 16 * 1024 });
+
+/**
+ * A row (top level, by space ID) or a session nested under one (by agent ID). `expanded` draws its
+ * nested sessions.
+ */
+export const spaceSidebarSpaceNodeSchema = Type.Recursive((Self) =>
+    Type.Object({
+        type: Type.Literal("space"),
+        id: spaceSidebarIdSchema,
+        expanded: Type.Boolean(),
+        foldRibbon: Type.Optional(spaceSidebarFoldRibbonSchema),
+        children: Type.Array(Self),
+    }),
+);
+export type SpaceSidebarSpaceNode = Static<typeof spaceSidebarSpaceNodeSchema>;
+
+/** One top-level item of the sidebar document, in its flat order. */
+export const spaceSidebarItemSchema = Type.Union([
+    Type.Object({ type: Type.Literal("search"), id: Type.Literal("happy-search") }),
+    Type.Object({ type: Type.Literal("create"), id: Type.Literal("happy-create") }),
+    Type.Object({
+        type: Type.Literal("section"),
+        id: spaceSidebarIdSchema,
+        label: spaceSidebarLabelSchema,
+        collapsed: Type.Boolean(),
+    }),
+    Type.Object({ type: Type.Literal("separator"), id: spaceSidebarIdSchema }),
+    spaceSidebarSpaceNodeSchema,
+    Type.Object({
+        type: Type.Literal("widget"),
+        id: spaceSidebarIdSchema,
+        html: spaceSidebarWidgetHtmlSchema,
+    }),
+]);
+export type SpaceSidebarItem = Static<typeof spaceSidebarItemSchema>;
+export type SpaceSidebarNode = SpaceSidebarItem;
+
+/** The sidebar document as a tree: the `nav` root's optional `foldRibbon` and its items. */
+export const spaceSidebarDocumentSchema = Type.Object({
+    foldRibbon: Type.Optional(spaceSidebarFoldRibbonSchema),
+    items: Type.Array(spaceSidebarItemSchema),
+});
+export type SpaceSidebarDocument = Static<typeof spaceSidebarDocumentSchema>;
+
+/**
+ * Where an inserted or moved node goes: immediately after a node and everything nested in it, or
+ * first among a row's or session's nested sessions (`null` is the top of the list).
+ */
+export const spaceSidebarPositionSchema = Type.Union([
+    Type.Object({ after: spaceSidebarIdSchema }, { additionalProperties: false }),
+    Type.Object({ parent: Nullable(spaceSidebarIdSchema) }, { additionalProperties: false }),
+]);
+export type SpaceSidebarPosition = Static<typeof spaceSidebarPositionSchema>;
+
+/** A node an `insert` adds. Search and Create are never inserted; sessions are inserted one by one. */
+export const spaceSidebarNewNodeSchema = Type.Union([
+    Type.Object(
+        {
+            type: Type.Literal("space"),
+            id: spaceSidebarIdSchema,
+            expanded: Type.Optional(Type.Boolean()),
+            foldRibbon: Type.Optional(spaceSidebarFoldRibbonSchema),
+        },
+        { additionalProperties: false },
+    ),
+    Type.Object(
+        {
+            type: Type.Literal("section"),
+            id: spaceSidebarIdSchema,
+            label: spaceSidebarLabelSchema,
+            collapsed: Type.Optional(Type.Boolean()),
+        },
+        { additionalProperties: false },
+    ),
+    Type.Object(
+        { type: Type.Literal("separator"), id: spaceSidebarIdSchema },
+        { additionalProperties: false },
+    ),
+    Type.Object(
+        {
+            type: Type.Literal("widget"),
+            id: spaceSidebarIdSchema,
+            html: spaceSidebarWidgetHtmlSchema,
+        },
+        { additionalProperties: false },
+    ),
+]);
+export type SpaceSidebarNewNode = Static<typeof spaceSidebarNewNodeSchema>;
+
+/**
+ * One change to the sidebar document, keyed by node ID. Moving a section moves its block: the
+ * heading and every item after it up to the next section or separator. Removing a section removes
+ * only its heading. `set` changes `collapsed` and `label` on a section, `expanded` and `foldRibbon`
+ * on a row or session, `foldRibbon` on `nav`, and `html` on a widget.
+ */
+export const spaceSidebarOperationSchema = Type.Union([
+    Type.Object(
+        {
+            type: Type.Literal("insert"),
+            node: spaceSidebarNewNodeSchema,
+            to: spaceSidebarPositionSchema,
+        },
+        { additionalProperties: false },
+    ),
+    Type.Object(
+        { type: Type.Literal("move"), id: spaceSidebarIdSchema, to: spaceSidebarPositionSchema },
+        { additionalProperties: false },
+    ),
+    Type.Object(
+        { type: Type.Literal("remove"), id: spaceSidebarIdSchema },
+        { additionalProperties: false },
+    ),
+    Type.Object(
+        {
+            type: Type.Literal("set"),
+            id: spaceSidebarIdSchema,
+            label: Type.Optional(spaceSidebarLabelSchema),
+            collapsed: Type.Optional(Type.Boolean()),
+            expanded: Type.Optional(Type.Boolean()),
+            /** `null` returns to the default. */
+            foldRibbon: Type.Optional(Nullable(spaceSidebarFoldRibbonSchema)),
+            html: Type.Optional(spaceSidebarWidgetHtmlSchema),
+        },
+        { additionalProperties: false },
+    ),
+]);
+export type SpaceSidebarOperation = Static<typeof spaceSidebarOperationSchema>;
+
+/**
+ * `POST /v0/spaces/sidebar/operations` — the person's batch, made against `baseVersion` and
+ * rebased onto the current version. Send it only when health reports
+ * `capabilities.sidebarOperations`.
+ */
+export const spaceSidebarOperationsRequestSchema = Type.Object({
+    /** The batch's retry key: a resend with the same request applies nothing again. */
+    mutationId: Type.String({ minLength: 1, maxLength: 1024 }),
+    baseVersion: Type.Integer({ minimum: 1 }),
+    operations: Type.Array(spaceSidebarOperationSchema, { minItems: 1, maxItems: 1000 }),
+});
+export type SpaceSidebarOperationsRequest = Static<typeof spaceSidebarOperationsRequestSchema>;
+
+export const spaceSidebarOperationsResponseSchema = Type.Object({
+    artifactId: cuid2Schema,
+    /** The version after the batch; unchanged when it changed nothing. */
+    version: Type.Integer({ minimum: 1 }),
+    /** The document at `version`, widgets included. */
+    html: Type.String(),
+    /** What applied: fallen-back anchors resolved, operations that changed nothing left out. */
+    operations: Type.Array(spaceSidebarOperationSchema),
+});
+export type SpaceSidebarOperationsResponse = Static<typeof spaceSidebarOperationsResponseSchema>;
+
+/** Who made a sidebar version: the person, Prioritizing, or the daemon's own lifecycle changes. */
+export const spaceSidebarAuthorSchema = Type.Union([
+    Type.Literal("person"),
+    Type.Literal("prioritizing"),
+    Type.Literal("daemon"),
+]);
+export type SpaceSidebarAuthor = Static<typeof spaceSidebarAuthorSchema>;
+
+/**
  * `PATCH /v0/spaces/:spaceId` — the person's own change to a row, applied at once. At least one
  * field. Giving `sectionId` moves the row (first in the section unless `afterId` says otherwise);
  * a moved row becomes `shown` unless `visibility` says otherwise.

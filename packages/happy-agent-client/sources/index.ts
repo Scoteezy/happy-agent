@@ -38,6 +38,22 @@ export * from "./happyReferences.js";
 export * from "./mediaLayoutBlocks.js";
 export * from "./mediaLayoutHtml.js";
 export {
+    formatSpaceSidebar,
+    parseSpaceSidebar,
+    SPACE_SIDEBAR_LIMITS,
+    SPACE_SIDEBAR_RESERVED_IDS,
+    SpaceSidebarError,
+} from "./spaceSidebarDocument.js";
+export {
+    applySpaceSidebarOperations,
+    locateSpaceSidebarNode,
+    spaceSidebarRunLength,
+    SpaceSidebarOperationError,
+    type SpaceSidebarApplication,
+    type SpaceSidebarLocation,
+} from "./applySpaceSidebarOperations.js";
+export { diffSpaceSidebar } from "./diffSpaceSidebar.js";
+export {
     artifactAddressPublic,
     artifactAddressLoopback,
     artifactNetworkHost,

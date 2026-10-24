@@ -336,6 +336,12 @@ Client-supplied conversation IDs on new work are additive on the same terms. A d
 `taskId`, `workspaceId`, and `agentId` on `POST /v0/spaces/stem-cells` reports
 `capabilities.stemCellIdentities: true` from health. Older daemons omit it and reject those
 fields with `400`; clients then send only the space `id` and learn the rest from the response.
+Sidebar operations are additive on the same terms. A daemon that serves
+`POST /v0/spaces/sidebar/operations`, `happy-widget` elements, `GET /v0/spaces/sidebar?widgets=true`,
+and the `space.sidebar.changed` event reports `capabilities.sidebarOperations: true` from health.
+Older daemons omit it; clients then write whole documents with `PUT /v0/spaces/sidebar`, which
+keeps its contract. Without `widgets=true` the document read leaves widgets out, so clients that
+predate them never meet one.
 
 Surfaces are additive and do not increment the protocol version. Clients detect them through
 `GET /v0/surfaces`: `404` or `501` means Surface support is unavailable. The desktop bootstrap
@@ -1107,6 +1113,8 @@ Fields:
   `surfaceEditing: true` advertises renaming Surfaces and changing their images, described under
   Surface catalog and members. `stemCellIdentities: true` advertises client-supplied `taskId`,
   `workspaceId`, and `agentId` on `POST /v0/spaces/stem-cells`, described under Spaces.
+  `sidebarOperations: true` advertises `POST /v0/spaces/sidebar/operations`, sidebar widgets, and
+  `space.sidebar.changed`, described under Spaces.
 - `ready` — `false` while starting, `true` once the agent system is loaded.
 - `status` — `"starting"` or `"ready"`; the human-readable form of `ready`.
 - `version` — one identity object. `protocol` is the wire protocol number, the client's
@@ -9904,24 +9912,48 @@ moved by the person anywhere in that list:
   whitespace. `collapsed="true"` folds those items. A section has no children.
 - `<happy-separator id="…"/>` — a plain visual rule with no title. It cannot fold and accepts no
   attribute other than `id`; it ends the run of the section above it.
-- Section and separator IDs are required, unique in the document, and 1–128 characters without
-  whitespace or control characters. Both are direct children of `nav` only.
 - `<happy-space id="…" expanded="true" fold-ribbon="hover|always">` — a row. A `happy-space` that
   is a direct child of `nav` names one of the person's spaces by space ID. A `happy-space` may
   contain only `happy-space` elements; a nested one names a session by agent ID, and that agent's
   parent must be the conversation of the enclosing node (the row's `target.agentId`, or the
   enclosing session). `expanded="true"` shows the nested sessions; otherwise they are folded.
+- `<happy-widget id="…">…</happy-widget>` — a free-form card, the escape hatch for something the
+  other items cannot say, such as a compact status card. Its content is arbitrary HTML: everything
+  between the opening tag and the first `</happy-widget>`, kept exactly as written, at most 16 KiB
+  of UTF-8 that may not contain `</happy-widget` in any letter case. An empty widget may be
+  self-closing. The skeleton never interprets the content. A widget accepts no attribute other
+  than `id` and has no switches; nothing nests in it, and it never nests in anything. Like a row,
+  it may be moved or removed, it is folded away inside a collapsed section, and while shown it
+  counts toward the visible budget. Clients render it isolated, as they render an artifact page:
+  no token, no API, and no access to the app.
+- Section, separator, and widget IDs are required, unique in the document, and 1–128 characters
+  without whitespace or control characters. All three are direct children of `nav` only.
 - `nav` and `happy-space` accept optional `fold-ribbon`: `"hover"` (default) shows a foldable row's
   fold ribbon only while pointed at; `"always"` shows it at the far right with the row's change
   count to its left. A row's own value overrides the `nav` value. Rows reserve no empty trailing
   slot; the change count sits flush right.
 
 Boolean switches are written `"true"` or `"false"`; an absent switch is false. Attribute values are
-always quoted; empty elements may be self-closing. Text, comments, other elements, other
-attributes, duplicate IDs, unknown space IDs, and nested IDs that are not sessions of their parent
-are rejected, so HTML and XML parsers read the same tree. Spaces and sessions absent from the
-document are not shown. Clients draw every element with trusted components; worktrees are drawn
-under the node whose agent works in them, and hidden while that node is folded.
+always quoted; empty elements may be self-closing. Outside widget content, text, comments, other
+elements, other attributes, duplicate IDs, unknown space IDs, and nested IDs that are not sessions
+of their parent are rejected, so HTML and XML parsers read the same skeleton. Spaces and sessions
+absent from the document are not shown. Clients draw every element other than a widget's content
+with trusted components; worktrees are drawn under the node whose agent works in them, and hidden
+while that node is folded.
+
+**Node IDs.** Every node has a stable ID, which is how every write below names it. Sections,
+separators, rows, sessions, and widgets carry theirs in `id`; Search, Create, and the root are
+named by their tags, `happy-search`, `happy-create`, and `nav`. Those three names are reserved and
+are not valid `id` values. IDs are unique across the whole document.
+
+**Canonical form.** The daemon stores the document in one canonical form: one element a line, two
+spaces a level, attributes in the order shown above, false switches and default values left out,
+empty elements self-closed, and widget content written verbatim between its tags. Serializing a
+parsed canonical document gives back the same text, and any valid document parses to the same tree
+as its canonical form. `@slopus/happy-agent-client` exports the parser, the serializer, the
+operation applier, and the document differ the daemon itself uses (`parseSpaceSidebar`,
+`formatSpaceSidebar`, `applySpaceSidebarOperations`, `diffSpaceSidebar`), so a client and the
+daemon read, write, and apply the document identically.
 
 Validation runs on every artifact write, including ordinary artifact tools. Rejection preserves the
 last valid version and returns diagnostics `[{message, offset}]` (zero-based character offset).
@@ -9940,37 +9972,195 @@ the next read: sections become flat `happy-section` headings keeping their IDs, 
 collapsed state, the former Older section (`id="older"`) becomes `<happy-separator id="older"/>`,
 order is preserved, and plain HTML is dropped.
 
-`GET /v0/spaces/sidebar` returns `200 {artifactId, version, html, spaces, agentIcons, seed?}`, where
-`version` is the immutable artifact version number, `spaces` contains the person's ordinary space
-objects, and `agentIcons` maps session agent IDs to `{ "type": "library", "slug": "..." }` icons
-Prioritizing chose (sessions get icons whether or not they are shown). Daemons that predate
-`agentIcons` and `seed` omit them; clients treat a missing `agentIcons` as empty and a missing
-`seed` as false. `PUT /v0/spaces/sidebar`
-takes `{html, baseVersion, mutationId}` and returns the same shape. All three fields are required
-on this route. A retry with the same mutation ID returns its committed version without writing
-again; reusing an ID for different content is `409`. A stale base is `409 conflict` with
-`currentVersion`; invalid content is `400 invalid_request` with `diagnostics`. These details are
-additional fields on the ordinary error envelope. Every sidebar update emits the existing
-`artifact.updated` event for its artifact ID after commit, echoing the mutation ID when supplied.
-Clients reload on conflict and report through their existing error path; no automatic merge.
+#### `GET /v0/spaces/sidebar`
+
+Returns `200 {artifactId, version, html, spaces, agentIcons, seed?}`, where `version` is the
+immutable artifact version number, `html` the document at that version, `spaces` the person's
+ordinary space objects, and `agentIcons` maps session agent IDs to
+`{ "type": "library", "slug": "..." }` icons Prioritizing chose (sessions get icons whether or not
+they are shown). Daemons that predate `agentIcons` and `seed` omit them; clients treat a missing
+`agentIcons` as empty and a missing `seed` as false.
+
+Query `widgets=true` includes `happy-widget` elements in `html`. Without it they are left out of
+`html`, so clients that predate widgets never meet one; `version` is the same either way. Any other
+value of `widgets` is `400 invalid_request`.
+
+#### `POST /v0/spaces/sidebar/operations`
+
+The person's change to the document, as a batch of small operations keyed by node ID. Clients that
+draw the sidebar from the document make every change through this route: a drag, a fold, a rename,
+showing or hiding a session.
+
+Request:
+
+```json
+{
+    "mutationId": "c1x2v3b4n5m6q7w8e9r0t1y2",
+    "baseVersion": 12,
+    "operations": [
+        { "type": "move", "id": "s3k8m2q9w1e5r7y3u6i0o2p4", "to": { "after": "releases" } },
+        { "type": "set", "id": "releases", "collapsed": true },
+        {
+            "type": "insert",
+            "node": { "type": "separator", "id": "quiet" },
+            "to": { "after": "s9w1e5r7y3u6i0o2p4k8m2q3" }
+        },
+        { "type": "remove", "id": "a9b8c7d6e5f4g3h2i1j0k9l8" }
+    ]
+}
+```
+
+- `mutationId` — required; the client-chosen ID of this batch and its retry key.
+- `baseVersion` — required; the document version the client made the operations against.
+- `operations` — 1–1,000 operations, applied in order as one atomic batch.
+
+A position `to` is exactly one of:
+
+- `{ "after": "ID" }` — immediately after that node and everything nested in it, among its
+  siblings. After a section heading is the first place in its block; to follow a whole block, name
+  its last item.
+- `{ "parent": "ID" }` — first among that row's or session's nested sessions.
+- `{ "parent": null }` — first in the list.
+
+The operations:
+
+- `{ "type": "insert", "node": …, "to": … }` adds one node. `node` is
+  `{ "type": "space", "id", "expanded"?, "foldRibbon"? }`,
+  `{ "type": "section", "id", "label", "collapsed"? }`, `{ "type": "separator", "id" }`, or
+  `{ "type": "widget", "id", "html" }`. A row's nested sessions are inserted one by one after it.
+  Search and Create cannot be inserted.
+- `{ "type": "move", "id", "to" }` moves a node with everything nested in it. Moving a section
+  moves its block: the heading and every item after it up to the next section or separator. A
+  node cannot move into itself or into the block it carries. `nav` cannot move.
+- `{ "type": "remove", "id" }` takes a node out with everything nested in it. Removing a section
+  removes only its heading; the items of its block join the block above. Search, Create, and `nav`
+  cannot be removed.
+- `{ "type": "set", "id", … }` changes a node's switches and text: `collapsed` and `label` on a
+  section, `expanded` and `foldRibbon` on a row or session, `foldRibbon` on `nav`, and `html` on a
+  widget. `foldRibbon: null` returns to the default. At least one field; a field the node's kind
+  does not have is invalid.
+
+Every operation must keep the document within the grammar as it applies: where each kind may
+stand, unique IDs, depth, element count, and size. The batch's result must also satisfy the
+document rules above, such as known space IDs and sessions nested under their parents.
+
+**Rebase.** The batch applies to the current version, not to `baseVersion`, so a batch made
+against an older version still lands wherever its operations make sense:
+
+- A target or anchor that still exists is used where it is now, wherever other changes moved it.
+- When an `after` anchor is gone, the node goes after the nearest node that preceded the anchor
+  among its siblings in `baseVersion` and still sits under the same parent, and first under that
+  parent when none does.
+- Removing a node that is already gone changes nothing.
+
+Only real conflicts are refused: moving or changing a node that is gone, inserting an ID that
+exists now, a `parent` that is gone, or an `after` anchor whose parent is gone. Each is
+`409 conflict` with `currentVersion` and `operationIndex`, the zero-based index of the first
+operation that cannot apply, and the message names that operation. A batch that cannot apply even
+to `baseVersion` is `400 invalid_request` with `operationIndex` and `diagnostics`; a result the
+document rules refuse is `400 invalid_request` with `diagnostics`. A `baseVersion` newer than the
+current version is `409 conflict` with `currentVersion`. A refused batch writes nothing.
+
+Response — `200`:
+
+```json
+{
+    "artifactId": "k2n4b6v8m0q1w3e5r7t9y1u3",
+    "version": 13,
+    "html": "<nav>\n  <happy-search/>\n  …\n</nav>\n",
+    "operations": [
+        /* the operations as applied */
+    ]
+}
+```
+
+- `version` — the document's version after the batch; unchanged when the batch changed nothing.
+- `html` — the document at that version, widgets included.
+- `operations` — what was applied: an anchor that fell back is replaced by the position used, and
+  operations that changed nothing are left out.
+
+A retry with the same `mutationId` and the same request returns the first answer and applies
+nothing again, also when the retries race; the same `mutationId` with a different request is
+`409 conflict`. The daemon recognizes at least each person's last 500 batches. The first batch
+ends `seed`.
+
+#### `PUT /v0/spaces/sidebar`
+
+The whole-document write that clients predating operations use. It takes
+`{html, baseVersion, mutationId}`, all three required, and returns the shape of
+`GET /v0/spaces/sidebar` without widgets. A stale base is `409 conflict` with `currentVersion`;
+there is no rebase. The daemon turns the difference between the current document and `html` into
+operations by node ID with `diffSpaceSidebar` and applies them as the person's batch, so authorship
+and events are those of `POST /v0/spaces/sidebar/operations`. Widgets are neither shown nor changed:
+the request cannot contain one, and widgets it leaves out stay where they are. A retry with the
+same mutation ID returns its committed version without writing again; reusing an ID for different
+content is `409`. Invalid content is `400 invalid_request` with `diagnostics`. These details are
+additional fields on the ordinary error envelope.
+
+#### Authorship
+
+For every node the daemon records who last set each of its aspects: its place (`insert`, `move`,
+or `remove`), its fold (`collapsed` or `expanded`), its `label`, its `foldRibbon`, and a widget's
+`html`. The author is the person (through these routes and ordinary artifact updates) or
+Prioritizing. Lifecycle changes the daemon makes itself — inserting new work, removing archived
+work — record no author, and a node they remove takes its authorship with it. Moving a section
+records its heading only: the items in its block are carried and keep their own authorship.
+
+Prioritizing never overrides the person: an operation of Prioritizing's that would change an aspect
+the person last set is dropped, as is one that breaks Prioritizing's other rules below, and the rest
+of its batch still applies. Each dropped operation is reported to Prioritizing in a note. The
+person's operations are never dropped.
+
+#### Changes and events
+
+Every new version is announced after commit with `space.sidebar.changed`:
+`{artifactId, previousVersion, version, author, operations, mutationId?}`. Applying `operations` to
+`previousVersion` with `applySpaceSidebarOperations` gives `version` exactly. `author` is
+`"person"`, `"prioritizing"`, or `"daemon"` for lifecycle changes; `mutationId` echoes the person's
+batch, or the mutation of the request that caused a lifecycle change. A version that only changed
+the artifact's title or background carries no operations. A client holding `previousVersion` applies
+the operations; any other client reads the document again. The one-time rewrite of a document in the
+earlier grammar happens before any client can read it and is not announced this way.
+
+Every sidebar version also still emits the ordinary `artifact.updated` event for its artifact ID,
+echoing the mutation ID when supplied, for clients that predate operations. A client that follows
+`space.sidebar.changed` may ignore `artifact.updated` for the sidebar artifact.
+
+For optimistic updates a client applies its unconfirmed batches with `applySpaceSidebarOperations`
+on top of the last version it confirmed, sends them, and forgets each one when the
+`space.sidebar.changed` event or response carrying its `mutationId` arrives.
+
+Daemons that serve this route, widgets, `widgets=true`, and `space.sidebar.changed` report
+`capabilities.sidebarOperations: true` from health. Older compatible daemons omit it, answer the
+route with `404`, and reject `widgets` as an unknown query; clients then write whole documents
+with `PUT`.
+
+#### Prioritizing's writes
 
 Ordinary artifact updates/tools accept optional `baseVersion`; it is required when the target is a
-sidebar. Prioritizing may read and update its artifact using ordinary artifact tools. Its
-convenience `edit_sidebar {baseVersion, edits:[{oldText,newText}]}` applies sequential exact-text
-replacements (each old text must occur exactly once), making one version per call. Its edits wait
-for the existing calm batch; stale or invalid proposals never overwrite a newer document.
-`get_sidebar_styles` returns the elements, their attributes and children, and the rules above.
-`list_sidebar` returns the document, facts about each row, every session under the person's rows
-with its parent, whether or not it is shown, and `visibleRows: {shown, budget}`. `shown` counts the
-top-level rows outside collapsed sections plus the sessions drawn under expanded rows, excluding
-Happy and new work before its first message; `budget` is 10, a target Prioritizing aims to stay
-within rather than a limit the daemon enforces. `read_row_conversation {id, limit?}` takes a space
-ID or a session's agent ID and returns the person's messages, messages from other agents (such as a
-subtask's task or report), and the agent's text replies, newest first, without tool calls or
-reasoning, bounded to 40 messages (default 12) and about 16,000 characters. `set_space_icon` takes
-a space ID or a session's agent ID. Prioritizing runs on the person's default model from Settings
-at that model's default effort. It gives every session an icon but leaves sessions out of the
-document unless there is a strong reason to show one, such as a session waiting on the person.
+sidebar. A person's ordinary artifact update of the sidebar is a whole-document write like `PUT`.
+Prioritizing may read and update its artifact using ordinary artifact tools. Its convenience
+`edit_sidebar {baseVersion, edits:[{oldText,newText}]}` applies sequential exact-text replacements
+(each old text must occur exactly once), making one version per call. Prioritizing reads and writes
+HTML: the daemon compares its proposed document with the document it read, including its own queued
+proposals, by node ID with `diffSpaceSidebar`, and queues the resulting operations. A stale
+`edit_sidebar` base still applies when each old text occurs exactly once in the current document; a
+stale whole-document update is a conflict. Queued operations wait for the existing calm batch, then
+apply through the same rebase and authorship rules, one version per proposal; a person's change in
+the meantime no longer discards them. `get_sidebar_styles` returns the elements, their attributes
+and children, and the rules above. `list_sidebar` returns the document, facts about each row, every
+session under the person's rows with its parent, whether or not it is shown, and
+`visibleRows: {shown, budget}`. `shown` counts the top-level rows and widgets outside collapsed
+sections plus the sessions drawn under expanded rows, excluding Happy and new work before its first
+message; `budget` is 10, a target Prioritizing aims to stay within rather than a limit the daemon
+enforces. `read_row_conversation {id, limit?}` takes a space ID or a session's agent ID and returns
+the person's messages, messages from other agents (such as a subtask's task or report), and the
+agent's text replies, newest first, without tool calls or reasoning, bounded to 40 messages
+(default 12) and about 16,000 characters. `set_space_icon` takes a space ID or a session's agent ID.
+Prioritizing runs on the person's default model from Settings at that model's default effort. It
+gives every session an icon but leaves sessions out of the document unless there is a strong reason
+to show one, such as a session waiting on the person. It may add and update widgets, rarely, where a
+compact card says more than a row.
 
 Fold state lives in the document; clients report nothing else about what the person sees.
 Committed manual document changes enter the next calm brief and preserve the person's authority
@@ -9980,7 +10170,8 @@ New spaces are inserted immediately after Happy's top-level `happy-space` elemen
 nested in it, or immediately after the section or separator named at creation. When Happy's row is
 absent, nested, or inside a collapsed section, they are inserted immediately after
 `<happy-create/>` instead. Archived or left spaces, and archived sessions, are removed together
-with everything nested under them. Lifecycle changes publish ordinary artifact events.
+with everything nested under them. Lifecycle changes publish `space.sidebar.changed` and ordinary
+artifact events.
 
 Prioritizing never moves or hides Happy,
 never moves Search or Create, never undoes the person's moves or folds, never touches new work
@@ -11833,6 +12024,11 @@ than version-chained changes; a client keeps the copy with the greater `version`
     - `sectionId` (ID string).
 - `space.batch.applied` — a batch applied. Its rows' and sections' own events precede it.
     - `batch` (full batch object).
+- `space.sidebar.changed` — the sidebar document has a new version, described as operations by
+  node ID (see "Changes and events" under Sidebar artifact). Unlike the other space events it is
+  version-chained.
+    - `artifactId` (ID string), `previousVersion`, `version`, `author` (`"person"`,
+      `"prioritizing"`, or `"daemon"`), `operations` (the applied operations, in order).
 
 Every space event echoes the `mutationId` of the request that caused it, when one was supplied.
 

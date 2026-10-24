@@ -89,6 +89,11 @@ export const healthResponseSchema = Type.Object({
             surfaceEditing: Type.Optional(Type.Boolean()),
             /** True when new work accepts client-supplied `taskId`, `workspaceId`, and `agentId`. */
             stemCellIdentities: Type.Optional(Type.Boolean()),
+            /**
+             * True when the sidebar document takes operations by node ID, holds widgets, and
+             * announces each version with `space.sidebar.changed`.
+             */
+            sidebarOperations: Type.Optional(Type.Boolean()),
         }),
     ),
     /** Always `true`; a daemon that cannot answer does not answer. */
