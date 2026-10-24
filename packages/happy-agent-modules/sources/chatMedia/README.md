@@ -80,8 +80,9 @@ same grammar every client checks again: a closed subset of CSS covering flexbox,
 spacing, alignment, `object-fit`, and text, with `tone` and named font sizes instead of colours.
 An unknown property or a value outside its grammar drops that declaration only. A style holding a
 backslash or a quote is dropped whole, which keeps escapes, strings, and `url()` out. The input is
-at most 32 KiB, elements deeper than 12 are unwrapped, and a tree holds at most 500 nodes and
-8,000 characters of text and alt. Clients receive only the typed tree, never HTML.
+at most 32 KiB, kept elements deeper than 12 are unwrapped, HTML nested deeper than 32 is dropped,
+every element and text counts toward 500 nodes, and a tree holds at most 8,000 characters of text
+and alt. Clients receive only the typed tree, never HTML.
 
 An image item carries `scale` when its PNG `pHYs`, JPEG JFIF, or EXIF density says 144 or 216 DPI,
 so a Retina screenshot shows at its natural CSS size. Clients show an image without explicit

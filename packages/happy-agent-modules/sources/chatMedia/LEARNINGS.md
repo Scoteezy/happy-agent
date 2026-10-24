@@ -72,6 +72,17 @@ write blank lines inside their HTML. A block that resolves no image, or loses co
 stays Markdown, so a mistake never hides what the agent wrote. Guidance is one sentence and one
 tiny example in the instructions. The `present_files` layout argument stays as it was.
 
+## Layout parsing and splitting stay bounded on hostile text
+
+A security review of layouts in reply text found no way to run code or reach unshown media, but
+three ways to stall a reader. Deeply nested wrappers the subset lacks were unwrapped recursively at
+an unchanged depth and overflowed the stack; every element now counts toward nesting and the node
+budget, HTML deeper than 32 is dropped as truncated, and the parser never throws. The splitter
+re-scanned a paragraph for every code span, and the fence check backtracked on long runs of
+spaces, which made one 64 KiB reply take seconds inside an exported bot's transaction; both are
+single linear scans now, with timed tests. An aspect ratio of 1:10000 at full width made a box
+millions of pixels tall, so ratios are held to 1:10 through 10:1.
+
 ## A layout is followed leniently, never refused
 
 The first version failed the call on anything outside a narrow allowlist. Kirill found that too
