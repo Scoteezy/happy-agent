@@ -9831,7 +9831,10 @@ of its bot's subtasks the same way; Prioritizing is one of Happy's. Their change
 - `orderKey` — its opaque position within its section.
 - `placement` — `"pending"` while Prioritizing has not placed new work yet, otherwise `"settled"`.
 - `visibility` — `"shown"`, `"folded"` (in the Older part of the list), or `"hidden"`.
-- `working` — whether the target's conversation is running now.
+- `working` — whether the target's conversation is running now. Shortly after that conversation
+  starts or stops running, aborted runs included, the daemon publishes the row again in
+  `space.updated` with a greater `version` and `working` as it is then; runs that start and stop
+  close together are published once.
 - `version` — an integer that grows with every change to the row. Space events carry whole
   objects, so a client keeps the copy with the greater `version`.
 

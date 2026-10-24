@@ -165,6 +165,8 @@ import {
  * several rows, or several new chats at once, make one run.
  */
 const WAKE_DELAY_MS = 2_000;
+/** How long a run starting or settling waits for the rest of its burst before rows show it. */
+const WORKING_DELAY_MS = 300;
 /** How often waiting wakes and queued changes are checked, such as after a restart. */
 const CHECK_INTERVAL_MS = 15_000;
 const BRIEF_FUNCTION = "spaces.briefPrioritizing";
@@ -234,6 +236,8 @@ export class SpacesModule implements AgentModule {
     readonly #listeners = new Set<SpaceEventListener>();
     /** The pending wake of each person's Prioritizing, which gathers the rest of a burst. */
     readonly #wakeTimers = new Map<SpaceOwnerId, ReturnType<typeof setTimeout>>();
+    /** The pending `working` refresh of each conversation, which gathers a burst of runs. */
+    readonly #workingTimers = new Map<string, ReturnType<typeof setTimeout>>();
     /** Prioritizing agents with a turn in progress; their batch waits until they finish. */
     readonly #busyPrioritizing = new Set<string>();
     /** Prioritizing agents being made right now, which are not sessions to brief about. */
@@ -521,6 +525,8 @@ export class SpacesModule implements AgentModule {
         this.#loopLifetime.abort();
         for (const timer of this.#wakeTimers.values()) clearTimeout(timer);
         this.#wakeTimers.clear();
+        for (const timer of this.#workingTimers.values()) clearTimeout(timer);
+        this.#workingTimers.clear();
         await this.#checkLoop;
     }
 
@@ -2245,6 +2251,44 @@ export class SpacesModule implements AgentModule {
             });
     }
 
+    /**
+     * Publish the rows of this conversation again once its runs have stopped starting and settling
+     * for a moment, so `working` follows the conversation without an event per run. Read after the
+     * delay, the run a settlement ends is gone, and one that started meanwhile is counted.
+     */
+    #scheduleWorking(agentId: string): void {
+        const lifetime = this.#lifetime;
+        if (lifetime === undefined || this.#workingTimers.has(agentId)) return;
+        const timer = setTimeout(() => {
+            this.#workingTimers.delete(agentId);
+            void this.#publishWorking(lifetime.named("spaces-working"), agentId).catch(
+                (error: unknown) => {
+                    lifetime.log.warn("A row's working state could not be published.", {}, error);
+                },
+            );
+        }, WORKING_DELAY_MS);
+        timer.unref?.();
+        this.#workingTimers.set(agentId, timer);
+    }
+
+    async #publishWorking(ctx: Context, agentId: string): Promise<void> {
+        // Every row event carries `working` as it is then, so whatever a client saw last may be
+        // stale; each burst publishes once, whatever it was.
+        await ctx.inTx(async (txCtx) => {
+            for (const row of await querySpacesByAgent(txCtx, agentId)) {
+                const target = row.contents[0];
+                if (target === undefined || target.kind === "surface" || target.agentId !== agentId)
+                    continue;
+                // The version grows so clients take the copy; the row's own change time stays.
+                const next: SpaceRecord = { ...row, version: row.version + 1 };
+                await updateSpace(txCtx, next, row.version);
+                await this.#commitEvents(txCtx, row.ownerUserId, undefined, [
+                    { type: "space_updated", space: next },
+                ]);
+            }
+        });
+    }
+
     /** Wake Prioritizing once the burst this event belongs to has had time to arrive. */
     #scheduleWake(ownerUserId: SpaceOwnerId): void {
         const lifetime = this.#lifetime;
@@ -3852,6 +3896,13 @@ export class SpacesModule implements AgentModule {
     #subscribe(): void {
         if (this.#unsubscribe.length > 0) return;
         this.#unsubscribe.push(
+            this.#events.subscribe((event) => {
+                if (
+                    (event.type === "loop.started" || event.type === "loop.settled") &&
+                    event.agentId !== undefined
+                )
+                    this.#scheduleWorking(event.agentId);
+            }),
             this.#userSettings.onEventTransactional(async (ctx, event) => {
                 if (
                     event.setting.key === "happy-desktop.experiments.stemCells" &&

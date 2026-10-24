@@ -351,6 +351,16 @@ client drops an operation that changes no value, so the person was never recorde
 author and Prioritizing could fold the row later. The person's requested `set`s now record their
 named aspects as the person's even when nothing changed (`affirmSidebarAuthorship`).
 
+## A row's `working` follows its conversation
+
+`working` was computed only when something else about the row changed, so a row kept shimmering
+after its conversation stopped, aborted runs above all. The module now listens for `loop.started`
+and `loop.settled` and, 300 ms after the first of a burst, publishes every row whose target is that
+conversation with a greater version and `working` read then, after the settled run has left the
+journal's active runs. It publishes even when it last published the same value, because every row
+event carries `working` live: the naming update during a run, for one, already showed the row
+working. The row's `updatedAt` stays, so folded rows keep their order.
+
 ## People who never opted in are untouched
 
 Spaces is an experiment, and a person who has not turned it on must see the daemon behave exactly

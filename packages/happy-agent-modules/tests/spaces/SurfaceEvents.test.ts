@@ -48,7 +48,7 @@ it("refreshes Surface names and pictures from current state and removes its subs
             },
         } as unknown as ConstructorParameters<typeof SpacesModule>[3],
         {} as ConstructorParameters<typeof SpacesModule>[4],
-        {} as ConstructorParameters<typeof SpacesModule>[5],
+        { subscribe } as unknown as ConstructorParameters<typeof SpacesModule>[5],
         { register: () => undefined } as unknown as ConstructorParameters<typeof SpacesModule>[6],
         {} as ConstructorParameters<typeof SpacesModule>[7],
         {} as ConstructorParameters<typeof SpacesModule>[8],
@@ -158,7 +158,7 @@ it.each([false, true])(
                 onEvent: subscribe,
             } as unknown as ConstructorParameters<typeof SpacesModule>[3],
             {} as ConstructorParameters<typeof SpacesModule>[4],
-            {} as ConstructorParameters<typeof SpacesModule>[5],
+            { subscribe } as unknown as ConstructorParameters<typeof SpacesModule>[5],
             { register: () => undefined } as unknown as ConstructorParameters<
                 typeof SpacesModule
             >[6],
