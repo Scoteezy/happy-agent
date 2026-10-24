@@ -11745,6 +11745,8 @@ Turning Stories on again restores them unchanged, with the same `expiresAt`.
     "expiresAt": null,
     "seen": false,
     "viewCount": null,
+    "myReaction": null,
+    "reactions": [],
     "version": "01991f3a-5c1e-7000-8000-2f9a1b3c4d5e"
 }
 ```
@@ -11776,6 +11778,10 @@ Turning Stories on again restores them unchanged, with the same `expiresAt`.
   the caller's own stories and `false` on drafts.
 - `viewCount` — on the author's own posted story, how many other people have seen it; `null` for
   everyone else and on drafts.
+- `myReaction` — the caller's own reaction to this posted story, one emoji, or `null`. See
+  "Reactions".
+- `reactions` — how many people reacted with each emoji, as `{ "emoji", "count" }`, most first and
+  then by the emoji's first reaction; empty on drafts and on stories nobody reacted to.
 - `version` — the UUIDv7 resource version, used with `If-Match`.
 
 Who may read a story:
@@ -11865,6 +11871,12 @@ The types:
   daemon no longer serves is left out of the drawing; the overlay itself is kept.
 - `emoji` — `emoji` is one emoji, a single extended grapheme cluster, drawn with the client's own
   emoji font.
+- `reaction` — a round speech bubble holding one emoji, `emoji`, which viewers tap to react with
+  it (see "Reactions"). `dark: true` draws a dark bubble instead of the white one, and
+  `flipped: true` puts its tail on the right instead of the left; both are optional and false when
+  absent. `transform.scale` is the fraction of the canvas's width the bubble takes. Once the story
+  is posted, the bubble shows under its emoji how many people reacted with that emoji, from
+  `reactions`, when there are any. A frame holds at most five reaction overlays.
 
 A client ignores an overlay of a type it does not know.
 
@@ -11886,7 +11898,7 @@ they may choose from one conversation.
 ### `GET /v0/stories`
 
 The caller's own stories, newest first. Query parameters: `status` (optional; `draft`, `posted`,
-or `deleted`, repeated for several, default `draft` and `posted`), `cursor` (optional, an opaque
+or `deleted`, comma-separated for several, default `draft,posted`), `cursor` (optional, an opaque
 cursor from a previous page), and `limit` (optional, `1`–`100`, default `50`).
 
 Response — `200`:
@@ -12061,6 +12073,59 @@ seen, by `postedAt`. A call naming a story older than the mark changes nothing. 
 `{ "story": { ... } }` from the caller's view, with `story.seen` to the caller's own connections
 after commit, so their other devices update the ring. An author's own stories are always seen.
 Marking a draft is `409 conflict`.
+
+### Reactions
+
+Each person who may read a posted story has at most one reaction to it: one emoji. They react by
+tapping a reaction overlay, which reacts with its emoji, or with the heart in the viewer's bottom
+bar, which reacts with ❤️; pressing and holding the heart offers other emoji. Tapping the same
+emoji again removes the reaction, and reacting with another emoji replaces it. The author does not
+react to their own story; the viewer's bottom bar shows them `viewCount` instead.
+
+Everyone who may read the story sees its `reactions` counts. Only the author sees who reacted,
+through `GET /v0/stories/:storyId/viewers`. Reacting also marks the story seen.
+
+#### `PUT /v0/stories/:storyId/reaction`
+
+Sets the caller's reaction. Request: `{ "emoji": "❤️", "mutationId": "..." }`, where `emoji` is a
+single extended grapheme cluster that is an emoji. Response — `200`: `{ "story": { ... } }` from
+the caller's view, with `story.reacted` after commit. Setting the reaction the caller already has
+answers `200` and emits nothing. Reacting to a draft or a deleted story, or to one's own story, is
+`409 conflict`.
+
+#### `DELETE /v0/stories/:storyId/reaction`
+
+Removes the caller's reaction. The body is `{}` or `{ "mutationId": "..." }`. Response — `200`:
+`{ "story": { ... } }`, with `story.reacted` after commit; removing a reaction the caller does not
+have answers `200` and emits nothing.
+
+#### `GET /v0/stories/:storyId/viewers`
+
+The people who have seen the author's own posted story, with their reactions. Only the author may
+read it; anyone else receives `404`. Query parameters: `cursor` (optional) and `limit`
+(optional, `1`–`100`, default `50`).
+
+Response — `200`:
+
+```json
+{
+    "viewers": [
+        {
+            "userId": "u9z8y7x6w5v4u3t2s1r0q9p8",
+            "name": "Steve Korshakov",
+            "photo": "/v0/users/u9z8y7x6w5v4u3t2s1r0q9p8/photo",
+            "thumbhash": null,
+            "reaction": "❤️",
+            "reactedAt": 1755400000000
+        }
+    ],
+    "nextCursor": null
+}
+```
+
+Viewers who reacted come first, most recent reaction first, then the others by name. `reaction`
+and `reactedAt` are `null` for a viewer who has not reacted. `photo` and `thumbhash` follow the
+feed's author fields.
 
 ### `GET /v0/stories/:storyId/frames/:frameId`
 
@@ -12254,6 +12319,9 @@ connections of people who may read the story as it is after the change.
 - `story.seen` — `authorUserId` and `storyId`, the viewer's new mark for that author. It reaches
   only the person who saw it. The author's `viewCount` changes without an event; the author's
   client reads the story again when it shows the count.
+- `story.reacted` — `storyId`, the story's new `reactions`, and optional `mutationId`. It reaches
+  everyone who may read the story; the reacting person's own copy also carries their new
+  `myReaction`. The author's client reads `viewers` again when it shows them.
 
 A story that expires emits nothing: clients drop it when its `expiresAt` passes, and the next feed
 read leaves it out.
@@ -12271,6 +12339,7 @@ daemon never plays haptics.
 | `story.advance` | The viewer moves to another frame, story, or author.                     | Selection changed    |
 | `story.post`    | `POST /v0/stories/:storyId/post` answers `200`, not when Post is tapped. | Success notification |
 | `story.delete`  | A confirmed deletion answers `200`.                                      | Warning notification |
+| `story.react`   | The viewer taps a reaction bubble or the heart, as the reaction appears. | Light impact         |
 | `sticker.drop`  | A sticker or emoji lands on a frame from the picker.                     | Medium impact        |
 | `overlay.snap`  | A dragged overlay snaps to a guide, once each time (see below).          | Rigid impact, light  |
 | `overlay.trash` | A dragged overlay reaches the delete target.                             | Heavy impact         |
@@ -13454,6 +13523,8 @@ version rules. Snapshot-to-stream cursor and version-gap recovery rules remain u
     - `storyId`, `version`, `mutationId`.
 - `story.seen` — the person's seen mark for an author moved. Only that person receives it.
     - `authorUserId`, `storyId`.
+- `story.reacted` — a story's reaction counts changed. It reaches those who may read the story.
+    - `storyId`, `reactions`, `myReaction` (only in the reacting person's copy), `mutationId`.
 - `sticker_recents.updated` — the person's recently used stickers changed. Only that person
   receives it. It is a complete replacement of the list.
     - `recents`, `mutationId`.
