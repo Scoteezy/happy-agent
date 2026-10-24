@@ -2,28 +2,37 @@
 
 The experimental sidebar is a `sidebar` artifact, and the artifact is the sidebar's state: one
 `<nav>` holding a flat, ordered list of `<happy-search/>`, `<happy-create/>`,
-`<happy-section id label collapsed?/>`, `<happy-separator id/>`, and `<happy-space id expanded?>`,
-every one of which the person can drag. A top-level `happy-space` names a row; a nested one names a
-session (subtask or collaborator) by agent ID, under the conversation that is its parent. A section
-is a titled heading over the rows after it, up to the next section or separator, folds them, and
-moves with them as one block; a separator is an untitled rule that cannot fold. Anything absent is
-not shown. `fold-ribbon` on the nav or a row chooses whether a foldable row's ribbon shows on hover
-or always.
+`<happy-section id label collapsed?/>`, `<happy-separator id/>`, `<happy-space id expanded?>`, and
+`<happy-widget id>…</happy-widget>`, every one of which the person can drag. A top-level
+`happy-space` names a row; a nested one names a session (subtask or collaborator) by agent ID,
+under the conversation that is its parent. A section is a titled heading over the rows after it,
+up to the next section or separator, folds them, and moves with them as one block; a separator is
+an untitled rule that cannot fold; a widget is a leaf of opaque HTML that clients draw isolated.
+Anything absent is not shown. `fold-ribbon` on the nav or a row chooses whether a foldable row's
+ribbon shows on hover or always. The grammar, the canonical form, the operations, and the differ
+are the client's (`parseSpaceSidebar`, `formatSpaceSidebar`, `applySpaceSidebarOperations`,
+`diffSpaceSidebar`), so the daemon and clients compute identical documents.
 
 `sidebar` lazily creates it with Prioritizing as a mirror of the classic sidebar (Happy, Surfaces,
 a separator, then the default Bots and Tasks sections, rows only) and marks it `seed`
 until the person's first write or Prioritizing's next notice; Prioritizing may not change the seed.
-A document in the first grammar is migrated once on read. `updateSidebar` commits the person's CAS
-write; `editSidebar` queues one exact-edit version per call for the calm batch. New rows go right
-below Happy (or after the section or separator they were made under, or after Create when Happy is
-gone or folded away); archived rows and sessions leave with everything nested under them.
+A document in the first grammar is migrated once on read. Every write is a batch of operations by
+node ID: `applySidebarOperations` commits the person's batch, rebased onto the current version and
+answered once per mutation ID; `updateSidebar` (the older whole-document route) and the person's
+ordinary artifact updates are diffed into the same batch; `editSidebar` and Prioritizing's artifact
+updates are diffed into operations queued for the calm batch, one version per proposal. Each
+version records who set each node's place, fold, label, fold ribbon, and widget content, and is
+announced with its operations. New rows go right below Happy (or after the section or separator
+they were made under, or after Create when Happy is gone or folded away); archived rows and
+sessions leave with everything nested under them.
 
 Prioritizing reads `list_sidebar` (the document, row facts, every session under the rows, and the
 shown count against the visible budget of ten), reads threads with `read_row_conversation`,
 writes `edit_sidebar` or `update_artifact`, reads the grammar with `get_sidebar_styles`, and sets
-row and session icons with `set_space_icon`. It may not move Happy, Search, or Create, the
-person's moves and folds, or work active in the last two hours, and it may not touch a stem cell
-before its first message; a section it moves carries its rows under the same rules. Its section
+row and session icons with `set_space_icon`. It may not move Happy, Search, or Create, override
+anything the person last set, or move work active in the last two hours, and it may not touch a
+stem cell before its first message; a section it moves carries its rows under the same rules. An
+operation that breaks a rule is dropped with a note and the rest still applies. Its section
 labels name subjects, never age or doneness, and are unique, and it keeps the Bots and Tasks
 sections. Sessions stay hidden unless it has a strong reason to show one, and a shown session
 counts toward the budget.

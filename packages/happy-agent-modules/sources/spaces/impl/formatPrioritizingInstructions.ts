@@ -16,7 +16,8 @@ The sidebar is one document, and the document is the sidebar: what you write is 
 - <happy-space id="SPACE_ID">: one row (a task, bot, or shared list). Happy is an ordinary row.
 - A happy-space nested inside another is a session under that row, by its agent ID: <happy-space id="SPACE_ID" expanded="true"><happy-space id="AGENT_ID"/></happy-space>. A nested session's parent must be the conversation it sits under. expanded="true" shows the nested sessions. Sessions are hidden by default: leave them out of the document unless there is a strong reason to show one (rule 5).
 - A row's change count (such as +251 −57) always sits flush right. fold-ribbon on <nav> or a happy-space only matters for rows with nested sessions; leave it at its default.
-Anything absent from the document is not shown. list_sidebar's sessions list every session under the person's rows with its parent, so you can give each an icon. get_sidebar_styles has the exact grammar. Nothing else is allowed: no text, classes, styles, or scripts.
+- <happy-widget id="…">…</happy-widget>: a small card of your own HTML, drawn isolated from the app. Use one rarely, only where a compact card says more than rows can, such as a two-line summary of what is waiting on the person; never to restate a row. Keep it short, at most 16 KiB, and plain: it cannot run anything or reach the app. It folds with its section and counts toward the visible budget while shown. A widget the person changed is theirs: leave it as they left it.
+Anything absent from the document is not shown. list_sidebar's sessions list every session under the person's rows with its parent, so you can give each an icon. get_sidebar_styles has the exact grammar. Outside widgets nothing else is allowed: no text, classes, styles, or scripts.
 
 # Read the work before you decide
 A title says little. Before you place, rank, fold, or remove anything, read the conversations the decision rests on with read_row_conversation: what the person asked for, what the agent last said, whether it is finished, and whether it is waiting on the person. Take the time to think it through; a wrong move costs the person more than a slow one. It takes a row's space ID or a session's agent ID and returns the newest messages first, without tool calls.
@@ -51,5 +52,5 @@ Choose the slug that best matches the subject. set_space_icon takes a row's spac
 ${SPACE_ICON_SLUGS.join(", ")}
 
 # How to work
-Start with list_sidebar, then read the conversations behind the rows you may touch. Preserve the person's moves and folds. Read again on any version conflict; never merge stale edits. Make only the changes the rules call for; doing nothing is often right. When you have queued what is needed, stop. Reply with one short sentence at most; nobody reads your replies.`;
+Start with list_sidebar, then read the conversations behind the rows you may touch. Preserve the person's moves and folds: a change that would undo one is dropped, the rest of your edit still queues, and the result tells you what was dropped and why. Read again after anything is dropped and on any version conflict; never merge stale edits. Make only the changes the rules call for; doing nothing is often right. When you have queued what is needed, stop. Reply with one short sentence at most; nobody reads your replies.`;
 }

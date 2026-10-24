@@ -1,4 +1,5 @@
 import { cuid2Schema } from "@slopus/happy-agent-base";
+import { spaceSidebarOperationSchema } from "@slopus/happy-agent-client";
 import { Type, type Static } from "@sinclair/typebox";
 
 import { SPACE_ICON_SLUGS } from "./impl/spaceIconSlugs.js";
@@ -209,18 +210,43 @@ export const spaceBatchSchema = Type.Object(
     { additionalProperties: false },
 );
 
+/** Who last set one aspect of a sidebar node. The daemon's own lifecycle changes record nobody. */
+export const sidebarAuthorSchema = Type.Union([
+    Type.Literal("person"),
+    Type.Literal("prioritizing"),
+]);
+export type SidebarAuthor = Static<typeof sidebarAuthorSchema>;
+
+/**
+ * Who last set each aspect of one node: its place (inserted, moved, removed, or regrouped under
+ * another heading), its fold, its section label, its fold ribbon, and a widget's content.
+ */
+export const sidebarAuthorshipSchema = Type.Object(
+    {
+        place: Type.Optional(sidebarAuthorSchema),
+        fold: Type.Optional(sidebarAuthorSchema),
+        label: Type.Optional(sidebarAuthorSchema),
+        foldRibbon: Type.Optional(sidebarAuthorSchema),
+        html: Type.Optional(sidebarAuthorSchema),
+    },
+    { additionalProperties: false },
+);
+export type SidebarAuthorship = Static<typeof sidebarAuthorshipSchema>;
+export type SidebarAspect = keyof SidebarAuthorship;
+
 /** Each person's sidebar bookkeeping. */
 export const spaceOwnerStateSchema = Type.Object(
     {
         ownerUserId: spaceOwnerIdSchema,
         sidebarArtifactId: Type.Optional(cuid2Schema),
-        /** Sidebar item keys: space, session, section, and separator IDs, or the tag of Search and Create. */
-        sidebarManualIds: Type.Optional(
-            Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 1000 }),
-        ),
-        /** Items whose expanded or collapsed switch the person set by hand. */
-        sidebarManualFolds: Type.Optional(
-            Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 1000 }),
+        /**
+         * Authorship by node ID, most recently set last. Entries outlive removed nodes, so what the
+         * person took out stays theirs; the daemon's own removals take theirs along.
+         */
+        sidebarAuthorship: Type.Optional(
+            Type.Record(Type.String({ minLength: 1, maxLength: 128 }), sidebarAuthorshipSchema, {
+                maxProperties: 2000,
+            }),
         ),
         sidebarPlacedIds: Type.Optional(
             Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 1000 }),
@@ -231,11 +257,15 @@ export const spaceOwnerStateSchema = Type.Object(
         agentIcons: Type.Optional(
             Type.Record(cuid2Schema, spaceIconSlugSchema, { maxProperties: 1000 }),
         ),
+        /**
+         * Prioritizing's proposals waiting for calm, each already turned into operations against
+         * the document it read. `baseVersion` is the artifact version current when it was queued.
+         */
         sidebarPending: Type.Optional(
             Type.Array(
                 Type.Object(
                     {
-                        html: Type.String({ maxLength: 131072 }),
+                        operations: Type.Array(spaceSidebarOperationSchema, { maxItems: 4000 }),
                         baseVersion: spaceVersionSchema,
                         operationId: Type.String({ minLength: 1, maxLength: 256 }),
                         title: Type.Optional(spaceTextSchema),
@@ -265,6 +295,26 @@ export const spaceOwnerStateSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+
+/**
+ * One committed batch of sidebar operations, kept so a retry with the same mutation ID answers
+ * with the first result instead of applying again.
+ */
+export const sidebarMutationSchema = Type.Object(
+    {
+        ownerUserId: spaceOwnerIdSchema,
+        mutationId: Type.String({ minLength: 1, maxLength: 1100 }),
+        /** The document version the batch left. */
+        version: spaceVersionSchema,
+        author: Type.Union([sidebarAuthorSchema, Type.Literal("daemon")]),
+        /** What the request was, so the same ID with another request is a conflict. */
+        digest: Type.String({ minLength: 64, maxLength: 64 }),
+        operations: Type.Array(spaceSidebarOperationSchema, { maxItems: 4000 }),
+        appliedAt: spaceTimestampSchema,
+    },
+    { additionalProperties: false },
+);
+export type SidebarMutation = Static<typeof sidebarMutationSchema>;
 
 export type SpaceOwnerId = Static<typeof spaceOwnerIdSchema>;
 export type SpaceRole = Static<typeof spaceRoleSchema>;

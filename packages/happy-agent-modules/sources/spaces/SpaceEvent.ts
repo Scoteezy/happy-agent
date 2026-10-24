@@ -1,4 +1,5 @@
 import { cuid2Schema } from "@slopus/happy-agent-base";
+import { spaceSidebarAuthorSchema, spaceSidebarOperationSchema } from "@slopus/happy-agent-client";
 import { Type, type Static } from "@sinclair/typebox";
 import type { Context } from "@steve.kite/stdlib";
 
@@ -8,6 +9,7 @@ import {
     spaceRecordSchema,
     spaceSectionRecordSchema,
     spaceTimestampSchema,
+    spaceVersionSchema,
 } from "./Space.js";
 
 const envelope = {
@@ -44,6 +46,19 @@ export const spaceEventSchema = Type.Union([
     ),
     Type.Object(
         { ...envelope, type: Type.Literal("batch_applied"), batch: spaceBatchSchema },
+        { additionalProperties: false },
+    ),
+    /** A new sidebar version; its operations turn `previousVersion` into `version`. */
+    Type.Object(
+        {
+            ...envelope,
+            type: Type.Literal("sidebar_changed"),
+            artifactId: cuid2Schema,
+            previousVersion: spaceVersionSchema,
+            version: spaceVersionSchema,
+            author: spaceSidebarAuthorSchema,
+            operations: Type.Array(spaceSidebarOperationSchema),
+        },
         { additionalProperties: false },
     ),
 ]);

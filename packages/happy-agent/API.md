@@ -10101,8 +10101,9 @@ additional fields on the ordinary error envelope.
 
 For every node the daemon records who last set each of its aspects: its place (`insert`, `move`,
 or `remove`), its fold (`collapsed` or `expanded`), its `label`, its `foldRibbon`, and a widget's
-`html`. The author is the person (through these routes and ordinary artifact updates) or
-Prioritizing. Lifecycle changes the daemon makes itself — inserting new work, removing archived
+`html`. Inserting a node also sets what it starts with: a section's label and fold, a row's fold
+and any `foldRibbon` it names, a widget's `html`. The author is the person (through these routes
+and ordinary artifact updates) or Prioritizing. Lifecycle changes the daemon makes itself — inserting new work, removing archived
 work — record no author, and a node they remove takes its authorship with it. Moving a section
 records its heading only: the items in its block are carried and keep their own authorship.
 

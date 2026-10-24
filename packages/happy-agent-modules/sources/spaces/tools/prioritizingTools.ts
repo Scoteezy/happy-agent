@@ -1,6 +1,6 @@
 import { cuid2Schema, defineAgentTool, type AnyAgentTool } from "@slopus/happy-agent-base";
 import { Type, type Static } from "@sinclair/typebox";
-import { SIDEBAR_STYLES } from "../../artifacts/index.js";
+import { SIDEBAR_STYLES } from "../impl/sidebarStyles.js";
 import { spaceIconSlugSchema } from "../Space.js";
 import type { SpacesModule } from "../SpacesModule.js";
 
@@ -49,7 +49,7 @@ export function prioritizingTools(
             defer: false,
             capabilities: ["Read the person's sidebar artifact and live spaces."],
             description:
-                "Read {artifactId, version, html, spaces, sessions, visibleRows, manualIds}. The html is the sidebar exactly as the person sees it. spaces describe each row; sessions list every session under the rows with its parent, whether or not it is shown. visibleRows counts the rows shown outside collapsed sections and the sessions shown under them, not counting Happy and new work waiting for its first message, against the budget to stay within. Pending edits are included with the version your next edit must use.",
+                "Read {artifactId, version, html, spaces, sessions, visibleRows, manualIds}. The html is the sidebar exactly as the person sees it. spaces describe each row; sessions list every session under the rows with its parent, whether or not it is shown. visibleRows counts the rows and widgets shown outside collapsed sections and the sessions shown under them, not counting Happy and new work waiting for its first message, against the budget to stay within. manualIds are the items whose place, fold, name, or content the person last set. Pending edits are included with the version your next edit must use.",
             parameters: emptySchema,
             returnType: resultSchema,
             durable: true,
@@ -79,7 +79,7 @@ export function prioritizingTools(
             defer: false,
             capabilities: ["Edit the person's sidebar artifact."],
             description:
-                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Leave Happy, Search, Create, the person's manual moves, new work without a first message, and recent work in place. New pending work may receive its first placement.",
+                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Leave Happy, Search, Create, the person's manual moves and folds, their widgets, new work without a first message, and recent work in place: a change that would touch them is dropped, the rest still queues, and the result lists what was dropped. New pending work may receive its first placement.",
             parameters: editsSchema,
             returnType: resultSchema,
             durable: true,

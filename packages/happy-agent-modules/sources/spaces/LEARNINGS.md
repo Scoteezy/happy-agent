@@ -23,24 +23,69 @@ case and spacing, while the person may name sections freely. First-grammar docum
 once on read, keeping order: sections become sections with their labels and folds, the old "Older"
 bucket becomes a plain separator, and plain markup is dropped.
 
-Every writer uses CAS, and validation runs through ordinary artifact tools too. A nested node must
-be a session of the conversation it sits under. The person may move anything. Prioritizing may not
-move Search, Create, or Happy, undo the person's moves or folds, or move or tuck away work active in
-the last two hours (new pending work may receive its first placement). Moves and folds are tracked
-separately: a dragged row stays where the person put it, yet Prioritizing may still open it to show
-a session waiting on the person. An item that now sits under another section or separator has
-moved even if its order among the other items did not; otherwise inserting one above a row the
-person placed would regroup it unnoticed.
+Validation runs through ordinary artifact tools too. A nested node must be a session of the
+conversation it sits under. The person may move anything. Prioritizing may not move Search,
+Create, or Happy, undo the person's moves or folds, or move or tuck away work active in the last
+two hours (new pending work may receive its first placement). An item that now sits under another
+section or separator has moved even if its order among the other items did not; otherwise
+inserting one above a row the person placed would regroup it unnoticed.
 
 A section is its heading plus the rows after it, up to the next section or separator, and Kirill
 asked that it always move as one block. A row-level diff blamed whichever side of a swap had fewer
 rows, so dragging a big section past a small one marked the small section's rows as hand-placed.
-The diff now compares heading order first, then each block's rows, then each parent's sessions,
-each with a longest common subsequence. A moved section is one move: only its heading becomes
-hand-placed, its rows are `carried`, and the batch note names the section ("Moved Research.").
-Carried rows still count as moving for Prioritizing's guards, so it cannot move a section that
-holds Happy, untouched new work, or work active in the last two hours. A full replacement cannot
-tell which of two swapped items was dragged; ties keep the earliest subsequence.
+A `move` of a section now carries its block, and the client's `diffSpaceSidebar` turns a whole
+document into the fewest moves, moving a block whole when it travelled whole. Only the heading
+becomes the mover's, its rows are carried, and the batch note names the section ("Moved
+Research."). Carried rows still count as moving for Prioritizing's guards, so it cannot move a
+section that holds Happy, untouched new work, or work active in the last two hours.
+
+## Writes are operations by node ID
+
+Whole-document writes with compare-and-swap made every concurrent change a conflict: a person's
+drag while Prioritizing's batch waited discarded the batch, and a drag racing the calm apply was
+refused. Kirill approved moving to operations ("lets make these changes"). Every node has a stable
+ID, and every write is a batch of `insert`, `move`, `remove`, and `set` by ID, applied with the
+client's `applySpaceSidebarOperations` — the same function clients use for optimistic updates, so
+both sides compute identical documents. A batch applies to the current version, rebased from the
+one it was made against: an anchor that still exists is used where it is now; an `after` anchor
+that is gone falls back to the nearest node that preceded it in the base and is still under the
+same parent, else first under that parent; removing what is gone is a no-op. Only an operation on
+a node that is gone, or an insert of an ID that exists now, is a conflict, named by its index.
+Removing a section removes its heading only, so its rows join the block above instead of
+vanishing.
+
+Authorship is recorded per node and aspect (place, fold, label, fold ribbon, widget content), so
+"Prioritizing never overrides the person" is a lookup. Inserting sets every aspect the new node
+starts with: a section the person added keeps its label. Prioritizing's operation that touches a
+person-set aspect, or breaks its other rules, is dropped with a note and the rest still applies.
+At queue time the notes come back in `edit_sidebar`'s result (an edit with nothing left is an
+error); at the calm apply the queued operations are reviewed again against the current version and
+drops go into the next brief. Daemon lifecycle changes record nobody, and their removals take the
+authorship along. Authorship keeps the 2,000 most recently set nodes.
+
+Prioritizing still reads and writes HTML: `list_sidebar` shows the current version with its queued
+proposals drawn in, at the current version plus one per proposal, and each edit is diffed by ID
+against that view into operations. A stale `edit_sidebar` still applies when every old text occurs
+exactly once; a stale whole-document artifact update is a conflict. Each queued proposal applies
+as its own version, rebased from the version it was queued against with the earlier proposals
+drawn in, and a person's change no longer discards them.
+
+The person's batches are recorded by mutation ID with a digest of the request (the latest 500 per
+person), so a retry answers with the first result without applying again, also when retries race.
+The document rules (known space IDs, sessions under their parent) are checked only on the nodes a
+batch places, so a stale node nobody touched never blocks the person. Every version is announced
+with `space.sidebar.changed` carrying its operations; `artifact.updated` is still emitted for
+older clients.
+
+Older clients keep working unchanged, which was the simpler choice over refusing them: `PUT
+/v0/spaces/sidebar` stays, with CAS and no rebase, and is diffed into the person's operations so
+authorship and events match. Widgets are invisible to them: `GET` leaves widgets out unless
+`widgets=true`, a `PUT` may not contain one, and widgets it leaves out stay where they are.
+
+`happy-widget` is the one escape hatch: a leaf of opaque HTML (16 KiB, never nested, ending at the
+first `</happy-widget` in any case) that moves, folds, and counts toward the budget like a row and
+is drawn isolated by clients. Prioritizing may add or update widgets, rarely, for a compact card
+that says more than rows can.
 
 New rows go right below Happy, after everything nested under it, where the person expects new
 work; or after the section or separator they were made under. When Happy is gone, nested, or
@@ -191,7 +236,11 @@ existing names are never changed by the toggle.
 `006-sidebar-document-format` changes no data a reader depends on (it drops the old visibility
 reports), but its key is what an older build that knows Spaces sees as unknown, so it refuses the
 database cleanly instead of failing on the flat document. Any later change older builds cannot
-read needs its own marker migration.
+read needs its own marker migration. `007-sidebar-operations` is the next: it adds the mutation
+log and turns each person's manual lists into authorship (a placed or named item keeps place and
+label, a set switch keeps its fold). Queued Prioritizing proposals were whole documents and are
+dropped with a note rather than converted, since converting would need the version each was
+written against; Prioritizing reads the sidebar again at its next notice.
 
 ## Stored state survives a rollback
 

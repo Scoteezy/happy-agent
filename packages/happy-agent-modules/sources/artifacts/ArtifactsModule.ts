@@ -23,7 +23,7 @@ import { ProjectsModule } from "../projects/index.js";
 import { TasksModule } from "../tasks/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
 import type { SpacesModule } from "../spaces/index.js";
-import { parseSidebar, SidebarValidationError } from "./SidebarDocument.js";
+import { readSidebarDocument, SidebarValidationError } from "./SidebarDocument.js";
 import { readFile } from "node:fs/promises";
 import {
     insertArtifactInline,
@@ -499,7 +499,7 @@ export class ArtifactsModule implements AgentModule {
 
     /** No filesystem writes: safe inside a lifecycle/owner transaction, including rollback. */
     async stageSidebarText(ctx: Context, text: string): Promise<ArtifactUpload> {
-        parseSidebar(text);
+        readSidebarDocument(text);
         const now = Date.now();
         const bytes = new TextEncoder().encode(text);
         const upload = {
@@ -600,10 +600,10 @@ export class ArtifactsModule implements AgentModule {
             }
             if (input.type === "sidebar") {
                 const html = await this.#sidebarText(txCtx, entry.sha256);
-                parseSidebar(html);
+                readSidebarDocument(html);
                 if (this.#spaces === undefined || input.id === undefined)
                     throw new ArtifactInputError("Sidebar artifacts are created by Spaces.");
-                await this.#spaces.validateSidebarWrite(txCtx, input.id, html, input.author);
+                await this.#spaces.validateSidebarWrite(txCtx, input.id, html);
             }
             const background = input.background?.toLowerCase();
             const display = input.display;
@@ -785,36 +785,29 @@ export class ArtifactsModule implements AgentModule {
             );
             const now = Math.max(Date.now(), current.updatedAt + 1);
             if (current.type === "sidebar") {
-                let html = await this.#sidebarText(txCtx, entry.sha256);
-                parseSidebar(html);
+                const html = await this.#sidebarText(txCtx, entry.sha256);
+                readSidebarDocument(html);
                 if (this.#spaces === undefined)
                     throw new ArtifactInputError("Spaces is unavailable.");
-                if (
-                    !sidebarBatch &&
-                    input.author.kind === "agent" &&
-                    !(input.files ?? []).some((file) => file.path === "index.html")
-                ) {
-                    html = (await this.#spaces.pendingSidebarText(txCtx, current.id)) ?? html;
-                }
-                await this.#spaces.validateSidebarWrite(txCtx, current.id, html, input.author);
-                if (!sidebarBatch && input.author.kind === "agent") {
-                    await this.#spaces.queueSidebarArtifact(
-                        txCtx,
-                        current.id,
-                        html,
-                        input.baseVersion!,
-                        input.operationId ?? createId(),
-                        {
+                // An ordinary update goes through Spaces, which turns it into operations and
+                // commits them, or queues Prioritizing's, through this method's batch path.
+                if (!sidebarBatch) {
+                    await this.#spaces.writeSidebarArtifact(txCtx, current.id, {
+                        html: (input.files ?? []).some((file) => file.path === "index.html")
+                            ? html
+                            : undefined,
+                        author: input.author,
+                        baseVersion: input.baseVersion!,
+                        operationId: input.operationId ?? createId(),
+                        metadata: {
                             ...(input.title === undefined ? {} : { title: input.title }),
                             ...(input.background === undefined
                                 ? {}
                                 : { background: input.background }),
                         },
-                    );
-                    return current;
+                    });
+                    return await this.#required(txCtx, current.id);
                 }
-                if (!sidebarBatch && input.author.kind === "user")
-                    await this.#spaces.markSidebarManualEdit(txCtx, current.id, html);
             }
             const title = input.title ?? current.title;
             const background =

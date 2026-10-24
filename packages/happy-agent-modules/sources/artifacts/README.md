@@ -176,13 +176,12 @@ Every mutation composes with a caller's transaction and publishes its event only
 outermost commit.
 
 Spaces binds itself through `bindSpaces` to validate sidebar references and writer authority.
-`SidebarDocument` owns the grammar: one `<nav>` of `happy-search`, `happy-create`, titled
-`happy-section`, untitled `happy-separator`, and nested `happy-space` elements with quoted
-attributes and no text, so HTML
-and XML parsers read the same tree. Sidebar writes require the immutable `baseVersion`, run the
-strict validator on every path,
-and reject malformed content with source diagnostics. Manager writes enter Spaces' durable calm
-queue; `commitSidebar` is the apply path after its guards are checked again.
+The grammar is the client's `parseSpaceSidebar`, which every client uses too; `SidebarDocument`
+wraps it as `readSidebarDocument`, turning its refusals into `SidebarValidationError` with source
+diagnostics. Sidebar writes require the immutable `baseVersion` and run the parser on every path.
+An ordinary update of a sidebar is handed to Spaces' `writeSidebarArtifact`, which turns it into
+operations and commits the person's at once or queues Prioritizing's for the calm batch;
+`commitSidebar` is the path Spaces writes every version through.
 
 `stageSidebarText` keeps the bounded daemon-authored HTML in an artifact-owned content table,
 with its upload and expiry intent in the caller's transaction. Lifecycle rollback therefore

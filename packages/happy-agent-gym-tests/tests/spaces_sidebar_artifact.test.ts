@@ -280,11 +280,17 @@ it("guards stem cells, manual and recent placements, versions each edit once, an
         await h.gym.send("Work on the desktop.", { sessionId: manual.agent.id });
         await h.hold();
         let current = await h.read();
+        // A refused move is dropped while the rest of its edit still queues, so every attempt
+        // brings a separator of its own.
+        let moves = 0;
         const moveAfterSeparator = (id: string) => ({
             baseVersion: current.version,
             edits: [
                 { oldText: line(id), newText: "" },
-                { oldText: "</nav>", newText: `${separator("moved")}${line(id)}</nav>` },
+                {
+                    oldText: "</nav>",
+                    newText: `${separator(`moved-${String(++moves)}`)}${line(id)}</nav>`,
+                },
             ],
         });
         expect((await h.call("edit_sidebar", moveAfterSeparator(manual.space.id))).text).toContain(
@@ -293,11 +299,12 @@ it("guards stem cells, manual and recent placements, versions each edit once, an
         expect((await h.call("edit_sidebar", moveAfterSeparator(happy.id))).text).toContain(
             "Happy",
         );
+        // A stale base applies only where its old text still occurs exactly once.
         expect(
             (
                 await h.call("edit_sidebar", {
                     baseVersion: current.version - 1,
-                    edits: [{ oldText: "</nav>", newText: `${separator("stale")}</nav>` }],
+                    edits: [{ oldText: separator("stale"), newText: "" }],
                 })
             ).text,
         ).toContain("sidebar changed");

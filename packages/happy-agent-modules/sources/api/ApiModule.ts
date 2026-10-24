@@ -88,6 +88,7 @@ import {
     type MessageMode,
     type ServiceTierOption,
     agentWaitSchema,
+    spaceSidebarOperationsRequestSchema,
 } from "@slopus/happy-agent-client";
 import {
     cuid2Schema,
@@ -6960,6 +6961,15 @@ export class ApiModule implements AgentModule {
             case "batch_applied":
                 append("space.batch.applied", { batch: spaceBatchResource(event.batch) });
                 return;
+            case "sidebar_changed":
+                append("space.sidebar.changed", {
+                    artifactId: event.artifactId,
+                    previousVersion: event.previousVersion,
+                    version: event.version,
+                    author: event.author,
+                    operations: event.operations,
+                });
+                return;
         }
     }
 
@@ -6973,13 +6983,32 @@ export class ApiModule implements AgentModule {
         if (spaces === undefined || !url.pathname.startsWith("/v0/spaces")) return false;
         const owner = this.#spaceOwner(ctx);
         try {
+            if (request.method === "POST" && url.pathname === "/v0/spaces/sidebar/operations") {
+                const body = await bodyAs(
+                    request,
+                    spaceSidebarOperationsRequestSchema,
+                    "sidebar operations",
+                );
+                sendJson(
+                    response,
+                    200,
+                    await this.#withMutationId(
+                        body.mutationId,
+                        async () => await spaces.applySidebarOperations(ctx, owner, body),
+                    ),
+                );
+                return true;
+            }
             if (
                 url.pathname === "/v0/spaces/sidebar" &&
                 (request.method === "GET" || request.method === "PUT")
             ) {
+                const widgets = url.searchParams.get("widgets");
+                if (widgets !== null && (request.method !== "GET" || widgets !== "true"))
+                    throw invalidRequest('The widgets query takes only "true".');
                 const document =
                     request.method === "GET"
-                        ? await spaces.sidebar(ctx, owner)
+                        ? await spaces.sidebar(ctx, owner, { widgets: widgets === "true" })
                         : await this.#withMutationId(undefined, async () => {
                               const body = await bodyAs(
                                   request,
@@ -7108,10 +7137,16 @@ export class ApiModule implements AgentModule {
             if (error instanceof SidebarValidationError)
                 throw new ApiError(400, "invalid_request", error.message, {
                     diagnostics: error.diagnostics,
+                    ...(error.operationIndex === undefined
+                        ? {}
+                        : { operationIndex: error.operationIndex }),
                 });
             if (error instanceof SidebarConflictError)
                 throw new ApiError(409, "conflict", error.message, {
                     currentVersion: error.currentVersion,
+                    ...(error.operationIndex === undefined
+                        ? {}
+                        : { operationIndex: error.operationIndex }),
                 });
             if (error instanceof ArtifactConflictError)
                 throw new ApiError(409, "conflict", error.message, {
@@ -9398,6 +9433,7 @@ export class ApiModule implements AgentModule {
                 ...(this.#spaces === undefined || this.#tasks === undefined
                     ? {}
                     : { stemCellIdentities: true }),
+                ...(this.#spaces === undefined ? {} : { sidebarOperations: true }),
                 ...(this.#live === undefined
                     ? {}
                     : { desktopLiveCapabilities: [...this.#live.desktopCapabilities] }),

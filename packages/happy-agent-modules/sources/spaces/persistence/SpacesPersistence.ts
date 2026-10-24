@@ -5,11 +5,13 @@ import { sql } from "drizzle-orm";
 import type { Context } from "@steve.kite/stdlib";
 
 import {
+    sidebarMutationSchema,
     spaceBatchSchema,
     spaceOwnerStateSchema,
     spacePendingChangeSchema,
     spaceRecordSchema,
     spaceSectionRecordSchema,
+    type SidebarMutation,
     type SpaceBatch,
     type SpaceOwnerState,
     type SpacePendingChange,
@@ -22,6 +24,7 @@ import {
     SPACE_OWNERS_TABLE,
     SPACE_PENDING_TABLE,
     SPACE_SECTIONS_TABLE,
+    SPACE_SIDEBAR_MUTATIONS_TABLE,
     SPACES_TABLE,
 } from "../SpaceMigrations.js";
 import { spaceRefKey } from "../impl/spaceRefKey.js";
@@ -363,6 +366,67 @@ export async function queryBatches(
             ORDER BY applied_at DESC, id DESC LIMIT ${limit}`,
     );
     return rows.map((row) => parseValue(spaceBatchSchema, row.batch_json, "batch"));
+}
+
+/** How many committed sidebar batches each person's retries are recognized against. */
+export const SIDEBAR_MUTATIONS_KEPT = 500;
+
+/** A committed sidebar batch by its mutation ID, for answering a retry. */
+export async function querySidebarMutation(
+    ctx: Context,
+    ownerUserId: string,
+    mutationId: string,
+): Promise<SidebarMutation | undefined> {
+    const rows = await agentDatabaseRows<{
+        readonly version: number;
+        readonly author: string;
+        readonly digest: string;
+        readonly operations_json: string;
+        readonly applied_at: number | string;
+    }>(
+        ctx.db,
+        sql`SELECT version, author, digest, operations_json, applied_at
+            FROM ${sql.raw(SPACE_SIDEBAR_MUTATIONS_TABLE)}
+            WHERE owner_user_id = ${ownerUserId} AND mutation_id = ${mutationId} LIMIT 1`,
+    );
+    const row = rows[0];
+    if (row === undefined) return undefined;
+    const mutation = {
+        ownerUserId,
+        mutationId,
+        version: Number(row.version),
+        author: row.author,
+        digest: row.digest,
+        operations: JSON.parse(row.operations_json) as unknown,
+        appliedAt: Number(row.applied_at),
+    };
+    assertValue(sidebarMutationSchema, mutation, "sidebar mutation");
+    return mutation as SidebarMutation;
+}
+
+/** Records a committed batch and forgets the person's oldest beyond the ones kept. */
+export async function insertSidebarMutation(
+    ctx: Context,
+    mutation: SidebarMutation,
+): Promise<void> {
+    assertValue(sidebarMutationSchema, mutation, "sidebar mutation");
+    await agentDatabaseRun(
+        ctx.db,
+        sql`INSERT INTO ${sql.raw(SPACE_SIDEBAR_MUTATIONS_TABLE)}
+            (owner_user_id, mutation_id, version, author, digest, operations_json, applied_at)
+            VALUES (${mutation.ownerUserId}, ${mutation.mutationId}, ${mutation.version},
+                ${mutation.author}, ${mutation.digest}, ${JSON.stringify(mutation.operations)},
+                ${mutation.appliedAt})`,
+    );
+    await agentDatabaseRun(
+        ctx.db,
+        sql`DELETE FROM ${sql.raw(SPACE_SIDEBAR_MUTATIONS_TABLE)}
+            WHERE owner_user_id = ${mutation.ownerUserId} AND rowid NOT IN (
+                SELECT rowid FROM ${sql.raw(SPACE_SIDEBAR_MUTATIONS_TABLE)}
+                WHERE owner_user_id = ${mutation.ownerUserId}
+                ORDER BY applied_at DESC, rowid DESC LIMIT ${SIDEBAR_MUTATIONS_KEPT}
+            )`,
+    );
 }
 
 interface OwnerRow {
