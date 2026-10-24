@@ -158,8 +158,9 @@ folds out of view is named in its note, because that is the change the person ca
 ## People who never opted in are untouched
 
 Spaces is an experiment, and a person who has not turned it on must see the daemon behave exactly
-as before. Opting in is the first sidebar read or write, or the first stem cell: only those create
-the person's owner state, Prioritizing, and the sidebar document. Everything else (lifecycle
+as before. The first sidebar read or write, or the first stem cell creates
+the person's owner state and sidebar document; Prioritizing additionally requires the person's
+Stem Cells setting as described below. Everything else (lifecycle
 inserts, new-session and new-work briefs, the calm check, notes in Happy's chat) works from that
 state and so does nothing without it. The `request_space_placement` tool is offered only to
 conversations whose person has a live Prioritizing, and asking for a placement never creates an
@@ -170,6 +171,20 @@ were first made the naming for every chat, and that changed every person's task,
 names. Now only a stem cell is named that way: `createStemCell` marks its agent through
 `TitlesModule.nameBySubject` in the same transaction, and every other chat keeps the standard
 naming it always had.
+
+## Prioritizing follows each person's Stem Cells setting
+
+Reading the sidebar used to activate Prioritizing, and switching Stem Cells off in the desktop
+left that helper running. Prioritizing now requires the literal boolean `true` in the person's
+`happy-desktop.experiments.stemCells` user setting. Missing, cleared, false, or malformed values
+leave it off. A sidebar document can still exist without the helper. Team lookups resolve the
+row owner's settings, never whichever caller happens to be processing an event.
+
+Disabling atomically clears pending layout edits and notices and aborts that person's helper.
+A persisted generation invalidates already queued durable notices even if the person enables it
+again. Creation, briefing, tools, artifact writes, and batch application all check the setting;
+restart also stops disabled helpers. Ordinary task, bot, and chat naming remains independent, and
+existing names are never changed by the toggle.
 
 ## The sidebar format is marked by a migration
 

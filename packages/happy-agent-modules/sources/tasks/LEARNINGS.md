@@ -25,6 +25,20 @@ its sender line removed. A rename, even to the same name, ends automatic naming,
 naming request that is still running. Tasks created before naming existed keep their names as
 chosen.
 
+## New naming jobs survive a failed request; existing names are left alone
+
+A one-shot attempt flag was committed before detached inference, so a temporary provider failure
+left a task called `New Task` permanently. New first-message naming now commits a Durable Functions
+job with that flag. The job persists its three-attempt budget before each provider request, waits
+one then five seconds between failures, and resumes after a restart. After the budget is spent it
+uses a short, cleaned excerpt of the same first message. The task and its conversation title change
+together, only while the task is active and its name remains unconfigured. Eligibility reads and
+database writes are outside the provider-error retry boundary.
+
+The user explicitly asked to leave existing names alone: no startup scan, backfill, or clearing of
+old attempt flags. Later messages never start another job. Stem Cells controls Prioritizing, not
+ordinary task naming; turning it off does not disable this path.
+
 ## A conversation an agent opens runs on that agent's model
 
 A bot's `create_task` with opening text failed on its first turn with "A model is required for

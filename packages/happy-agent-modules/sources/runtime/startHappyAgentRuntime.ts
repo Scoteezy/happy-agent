@@ -540,6 +540,7 @@ export async function startHappyAgentRuntime(
             workspaces,
             runners,
             tasks,
+            durableFunctions,
             botSettings,
             history,
         );

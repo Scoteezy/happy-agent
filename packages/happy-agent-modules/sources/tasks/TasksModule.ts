@@ -4,7 +4,6 @@ import { createId } from "@paralleldrive/cuid2";
 import {
     cuid2Schema,
     currentAgentEnvironment,
-    withAgentDatabase,
     type AgentBaseAcceptedMessage,
     type AgentConfig,
     type AgentKV,
@@ -19,7 +18,7 @@ import { Value } from "@sinclair/typebox/value";
 import { computePermissions, RunnerUnavailableError } from "@slopus/happy-agent-compute";
 import { type MessageMode } from "@slopus/happy-agent-client";
 import type { SessionReasoningEffort, SessionServiceTier } from "@slopus/happy-providers";
-import { afterCommit, backoff, detach, type Context, type RootContext } from "@steve.kite/stdlib";
+import { afterCommit, backoff, type Context } from "@steve.kite/stdlib";
 
 import { AbortModule } from "../abort/index.js";
 import type { BotSettingsModule } from "../botSettings/index.js";
@@ -35,6 +34,7 @@ import { agentDeliveryMode } from "../impl/agentDeliveryMode.js";
 import type { HistoryModule } from "../history/index.js";
 import { isUserOriginMetadata, senderAgentIdMetadata } from "../impl/messageOrigin.js";
 import { mutationIdMetadata } from "../impl/mutationEcho.js";
+import { runNamingAttempts } from "../impl/runNamingAttempts.js";
 
 import {
     archiveTaskCleanupSchema,
@@ -93,6 +93,13 @@ import { sendTaskMessageTool } from "./tools/send_task_message.js";
 const OWNER_KEY = "owner";
 /** Marks a task agent's conversation once its first message has started naming the task. */
 const NAME_ATTEMPTED_KEY = "task-name-attempted";
+const NAMING_FUNCTION = "tasks.name";
+const namingArgumentsSchema = Type.Object({
+    taskId: cuid2Schema,
+    providerId: Type.String(),
+    modelId: Type.Optional(Type.String()),
+    message: Type.String({ minLength: 1, maxLength: MAX_NAMING_MESSAGE_CHARS }),
+});
 const ownerSchema = Type.Union([cuid2Schema, Type.Null()]);
 
 /** The catalog manages its tasks' folders; the agent sandbox does not apply to that work. */
@@ -126,13 +133,11 @@ export class TasksModule implements AgentModule {
     readonly #collaboration: CollaborationModule;
     readonly #transactionalListeners = new Set<TaskEventListener>();
     readonly #listeners = new Set<TaskEventListener>();
-    readonly #namingTasks = new Map<string, Promise<void>>();
     readonly #botSettings: BotSettingsModule | undefined;
     /** The mutation the sending run answers, carried on each message into a task. */
     readonly #history: HistoryModule | undefined;
     #agents: AgentSystemRef | undefined;
     #closed = false;
-    #lifetime: RootContext | undefined;
 
     constructor(
         config: ConfigModule,
@@ -158,6 +163,71 @@ export class TasksModule implements AgentModule {
         this.#runners = runners;
         this.#compute = compute;
         this.#durableFunctions = durableFunctions;
+        durableFunctions.register({
+            name: NAMING_FUNCTION,
+            argumentsSchema: namingArgumentsSchema,
+            resultSchema: Type.Null(),
+            executor: (ctx, call) =>
+                this.#backgroundScope.runInAsyncScope(async () => {
+                    const { taskId, providerId, modelId, message } = call.arguments;
+                    const initial = await readTask(ctx, taskId);
+                    if (
+                        initial === undefined ||
+                        initial.nameConfigured ||
+                        initial.status !== "active"
+                    )
+                        return null;
+                    const style = await this.#titles.namingStyle(ctx, initial.agentId);
+                    const name = await runNamingAttempts(
+                        ctx,
+                        call.kv,
+                        async () => {
+                            const current = await readTask(ctx, taskId);
+                            return (
+                                current !== undefined &&
+                                !current.nameConfigured &&
+                                current.status === "active"
+                            );
+                        },
+                        async () => {
+                            return (
+                                await this.#titles.suggestNames(
+                                    ctx,
+                                    {
+                                        firstMessage: message,
+                                        wanted: { title: true },
+                                        providerId,
+                                        ...(modelId === undefined ? {} : { modelId }),
+                                        style,
+                                    },
+                                    ctx.lifetime === undefined ? {} : { signal: ctx.lifetime },
+                                )
+                            ).title;
+                        },
+                    );
+                    if (name === null) return null;
+                    const chosen = name ?? this.#titles.fallbackName(message, style);
+                    const title = chosen
+                        ?.split(/\s+/u)
+                        .slice(0, 6)
+                        .join(" ")
+                        .slice(0, 60)
+                        .trimEnd();
+                    ctx.lifetime?.throwIfAborted();
+                    if (title === undefined || !Value.Check(taskNameSchema, title)) return null;
+                    await ctx.inTx(async (txCtx) => {
+                        const current = await this.#required(txCtx, taskId);
+                        if (current.nameConfigured || current.status !== "active") return;
+                        await this.#updateAgentMetadata(txCtx, current.agentId, { title });
+                        await this.#change(txCtx, current, (value) => ({
+                            ...value,
+                            name: title,
+                            nameConfigured: true,
+                        }));
+                    });
+                    return null;
+                }),
+        });
         // Archival is committed first; ending the archived agent's machine and background
         // processes follows the commit and survives a restart in between.
         durableFunctions.register({
@@ -223,8 +293,15 @@ export class TasksModule implements AgentModule {
                 if (message.length === 0) return;
                 if ((await scope.kv.read(hookCtx, NAME_ATTEMPTED_KEY)) !== undefined) return;
                 await scope.kv.write(hookCtx, NAME_ATTEMPTED_KEY, { at: Date.now() });
-                afterCommit(hookCtx, () => {
-                    this.#startNaming(task.id, scope.agent.provider, scope.agent.model, message);
+                await this.#durableFunctions.invoke(hookCtx, {
+                    function: NAMING_FUNCTION,
+                    operationId: `tasks.name:${task.id}`,
+                    arguments: {
+                        taskId: task.id,
+                        providerId: scope.agent.provider,
+                        ...(scope.agent.model === undefined ? {} : { modelId: scope.agent.model }),
+                        message,
+                    },
                 });
                 return;
             }
@@ -242,17 +319,13 @@ export class TasksModule implements AgentModule {
 
     readonly beforeStart = (ctx: Context, agents: AgentSystemRef): AgentModuleHooks => {
         this.#agents = agents;
-        this.#lifetime = withAgentDatabase(detach(ctx), ctx.db) as RootContext;
         return this.#hooks;
     };
 
-    /** Stop accepting automatic names and drain the bounded requests already running. */
+    /** Release module references; Durable Functions owns pending naming and its shutdown. */
     async close(): Promise<void> {
         if (this.#closed) return;
         this.#closed = true;
-        this.#lifetime = undefined;
-        await Promise.allSettled(this.#namingTasks.values());
-        this.#namingTasks.clear();
         this.#backgroundScope.emitDestroy();
     }
 
@@ -673,75 +746,6 @@ export class TasksModule implements AgentModule {
                 nameConfigured: true,
             }));
         });
-    }
-
-    /** Give an untouched placeholder task the title its first message suggests. */
-    async #nameFromFirstMessage(
-        ctx: Context,
-        taskId: string,
-        providerId: string,
-        modelId: string | undefined,
-        message: string,
-    ): Promise<void> {
-        try {
-            const initial = await readTask(ctx, taskId);
-            if (initial === undefined || initial.nameConfigured || initial.status !== "active")
-                return;
-            const suggested = (
-                await this.#titles.suggestNames(ctx, {
-                    firstMessage: message,
-                    wanted: { title: true },
-                    providerId,
-                    ...(modelId === undefined ? {} : { modelId }),
-                    style: await this.#titles.namingStyle(ctx, initial.agentId),
-                })
-            ).title;
-            const name = suggested?.split(/\s+/u).slice(0, 6).join(" ").slice(0, 60).trimEnd();
-            if (this.#closed || name === undefined || !Value.Check(taskNameSchema, name)) return;
-            await ctx.inTx(async (txCtx) => {
-                const current = await this.#required(txCtx, taskId);
-                if (current.nameConfigured || current.status !== "active") return;
-                await this.#updateAgentMetadata(txCtx, current.agentId, { title: name });
-                await this.#change(txCtx, current, (task) => ({
-                    ...task,
-                    name,
-                    nameConfigured: true,
-                }));
-            });
-        } catch (error) {
-            ctx.log.debug(
-                "Naming a task from its first message did not happen.",
-                { taskId },
-                error,
-            );
-        }
-    }
-
-    /** Start one detached naming request without delaying message acceptance or the real turn. */
-    #startNaming(
-        taskId: string,
-        providerId: string,
-        modelId: string | undefined,
-        message: string,
-    ): void {
-        const lifetime = this.#lifetime;
-        if (this.#closed || lifetime === undefined || this.#namingTasks.has(taskId)) return;
-        let task!: Promise<void>;
-        task = this.#backgroundScope
-            .runInAsyncScope(
-                async () =>
-                    await this.#nameFromFirstMessage(
-                        lifetime.named("task-initial-naming"),
-                        taskId,
-                        providerId,
-                        modelId,
-                        message,
-                    ),
-            )
-            .finally(() => {
-                if (this.#namingTasks.get(taskId) === task) this.#namingTasks.delete(taskId);
-            });
-        this.#namingTasks.set(taskId, task);
     }
 
     /**

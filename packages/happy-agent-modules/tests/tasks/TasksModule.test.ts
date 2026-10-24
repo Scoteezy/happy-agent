@@ -26,7 +26,10 @@ import { agentModeFromConfig } from "../../sources/api/ApiResourceProjection.js"
 import { botMigrations, BotsModule } from "../../sources/bots/index.js";
 import { CollaborationModule } from "../../sources/collaboration/index.js";
 import { ComputeModule } from "../../sources/compute/index.js";
-import { DurableFunctionsModule } from "../../sources/durableFunctions/index.js";
+import {
+    DurableFunctionsModule,
+    durableFunctionsMigrations,
+} from "../../sources/durableFunctions/index.js";
 import { GitModule } from "../../sources/git/index.js";
 import { HistoryModule } from "../../sources/history/index.js";
 import { ProfileModule } from "../../sources/profile/index.js";
@@ -757,6 +760,21 @@ describe("TasksModule", () => {
             expect((await fixture.tasks.get(ctx, raced.id))?.name).toBe("Onboarding emails");
             expect(fixture.agents.configs.get(raced.agentId)?.metadata?.title).toBe(
                 "Onboarding emails",
+            );
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it("leaves a previously attempted unnamed task alone", async () => {
+        const fixture = await started("tasks-old-name-attempt");
+        try {
+            const task = await fixture.tasks.create(fixture.database.context, {});
+            await fixture.markNamingAttempted(task.agentId);
+            await fixture.acceptText(task.agentId, "user", "A new follow-up message.");
+            expect(fixture.naming).not.toHaveBeenCalled();
+            expect((await fixture.tasks.get(fixture.database.context, task.id))?.name).toBe(
+                "New Task",
             );
         } finally {
             await fixture.close();
@@ -1612,6 +1630,7 @@ async function started(
             ...botMigrations,
             ...taskMigrations,
             ...teamMigrations,
+            ...durableFunctionsMigrations,
         ],
         name,
     );
@@ -1630,7 +1649,10 @@ async function started(
         new DurableFunctionsModule(),
         runners,
     );
-    const durable = { register: vi.fn(), invoke: vi.fn(), cancel: vi.fn() };
+    const durable = new DurableFunctionsModule();
+    vi.spyOn(durable, "invoke");
+    vi.spyOn(durable, "cancel");
+    const durableHooks = durable.beforeStart(database.context);
     const titles = new TitlesModule(config, new HistoryModule(), workspaces);
     const naming = vi.spyOn(titles, "suggestNames");
     const collaboration = new CollaborationModule(config, abort, new HistoryModule(), compute);
@@ -1647,8 +1669,18 @@ async function started(
         collaboration,
     );
     const taskHooks = tasks.beforeStart(database.context, agents.asRef());
-    const bots = new BotsModule(config, abort, titles, projects, workspaces, runners, tasks);
+    const bots = new BotsModule(
+        config,
+        abort,
+        titles,
+        projects,
+        workspaces,
+        runners,
+        tasks,
+        durable,
+    );
     const botHooks = await bots.beforeStart(database.context, agents.asRef());
+    await durableHooks.afterStart?.(database.context, agents.asRef());
     const profile = new ProfileModule(config, bots);
     const team = new TeamModule(config, profile, tasks);
     team.beforeStart(database.context, agents.asRef());
@@ -1683,6 +1715,9 @@ async function started(
         durable,
         events,
         naming,
+        markNamingAttempted: async (agentId: string) => {
+            await scopeFor(agentId).kv.write(database.context, "task-name-attempted", { at: 1 });
+        },
         tasks,
         team,
         tool,
@@ -1806,6 +1841,7 @@ async function started(
                 .filter((part) => part !== "")
                 .join("\n\n"),
         close: async () => {
+            durable.stop();
             for (const extra of extraTasks) await extra.close();
             team.close();
             await tasks.close();

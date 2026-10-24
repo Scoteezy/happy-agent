@@ -213,12 +213,18 @@ reaches clients as `agent.updated`, never as part of the bot's version.
 Creation accepts an optional name, never a client-supplied placeholder or naming flag. A supplied
 name is deliberate; an omitted name makes the daemon supply `New Bot` and record eligibility
 internally. Saving a manual name, even the same name, permanently settles it. A placeholder bot is
-fully usable immediately, and only its first accepted text-bearing user message launches detached
+fully usable immediately, and only its first accepted text-bearing user message schedules durable
 naming. The bots module asks the titles module to run the same cheap, bounded inference mechanism
 with a bot-specific prompt for a one-to-three-word person, role, or character identity based on the
 likely ongoing function. Applying the result rechecks the durable flag in the rename transaction,
 so an explicit rename racing inference always wins. The immutable username, folder, and workspace
 do not move.
+
+New jobs persist a three-attempt budget, with one then five seconds of backoff, and resume after a
+restart. Exhausting inference uses a short cleaned excerpt of that same first message, so a
+provider outage cannot leave meaningful new work unnamed. A manual rename or archival wins over
+both inference and fallback. Old attempted names are deliberately not backfilled or retried; the
+user asked to fix new work only. Naming is independent of the person's Stem Cells setting.
 
 ## Bot agents receive their live bot identity
 

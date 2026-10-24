@@ -450,6 +450,23 @@ export class TitlesModule implements AgentModule<AnyAgentTool> {
         return title?.split(/\s+/u).slice(0, 3).join(" ").slice(0, 40).trimEnd();
     }
 
+    /** A useful bounded first-message name when all provider attempts failed. Never reads history. */
+    fallbackName(
+        message: string,
+        style: NamingStyle = "standard",
+        bot = false,
+    ): string | undefined {
+        const text = message
+            .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
+            .replace(/https?:\/\/\S+/gu, " ")
+            .replace(/[\p{C}#*_`<>]+/gu, " ")
+            .replace(/\s+/gu, " ")
+            .trim();
+        if (!/[\p{L}\p{N}]/u.test(text)) return undefined;
+        const title = parseSuggestedNames(text, { title: true }, style).title;
+        return bot ? title?.split(/\s+/u).slice(0, 3).join(" ").slice(0, 40).trimEnd() : title;
+    }
+
     /**
      * A second look at a chat's title, once the chat is a conversation rather than one message.
      *

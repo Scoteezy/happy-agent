@@ -52,9 +52,10 @@ it("refreshes Surface names and pictures from current state and removes its subs
         { register: () => undefined } as unknown as ConstructorParameters<typeof SpacesModule>[6],
         {} as ConstructorParameters<typeof SpacesModule>[7],
         {} as ConstructorParameters<typeof SpacesModule>[8],
-        { get: async () => ({ value: null }) } as unknown as ConstructorParameters<
-            typeof SpacesModule
-        >[9],
+        {
+            get: async () => ({ value: null }),
+            onEventTransactional: subscribe,
+        } as unknown as ConstructorParameters<typeof SpacesModule>[9],
         {} as ConstructorParameters<typeof SpacesModule>[10],
     );
     try {
@@ -163,9 +164,10 @@ it.each([false, true])(
             >[6],
             {} as ConstructorParameters<typeof SpacesModule>[7],
             {} as ConstructorParameters<typeof SpacesModule>[8],
-            { get: async () => ({ value: null }) } as unknown as ConstructorParameters<
-                typeof SpacesModule
-            >[9],
+            {
+                get: async () => ({ value: null }),
+                onEventTransactional: subscribe,
+            } as unknown as ConstructorParameters<typeof SpacesModule>[9],
             {} as ConstructorParameters<typeof SpacesModule>[10],
         );
         try {

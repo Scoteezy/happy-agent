@@ -79,6 +79,7 @@ export async function sidebarGym() {
             };
         },
     });
+    await gym.client.saveUserSetting("happy-desktop.experiments.stemCells", { value: true });
     const read = () => gym.http.ok<SidebarDocument>("GET", "/v0/spaces/sidebar");
     const manager = async () =>
         await gym.waitUntil(

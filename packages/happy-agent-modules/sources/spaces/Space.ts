@@ -256,6 +256,7 @@ export const spaceOwnerStateSchema = Type.Object(
         ),
         sidebarBrief: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 32 })),
         prioritizingAgentId: Type.Optional(cuid2Schema),
+        prioritizingGeneration: Type.Optional(Type.Integer({ minimum: 0 })),
         /**
          * The person asked for something to happen now — a move in their own words, or a new sidebar to organise —
          * so the queued changes apply as soon as Prioritizing finishes, without waiting for calm.

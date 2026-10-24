@@ -150,6 +150,7 @@ const briefArgumentsSchema = Type.Object(
     {
         ownerUserId: spaceOwnerIdSchema,
         messageId: cuid2Schema,
+        generation: Type.Optional(Type.Integer({ minimum: 0 })),
         text: Type.String({ minLength: 1, maxLength: 20_000 }),
     },
     { additionalProperties: false },
@@ -240,6 +241,7 @@ export class SpacesModule implements AgentModule {
                     call.arguments.ownerUserId,
                     call.arguments.messageId,
                     call.arguments.text,
+                    call.arguments.generation ?? 0,
                 );
                 return null;
             },
@@ -249,6 +251,11 @@ export class SpacesModule implements AgentModule {
     readonly #hooks: AgentModuleHooks = {
         afterStart: async (ctx: Context): Promise<void> => {
             this.#subscribe();
+            for (const owner of await queryOwnerStates(ctx)) {
+                if (!(await this.#stemCellsEnabled(ctx, owner.ownerUserId))) {
+                    await this.#disablePrioritizing(ctx, owner.ownerUserId);
+                }
+            }
             await ctx.inTx((tx) => this.#reconcileSurfaces(tx));
             const lifetime = this.#lifetime;
             if (lifetime === undefined) return;
@@ -294,10 +301,17 @@ export class SpacesModule implements AgentModule {
             const owner = await queryOwnerByPrioritizingAgent(ctx, scope.agent.id);
             return owner === undefined
                 ? input.tools
-                : prioritizingTools(this, owner.ownerUserId, scope.agent.id);
+                : (await this.#stemCellsEnabled(ctx, owner.ownerUserId))
+                  ? prioritizingTools(this, owner.ownerUserId, scope.agent.id)
+                  : [];
         },
         beforeAgentLoop: async (ctx, scope) => {
-            if ((await queryOwnerByPrioritizingAgent(ctx, scope.agent.id)) !== undefined) {
+            const owner = await queryOwnerByPrioritizingAgent(ctx, scope.agent.id);
+            if (owner !== undefined) {
+                if (!(await this.#stemCellsEnabled(ctx, owner.ownerUserId))) {
+                    await this.#requireAgents().abort(ctx, scope.agent.id);
+                    return;
+                }
                 this.#busyPrioritizing.add(scope.agent.id);
             }
         },
@@ -491,10 +505,6 @@ export class SpacesModule implements AgentModule {
     async #ensureSidebar(ctx: Context, ownerUserId: SpaceOwnerId): Promise<string> {
         const state = await this.#ownerState(ctx, ownerUserId);
         if (state.sidebarArtifactId !== undefined) return state.sidebarArtifactId;
-        if (state.prioritizingAgentId === undefined)
-            throw new SpaceInputError(
-                "Configure a model for Prioritizing before creating the sidebar.",
-            );
         const artifacts = this.#requireArtifacts();
         const artifactId = createId();
         const classic = await this.#classicSidebar(ctx, ownerUserId);
@@ -520,7 +530,10 @@ export class SpacesModule implements AgentModule {
         });
         const happy = (await querySpaces(ctx, ownerUserId)).find((space) => space.role === "happy")
             ?.contents[0];
-        const actor = (await artifacts.actorFor(ctx, state.prioritizingAgentId)).author;
+        const actor =
+            state.prioritizingAgentId === undefined
+                ? ownerAuthor(ownerUserId)
+                : (await artifacts.actorFor(ctx, state.prioritizingAgentId)).author;
         await artifacts.create(ctx, {
             id: artifactId,
             type: "sidebar",
@@ -609,6 +622,7 @@ export class SpacesModule implements AgentModule {
             throw new SidebarValidationError(
                 "Only Prioritizing may edit this sidebar as an agent.",
             );
+        await this.#requirePrioritizingEnabled(ctx, owner.ownerUserId);
         const artifact = await this.#requireArtifacts().get(ctx, artifactId);
         if (artifact === undefined) return;
         if (owner.sidebarSeed === true)
@@ -1042,6 +1056,7 @@ export class SpacesModule implements AgentModule {
     }
 
     async #queueSidebarBrief(ctx: Context, ownerUserId: SpaceOwnerId, text: string): Promise<void> {
+        if (!(await this.#stemCellsEnabled(ctx, ownerUserId))) return;
         const state = await this.#ownerState(ctx, ownerUserId);
         if (state.sidebarArtifactId === undefined) return;
         await writeOwnerState(ctx, {
@@ -1247,7 +1262,9 @@ export class SpacesModule implements AgentModule {
             }
             await insertSpace(txCtx, space);
             // A sidebar row names its subject in a few words; other work keeps standard names.
-            await this.#titles.nameBySubject(txCtx, input.task.agentId);
+            if (await this.#stemCellsEnabled(txCtx, ownerUserId)) {
+                await this.#titles.nameBySubject(txCtx, input.task.agentId);
+            }
             // Prioritizing begins with the person's first new work.
             await this.#ensurePrioritizing(txCtx, ownerUserId);
             if (this.#artifacts !== undefined) {
@@ -1451,6 +1468,7 @@ export class SpacesModule implements AgentModule {
         change: SpacePendingChange,
     ): Promise<string> {
         return await ctx.inTx(async (txCtx) => {
+            await this.#requirePrioritizingEnabled(txCtx, ownerUserId);
             if (change.type === "place" || change.type === "visibility") {
                 const space = await this.#ownedSpace(txCtx, ownerUserId, change.spaceId);
                 if (space.role !== "item") {
@@ -1552,6 +1570,7 @@ export class SpacesModule implements AgentModule {
         slug: SpaceIconSlug,
     ): Promise<string> {
         return await ctx.inTx(async (txCtx) => {
+            await this.#requirePrioritizingEnabled(txCtx, ownerUserId);
             const row = await querySpace(txCtx, spaceId);
             if (row === undefined)
                 return await this.#setSessionIcon(txCtx, ownerUserId, spaceId, slug);
@@ -1683,6 +1702,7 @@ export class SpacesModule implements AgentModule {
      */
     async applyBatch(ctx: Context, ownerUserId: SpaceOwnerId): Promise<SpaceBatch | undefined> {
         return await ctx.inTx(async (txCtx) => {
+            if (!(await this.#stemCellsEnabled(txCtx, ownerUserId))) return undefined;
             const state = await this.#ownerState(txCtx, ownerUserId);
             if ((state.sidebarPending?.length ?? 0) > 0)
                 return await this.#applySidebarBatch(txCtx, ownerUserId, state);
@@ -2054,7 +2074,12 @@ export class SpacesModule implements AgentModule {
             .slice(0, 20_000);
         await this.#durableFunctions.invoke(ctx, {
             function: BRIEF_FUNCTION,
-            arguments: { ownerUserId, messageId: createId(), text: brief },
+            arguments: {
+                ownerUserId,
+                messageId: createId(),
+                text: brief,
+                generation: state.prioritizingGeneration ?? 0,
+            },
             ...(operationId === undefined ? {} : { operationId: `spaces:${operationId}` }),
         });
         const { sidebarSeed: _seed, ...rest } = state;
@@ -2067,34 +2092,87 @@ export class SpacesModule implements AgentModule {
         ownerUserId: SpaceOwnerId,
         messageId: string,
         text: string,
+        generation: number,
     ): Promise<void> {
-        const prioritizingAgentId = await this.#livePrioritizing(ctx, ownerUserId);
-        if (prioritizingAgentId === undefined) return;
-        const route = await this.#prioritizingRoute(ctx, ownerUserId);
-        if (route === undefined) throw new Error("No model is available for Prioritizing.");
-        await this.#requireAgents().send(
-            ctx,
-            prioritizingAgentId,
-            { role: "user", content: [{ type: "text", text }] },
-            {
-                id: messageId,
-                metadata: { ...AGENT_MESSAGE_ORIGIN_METADATA },
-                provider: route.providerId,
-                model: route.model,
-                effort: route.effort,
-                permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
-            },
-        );
+        await ctx.inTx(async (ctx) => {
+            if (
+                ((await this.#ownerState(ctx, ownerUserId)).prioritizingGeneration ?? 0) !==
+                generation
+            )
+                return;
+            const prioritizingAgentId = await this.#livePrioritizing(ctx, ownerUserId);
+            if (prioritizingAgentId === undefined) return;
+            const route = await this.#prioritizingRoute(ctx, ownerUserId);
+            if (route === undefined) throw new Error("No model is available for Prioritizing.");
+            await this.#requireAgents().send(
+                ctx,
+                prioritizingAgentId,
+                { role: "user", content: [{ type: "text", text }] },
+                {
+                    id: messageId,
+                    metadata: { ...AGENT_MESSAGE_ORIGIN_METADATA },
+                    provider: route.providerId,
+                    model: route.model,
+                    effort: route.effort,
+                    permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
+                },
+            );
+        });
     }
 
     /** The person's Prioritizing, unless they have none yet or archived it. */
     async #livePrioritizing(ctx: Context, ownerUserId: SpaceOwnerId): Promise<string | undefined> {
+        if (!(await this.#stemCellsEnabled(ctx, ownerUserId))) return undefined;
         const agentId = (await queryOwnerState(ctx, ownerUserId))?.prioritizingAgentId;
         if (agentId === undefined) return undefined;
         const config = await this.#requireAgents().config(ctx, agentId);
         return config === undefined || typeof config.metadata?.["archivedAt"] === "number"
             ? undefined
             : agentId;
+    }
+
+    /** The sidebar experiment belongs to this person, never to the installation or another caller. */
+    async #stemCellsEnabled(ctx: Context, ownerUserId: SpaceOwnerId): Promise<boolean> {
+        let personCtx = ctx;
+        if (this.#team.enabled) {
+            const user = await this.#team.getUser(ctx, ownerUserId);
+            if (user === undefined || user.authentication === "guest") return false;
+            personCtx = this.#team.connectionContext(ctx, user);
+        }
+        return (
+            (await this.#userSettings.get(personCtx, "happy-desktop.experiments.stemCells"))
+                .value === true
+        );
+    }
+
+    async #requirePrioritizingEnabled(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
+        if (!(await this.#stemCellsEnabled(ctx, ownerUserId))) {
+            throw new SpaceConflictError(
+                "Turn on Stem Cells to let Prioritizing change the sidebar.",
+            );
+        }
+    }
+
+    /** Disable only this person's organiser; its conversation and every existing name stay intact. */
+    async #disablePrioritizing(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
+        await ctx.inTx(async (txCtx) => {
+            const state = await queryOwnerState(txCtx, ownerUserId);
+            if (state === undefined) return;
+            const { applyRequestedAt: _requested, ...rest } = state;
+            await deletePendingChanges(txCtx, ownerUserId);
+            await writeOwnerState(txCtx, {
+                ...rest,
+                sidebarPending: [],
+                sidebarBrief: [],
+                prioritizingGeneration: (state.prioritizingGeneration ?? 0) + 1,
+            });
+            afterCommit(txCtx, () => {
+                this.#calmSignalled.delete(ownerUserId);
+            });
+            if (state.prioritizingAgentId !== undefined) {
+                await this.#requireAgents().abort(txCtx, state.prioritizingAgentId);
+            }
+        });
     }
 
     /** The default model from Settings, which a new chat also starts with, at its own effort. */
@@ -2128,6 +2206,7 @@ export class SpacesModule implements AgentModule {
      * again with the next new work after the person archived it.
      */
     async #ensurePrioritizing(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
+        if (!(await this.#stemCellsEnabled(ctx, ownerUserId))) return;
         if ((await this.#livePrioritizing(ctx, ownerUserId)) !== undefined) return;
         const happyAgentId = await this.#happyAgentId(ctx, ownerUserId);
         const route = await this.#prioritizingRoute(ctx, ownerUserId);
@@ -2265,6 +2344,14 @@ export class SpacesModule implements AgentModule {
     #subscribe(): void {
         if (this.#unsubscribe.length > 0) return;
         this.#unsubscribe.push(
+            this.#userSettings.onEventTransactional(async (ctx, event) => {
+                if (
+                    event.setting.key === "happy-desktop.experiments.stemCells" &&
+                    event.setting.value !== true
+                ) {
+                    await this.#disablePrioritizing(ctx, event.owner);
+                }
+            }),
             this.#tasks.onEvent(async (_eventCtx, event) => {
                 const lifetime = this.#lifetime;
                 if (lifetime === undefined) return;

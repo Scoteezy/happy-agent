@@ -456,6 +456,7 @@ it("Prioritizing puts new work in a new Releases section with one edit and one l
         },
     });
     running.add(gym);
+    await gym.client.saveUserSetting("happy-desktop.experiments.stemCells", { value: true });
     const get = () => gym.http.ok<Sidebar>("GET", "/v0/spaces/sidebar");
     const initial = await get();
     const happy = initial.spaces.find((space) => space.title === "Happy")!;

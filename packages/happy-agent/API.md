@@ -7965,12 +7965,17 @@ is ready for its first message through `POST /v0/agents/:agentId/send`. New crea
 Clients may open the composer immediately under their chosen IDs, queuing sends locally until
 creation succeeds; the response waits for setup.
 
-For an unnamed bot, the first accepted text-bearing user-role message starts one asynchronous
-naming request, using that message alone and the same cheap, bounded inference mechanism as
+For an unnamed bot, the first accepted text-bearing user-role message starts one durable asynchronous
+naming job, using that message alone and the same cheap, bounded inference mechanism as
 workspace naming. The bot-specific prompt asks for a short entity, person, or role-like identity
 based on its likely ongoing function, not a task title. Generated names are bounded to three words
 and 40 characters. Message acceptance and the bot's real turn never wait for naming. Failure or
-timeout keeps the placeholder and does not fail the message; later messages do not retry naming.
+timeout does not fail the message. A new naming job makes at most three bounded attempts, waiting
+one second before its second attempt and five seconds before its third. Pending jobs and their
+attempt budget survive daemon restarts; later messages do not start another job. If every attempt
+fails, a bounded plain-text excerpt of that first message supplies the name, within the same
+word and character limits. Text with no letters or numbers supplies no fallback. Previously
+attempted naming is not backfilled or restarted.
 
 The generated name updates the bot and its conversation title together and publishes their usual
 independently versioned updates. Its IDs, username, folder, and dedicated workspace remain
@@ -9602,12 +9607,20 @@ New creation emits `task.created`, `task.joined`, and `agent.created` once after
 `mutationId`.
 
 **Automatic naming.** For a task created without a name, by this route or by `create_task`, the
-first accepted text-bearing message starts one asynchronous naming request: a person's message,
+first accepted text-bearing message starts one durable asynchronous naming job: a person's message,
 or the message from the agent that created it, which is how a `create_task` call's opening `text`
 arrives. Naming uses that message alone and the same cheap, bounded inference as workspace naming,
-and asks for a short title of the work, two to six words. Message acceptance and the task's own
-turn never wait for naming. Failure or timeout keeps `New Task` and does not fail the message;
-later messages do not retry naming. The generated name updates the task and its agent title
+and asks for a short title of the work, two to six words. Ordinary task naming continues
+independently of the Stem Cells setting. Work created through enabled
+Stem Cells instead uses a one-to-three-word subject name from the conversation's own model,
+bounded to 32 characters. Message acceptance and the task's own
+turn never wait for naming. Failure or timeout does not fail the message. A new naming job makes
+at most three bounded attempts, waiting one second before its second attempt and five seconds
+before its third. Pending jobs and their attempt budget survive daemon restarts; later messages
+do not start another job. If every attempt fails, a bounded plain-text excerpt of that first
+message supplies the name, within the same word and character limits. Text with no letters or
+numbers supplies no fallback. Previously attempted naming is not backfilled or restarted.
+The generated name updates the task and its agent title
 together, publishing `task.updated` and `agent.updated`. The task's IDs, folder, and workspace
 never change. An explicit rename always wins, including one committed while naming is running.
 
@@ -9709,7 +9722,11 @@ calendar Surfaces wait until they contain content; other supported kinds, includ
 are seeded on membership alone. New work gets a row when it appears; archived or left work loses it.
 
 **Prioritizing.** Organisation belongs to Prioritizing, an ordinary subtask of Happy that runs
-on the cheapest model the installation offers. It is created with the person's first new work
+on the person's default model. It is enabled only when that person's opaque user setting
+`happy-desktop.experiments.stemCells` is the JSON boolean `true`; missing, cleared, false, or
+other values disable it. This setting is per authenticated member in team mode and belongs to
+the installation's one person in standalone mode. Enabling it does not itself create work or
+Prioritizing. While enabled, Prioritizing is created on the first sidebar-document read or new work
 (`POST /v0/spaces/stem-cells`), the same way Happy creates any subtask, and appears in Happy's
 `subtasks` like any other; until then there is none, and nothing organises the sidebar. After a new conversation's first
 message it gives the row an icon and decides where it belongs, and it tidies the list when asked.
@@ -9721,7 +9738,11 @@ viewer release to Releases.", that names every row it folded out of view, and is
 its diff. Icons apply at once, because they move
 nothing. A person's own changes through `PATCH` apply immediately and are never queued. Other
 agents may ask Prioritizing to move a row through their `request_space_placement` tool; only
-Prioritizing changes organisation.
+Prioritizing changes organisation. Disabling Stem Cells stops that person's Prioritizing,
+discards its unapplied organisation changes and notices, and prevents further automatic
+briefing, tool mutations, or batch application while disabled. Existing conversations and
+names are left unchanged. Task, bot, and ordinary chat naming remain independent of this
+setting and continue while it is disabled.
 
 Prioritizing never folds or hides running work or work active in the last two hours. This is
 checked against the batch's final outcome, including section removal: protected shown rows leave
@@ -9866,8 +9887,9 @@ Response — `200`:
 
 The experimental sidebar is one immutable-versioned `sidebar` artifact per person, owned by
 Prioritizing and listed under Happy. The document is the sidebar's state: what it contains, in its
-order, is exactly what the sidebar shows. It is created lazily together with Prioritizing
-(including on the first sidebar-document read). Legacy sections, order keys, placement and
+order, is exactly what the sidebar shows. The document is created lazily on the first
+sidebar-document read; Prioritizing is created on that read or new work only while that person's
+Stem Cells setting is enabled. Legacy sections, order keys, placement and
 visibility keep their existing contract independently; document edits do not synchronize them.
 
 **Grammar.** The entry is a single UTF-8 `index.html`, at most 128 KiB, 1,000 elements and a

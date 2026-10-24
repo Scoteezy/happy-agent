@@ -176,6 +176,7 @@ async function started(name: string) {
         workspaces,
         runners,
         tasks,
+        new DurableFunctionsModule(),
         botSettings,
     );
     const hooks: Record<string, AgentModuleHooks> = {

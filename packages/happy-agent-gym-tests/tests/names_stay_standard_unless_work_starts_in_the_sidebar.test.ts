@@ -147,6 +147,7 @@ describe("naming", () => {
 
     it("names work started in the sidebar by its subject, on the chat's own model", async () => {
         const gym = await namingGym();
+        await gym.client.saveUserSetting("happy-desktop.experiments.stemCells", { value: true });
 
         const stem = await gym.http.ok<StemCell>("POST", "/v0/spaces/stem-cells", {});
         const stemMessage = "Rewrite the pricing page copy so the team plan is clear.";

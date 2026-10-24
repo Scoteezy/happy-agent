@@ -109,6 +109,22 @@ async function nameChat(
 }
 
 describe("TitlesModule naming", () => {
+    it("falls back to bounded readable first-message text, never markup or empty punctuation", async () => {
+        const test = await titles([]);
+        expect(
+            test.module.fallbackName("## **Release** [notes](https://example.test) cleanup"),
+        ).toBe("Release notes cleanup");
+        expect(test.module.fallbackName("One two three four five six seven")).toBe(
+            "One two three four five six",
+        );
+        expect(test.module.fallbackName("One two three four five", "subject")).toBe(
+            "One two three",
+        );
+        expect(test.module.fallbackName("One two three four five", "standard", true)).toBe(
+            "One two three",
+        );
+        expect(test.module.fallbackName("``` !!! ")).toBeUndefined();
+    });
     it("asks for a short functional bot identity using the cheapest account model", async () => {
         const test = await titles([textTurn("<title>Release Steward</title>")]);
         await expect(

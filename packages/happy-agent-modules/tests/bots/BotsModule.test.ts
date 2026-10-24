@@ -31,7 +31,10 @@ import {
 } from "../../sources/bots/index.js";
 import { ComputeModule } from "../../sources/compute/index.js";
 import { CollaborationModule } from "../../sources/collaboration/index.js";
-import { DurableFunctionsModule } from "../../sources/durableFunctions/index.js";
+import {
+    DurableFunctionsModule,
+    durableFunctionsMigrations,
+} from "../../sources/durableFunctions/index.js";
 import { GitModule } from "../../sources/git/index.js";
 import { HistoryModule } from "../../sources/history/index.js";
 import { SecretsModule } from "../../sources/secrets/index.js";
@@ -916,6 +919,19 @@ describe("BotsModule", () => {
     });
 });
 
+it("leaves a previously attempted unnamed bot alone", async () => {
+    const fixture = await started("bots-old-name-attempt", true);
+    try {
+        const bot = await fixture.bots.create(fixture.database.context, {});
+        await fixture.markNamingAttempted(bot.agentId);
+        await fixture.accept(bot.agentId, "user", "A new follow-up message.");
+        expect(fixture.provider.sessions).toHaveLength(0);
+        expect((await fixture.bots.get(fixture.database.context, bot.id))?.name).toBe("New Bot");
+    } finally {
+        await fixture.close();
+    }
+});
+
 async function started(name: string, workspacesEnabled: boolean, script: ScriptedTurn[] = []) {
     const provider = new ScriptedProvider(script);
     const config = await temporaryTestConfig(
@@ -936,7 +952,13 @@ async function started(name: string, workspacesEnabled: boolean, script: Scripte
         },
     );
     const database = moduleDatabase(
-        [...projectMigrations, ...workspaceMigrations, ...botMigrations, ...taskMigrations],
+        [
+            ...projectMigrations,
+            ...workspaceMigrations,
+            ...botMigrations,
+            ...taskMigrations,
+            ...durableFunctionsMigrations,
+        ],
         name,
     );
     await database.ready;
@@ -969,8 +991,20 @@ async function started(name: string, workspacesEnabled: boolean, script: Scripte
         collaboration,
     );
     tasks.beforeStart(database.context, agents.asRef());
-    const bots = new BotsModule(config, abort, titles, projects, workspaces, runners, tasks);
+    const durable = new DurableFunctionsModule();
+    const durableHooks = durable.beforeStart(database.context);
+    const bots = new BotsModule(
+        config,
+        abort,
+        titles,
+        projects,
+        workspaces,
+        runners,
+        tasks,
+        durable,
+    );
     const hooks = await bots.beforeStart(database.context, agents.asRef());
+    await durableHooks.afterStart?.(database.context, agents.asRef());
     const events: BotEvent[] = [];
     const agentKVs = new Map<string, AgentKV>();
     bots.onEvent((_ctx, event) => {
@@ -987,6 +1021,11 @@ async function started(name: string, workspacesEnabled: boolean, script: Scripte
         database,
         events,
         provider,
+        markNamingAttempted: async (agentId: string) => {
+            const kv = agentKVs.get(agentId) ?? sharedKV();
+            agentKVs.set(agentId, kv);
+            await kv.write(database.context, "bot-name-attempted", { at: 1 });
+        },
         accept: async (
             agentId: string,
             role: AgentBaseAcceptedMessage["message"]["role"],
@@ -1051,6 +1090,7 @@ async function started(name: string, workspacesEnabled: boolean, script: Scripte
             return (await hooks.instructions?.(database.context, scope)) ?? "";
         },
         close: async () => {
+            durable.stop();
             await bots.close();
             await titles.close();
             database.close();
