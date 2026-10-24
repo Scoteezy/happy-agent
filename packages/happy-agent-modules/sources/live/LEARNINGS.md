@@ -21,14 +21,33 @@ override. The route, effort, service tier and voice prompt are frozen when a cal
 requests the priority tier only when the selected route offers it, and otherwise is reported as ignored.
 The explicitly selected voice credential stays separate.
 
-## Default account pools resolve once
+## Default account pools resolve once, onto an account that works
 
 Rejecting every smart default prevented voice from starting when ordinary conversations used an
 account pool. Live now selects one enabled compatible account from that pool at startup and holds
-its concrete provider for the whole call. The regular
-provider registry and a call-local lifetime still enforce pool or account disablement and daemon
-shutdown. A missing credential or later failure never rotates accounts, and the explicitly selected
-voice credential stays separate.
+its concrete provider for the whole call. The regular provider registry and a call-local lifetime
+still enforce pool or account disablement and daemon shutdown. A missing credential or later
+failure never rotates accounts, and the explicitly selected voice credential stays separate.
+
+The first selection was random. On October 24, 2026 it froze a call onto a pool member whose Codex
+sign-in could no longer be renewed, while the other member was healthy and was even the call's
+voice credential; the first request failed in under a second at round 0, and ordinary agents had
+been surviving the same dead account only through router failover, which voice may not use.
+Choosing well at call start is allowed; switching later is not. The pool now freezes onto the
+voice credential's account when the pool includes it, since the call cannot start unless that
+account is signed in. Otherwise it prefers an account whose latest inference anywhere in the daemon
+did not end in a typed authentication or out-of-tokens failure within fifteen minutes, or whose
+construction found no credential; configuration observes this on every concrete provider run and
+clears it on the next completed response. Only when every enabled account has failed does it fall
+back to them, and the choice among equals stays random. Once frozen, the account is never rotated,
+a failed delegation is never retried, and credential kinds never cross.
+
+When the frozen account's sign-in is rejected or its usage runs out, the failed request gets a
+fixed explanation naming that cause and what the person can do (sign in again, wait for usage, or
+choose another controller account and start a new call), instead of the generic failure they would
+only retry. `controller.failed` diagnostics record the provider error `type` beside its `kind`,
+because `kind` is `unknown` for authentication, rate limits and unclassified errors alike and the
+log of that call could not tell them apart.
 
 ## Setup errors identify which selection failed
 

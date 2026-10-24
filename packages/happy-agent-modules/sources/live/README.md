@@ -14,7 +14,9 @@ configured default account, with fast mode off. `ConfigModule` stores runtime ch
 as `config.voice`, applies `PATCH /v0/config` voice changes for the API, and gives active admin bots
 `get_voice_settings` and `set_voice_settings`. `system_prompt` replaces the voice model's built-in
 prompt; the built-in prompt is never stored. A pool chooses one enabled compatible account at startup
-and keeps it for the entire call, without account rotation or failover. Route, effort, service tier
+and keeps it for the entire call, without account rotation or failover: the voice credential's own
+account when the pool includes it, otherwise one without a sign-in or usage failure in the last
+fifteen minutes, and a failed account only when every account has failed. Route, effort, service tier
 (priority only when fast mode is on and the route offers it) and voice prompt are frozen per call. Voice separately uses the explicitly selected official OpenAI API key
 or Codex subscription credential. There is no credential, account, model, or old-Realtime fallback.
 Native credentials are reloaded once from the selected provider-owned sign-in store before the
@@ -23,7 +25,8 @@ Controller and credential setup failures have separate sanitized explanations. S
 account pool as the voice credential reports that an individual OpenAI account is required.
 
 A failed controller delegation returns a bounded safe explanation to voice and leaves the call
-active for the next request. An uncertain action is never retried; its identity remains remembered
+active for the next request. A rejected controller sign-in or exhausted usage says so and what the
+person can do; `controller.failed` records the provider error type. An uncertain action is never retried; its identity remains remembered
 and late results are ignored. Connection/protocol loss, account disablement, response delivery failure,
 and the lifetime action limit still end the call. Categorized diagnostics exclude provider text.
 

@@ -43,6 +43,32 @@ describe("RoundRobinRouterProvider", () => {
         expect(resolve).not.toHaveBeenCalled();
     });
 
+    it("freezes a preferred or working account before falling back to a failed one", () => {
+        const enabled = new Set(["first", "second", "third"]);
+        const failed = new Set(["first"]);
+        const provider = new RoundRobinRouterProvider({
+            candidates: ["first", "second", "third"].map((providerId) => ({ providerId })),
+            model: request.model!,
+            random: () => 0,
+            isEnabled: (id) => enabled.has(id),
+            resolve: async () => null,
+        });
+        const select = (preferred?: string) =>
+            provider.selectAccount({
+                ...(preferred === undefined ? {} : { preferred }),
+                failed: (id) => failed.has(id),
+            });
+        expect(select()).toBe("second");
+        expect(select("third")).toBe("third");
+        // A preferred account that failed loses to one that has not.
+        expect(select("first")).toBe("second");
+        failed.add("second").add("third");
+        expect(select("third")).toBe("third");
+        expect(select()).toBe("first");
+        enabled.delete("third");
+        expect(select("third")).toBe("first");
+    });
+
     it("keeps the random account per agent and advances after authentication failure", async () => {
         const accounts = {
             first: scriptedAccount([normal("first")]),

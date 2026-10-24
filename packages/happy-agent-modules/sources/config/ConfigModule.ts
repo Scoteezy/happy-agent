@@ -86,6 +86,7 @@ import {
     ProviderCredentialFailures,
     type UnavailableCredentialFailure,
 } from "./impl/ProviderCredentialFailures.js";
+import { ProviderAccountFailures } from "./impl/ProviderAccountFailures.js";
 import { ProviderCredentialsUnavailableError } from "./impl/ProviderCredentialsUnavailableError.js";
 import {
     ProviderExecutionObservations,
@@ -1662,6 +1663,7 @@ export class ConfigModule implements AgentModule {
     readonly migrations = nativeAccountIdentityMigrations;
     readonly #executionObservations = new ProviderExecutionObservations();
     readonly #credentialFailures = new ProviderCredentialFailures();
+    readonly #accountFailures = new ProviderAccountFailures();
 
     /**
      * The typed details of a failure configuration raised because a provider had no credential,
@@ -2421,8 +2423,12 @@ export class ConfigModule implements AgentModule {
             throw new VoiceSettingsError(`${name} does not accept ${effort} effort.`);
     }
 
-    /** Live alone requires a frozen route: smart routing must not rotate its controller account. */
-    async liveControllerRoute(): Promise<{
+    /**
+     * Live alone requires a frozen route: smart routing must not rotate its controller account.
+     * A pool chooses once, at call start: the call's own voice credential account when the pool
+     * includes it, otherwise an account without a recent sign-in or usage failure.
+     */
+    async liveControllerRoute(voiceProviderId?: string): Promise<{
         provider: BaseProvider;
         model: AgentModel;
         effort: SessionReasoningEffort;
@@ -2438,7 +2444,10 @@ export class ConfigModule implements AgentModule {
         let model: AgentModel = { ...selection.model, defaultEffort: effort };
         let provider = await this.providers.resolve(model.providerId, model.id);
         if (provider instanceof RoundRobinRouterProvider) {
-            const account = provider.selectAccount();
+            const account = provider.selectAccount({
+                ...(voiceProviderId === undefined ? {} : { preferred: voiceProviderId }),
+                failed: (id) => this.#accountFailures.has(id) || this.#credentialFailures.has(id),
+            });
             if (account === undefined)
                 throw new Error("The controller account pool has no enabled account for voice.");
             model = { ...model, providerId: account };
@@ -3190,6 +3199,7 @@ export class ConfigModule implements AgentModule {
                     undefined,
                     this.#executionObservations,
                     this.#credentialFailures,
+                    this.#accountFailures,
                 ),
             },
             this.configuration,
@@ -3261,6 +3271,7 @@ export class ConfigModule implements AgentModule {
                 scripted,
                 this.#executionObservations,
                 this.#credentialFailures,
+                this.#accountFailures,
             );
             // A test-owned inference registry is already authenticated. Initialize all its
             // accounts as usable, including canonical IDs whose production defaults are off. This

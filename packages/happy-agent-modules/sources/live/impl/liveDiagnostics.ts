@@ -4,6 +4,7 @@ import {
     type LiveDesktopAction,
     type LiveDesktopContext,
 } from "@slopus/happy-agent-client";
+import type { SessionProviderError } from "@slopus/happy-providers";
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { withLogContext, type Context } from "@steve.kite/stdlib";
@@ -64,6 +65,18 @@ export const liveControllerDetailSchema = Type.Object(
         ]),
         providerErrorKind: Type.Optional(
             choices(["internal_error", "context_overflow", "billing_error", "unknown"]),
+        ),
+        providerErrorType: Type.Optional(
+            choices<SessionProviderError["type"]>([
+                "authentication",
+                "out_of_tokens",
+                "rate_limit",
+                "server_overloaded",
+                "internal_server_error",
+                "network",
+                "empty_response",
+                "unclassified",
+            ]),
         ),
         round: Type.Optional(count),
     },

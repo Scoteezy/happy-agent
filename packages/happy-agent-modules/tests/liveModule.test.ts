@@ -532,6 +532,56 @@ describe("window-owned Live sessions", () => {
         expect(transport.create).toHaveBeenCalledOnce();
     });
 
+    it.each([
+        ["authentication", "unknown", "its account's sign-in was rejected", "sign in to"],
+        ["out_of_tokens", "billing_error", "its account has run out of usage", "usage to reset"],
+    ] as const)(
+        "prefers the voice credential's account and explains a controller %s failure",
+        async (type, kind, cause, remedy) => {
+            const f = await fixture();
+            f.provider.session.mockImplementation(async () => ({
+                destroy: vi.fn(async () => undefined),
+                run: async function* (): AsyncGenerator<SessionEvent> {
+                    yield {
+                        type: "done",
+                        state: "error",
+                        kind,
+                        message: "Codex could not use this account. Private detail.",
+                        providerError: { type },
+                    };
+                },
+            }));
+            await activeCall(f);
+            expect(f.config.liveControllerRoute).toHaveBeenCalledWith("fixture");
+            f.calls[0]!.onEvent({ type: "delegation", delegationId: "signed-out" });
+            await expect.poll(() => f.append.mock.calls.length).toBe(1);
+            const text = f.append.mock.calls[0]![0].text;
+            expect(text).toContain(cause);
+            expect(text).toContain(remedy);
+            expect(text).toContain("No action was started for this request.");
+            expect(JSON.stringify(f.append.mock.calls)).not.toContain("Private detail");
+            expect(JSON.stringify(f.info.mock.calls)).not.toContain("Private detail");
+            expect(f.info.mock.calls.map((args) => JSON.parse(args.at(-1)!))).toContainEqual(
+                expect.objectContaining({
+                    event: "controller.failed",
+                    delegationId: "signed-out",
+                    category: "inference",
+                    detail: {
+                        phase: "providerDone",
+                        reason: "providerError",
+                        round: 0,
+                        providerErrorKind: kind,
+                        providerErrorType: type,
+                    },
+                }),
+            );
+            // The frozen account is never swapped and the failed request is never replayed.
+            expect(f.config.liveControllerRoute).toHaveBeenCalledOnce();
+            expect(f.provider.session).toHaveBeenCalledOnce();
+            expect((await f.live.get(f.db.context, "owner", "liveone")).status).toBe("active");
+        },
+    );
+
     it.each([false, true])(
         "ends a lost response transport without attempting a second delivery (controller error: %s)",
         async (controllerError) => {

@@ -405,6 +405,13 @@ reported as `effectiveController.notice`, instead of changing accounts or substi
 model. Fast mode becomes the priority tier only when that model's route offers it. Live holds that concrete route and its pool/account
 lifetimes, so pool or account disablement and daemon shutdown still cancel it while credential
 failures never trigger account failover.
+A random choice once froze a call onto a pool member whose sign-in could no longer be renewed.
+Because that call can never fail over, the choice now takes the voice credential's account when the
+pool includes it, and otherwise skips accounts that recently failed: configuration observes every
+concrete provider run and remembers, per account for fifteen minutes, a terminal typed
+`authentication` or `out_of_tokens` failure, cleared by the next completed response, beside the
+existing missing-credential memory. Failed accounts are chosen only when every enabled account has
+failed. Ordinary smart routing does not consult this memory; it fails over within the turn.
 The voice transport's explicit credential selection remains independent of the text controller.
 Selecting a pool as that credential is invalid, even when it has Codex compatibility. Configuration
 throws a dedicated fixed-message error for that proven selection, allowing Live to explain it

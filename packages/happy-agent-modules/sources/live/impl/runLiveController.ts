@@ -191,12 +191,14 @@ export async function runLiveController(
         category: LiveFailureCategory,
         reason: LiveControllerDetail["reason"],
         providerErrorKind?: LiveControllerDetail["providerErrorKind"],
+        providerErrorType?: LiveControllerDetail["providerErrorType"],
     ) =>
         new LiveControllerError(category, {
             phase,
             reason,
             round,
             ...(providerErrorKind === undefined ? {} : { providerErrorKind }),
+            ...(providerErrorType === undefined ? {} : { providerErrorType }),
         });
     try {
         if (signal.aborted) throw fail("deadline", "deadline");
@@ -318,6 +320,7 @@ export async function runLiveController(
                                       ? "providerLengthLimit"
                                       : "providerCancelled",
                                 event.state === "error" ? event.kind : undefined,
+                                event.state === "error" ? event.providerError?.type : undefined,
                             );
                         finished = true;
                     }

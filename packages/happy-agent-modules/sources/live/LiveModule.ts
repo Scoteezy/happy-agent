@@ -349,7 +349,9 @@ export class LiveModule implements AgentModule {
         let route: Call["route"];
         let credential: Call["credential"];
         try {
-            route = await this.#config.liveControllerRoute();
+            // A pool that includes the voice credential's account freezes onto it: the call cannot
+            // start unless that account is signed in, while another member may not be.
+            route = await this.#config.liveControllerRoute(request.credential.providerId);
         } catch (error) {
             throw new LiveError(
                 503,

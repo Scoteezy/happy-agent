@@ -63,15 +63,22 @@ export class RoundRobinRouterProvider extends BaseProvider {
         this.#resolve = options.resolve;
     }
 
-    /** Choose one enabled account for a caller that must freeze its route without failover. */
-    selectAccount(): string | undefined {
-        const count = this.#candidates.length;
-        const start = randomIndex(count, this.#random());
-        for (let offset = 0; offset < count; offset += 1) {
-            const candidate = this.#candidates[(start + offset) % count]!;
-            if (this.#isEnabled(candidate.providerId)) return candidate.providerId;
-        }
-        return undefined;
+    /**
+     * Choose one enabled account for a caller that must freeze its route without failover. The
+     * caller cannot fail over later, so an account that recently `failed` is chosen only when every
+     * enabled account has; within either group the `preferred` account wins, otherwise one at random.
+     */
+    selectAccount(
+        options: { preferred?: string; failed?: (providerId: string) => boolean } = {},
+    ): string | undefined {
+        const enabled = this.#candidates
+            .map((candidate) => candidate.providerId)
+            .filter((providerId) => this.#isEnabled(providerId));
+        const working = enabled.filter((providerId) => options.failed?.(providerId) !== true);
+        const choices = working.length > 0 ? working : enabled;
+        if (options.preferred !== undefined && choices.includes(options.preferred))
+            return options.preferred;
+        return choices[randomIndex(choices.length, this.#random())];
     }
 
     async session(id: string, options: SessionOptions): Promise<BaseSession> {

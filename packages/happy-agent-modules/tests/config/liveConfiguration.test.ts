@@ -162,6 +162,38 @@ it("does not try another pool credential when its selected controller cannot loa
     );
     expect(other).not.toHaveBeenCalled();
 });
+it("freezes a pool controller onto a signed-in account instead of one whose sign-in was rejected", async () => {
+    const f = await fixture(undefined, controllerPool, undefined, true);
+    const rejected = {
+        type: "done",
+        state: "error",
+        kind: "unknown",
+        message: "Codex authentication could not be renewed for this account.",
+        providerError: { type: "authentication" },
+    } as const;
+    const controller = new ScriptedProvider([[rejected]]);
+    f.providers.add("controller", controller, "codex");
+    // The random choice alone would pick the dead account first, as it did in the failed call.
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    expect((await f.config.liveControllerRoute()).model.providerId).toBe("controller");
+
+    // The call's voice credential account is a pool member, so it is the frozen controller.
+    const route = await f.config.liveControllerRoute("voice");
+    expect(route.provider).toBe(f.provider);
+    expect(route.model).toMatchObject({ providerId: "voice", defaultEffort: "low" });
+
+    // Without that account, an ordinary inference that saw the rejected sign-in steers the choice.
+    const session = await controller.session("ordinary-agent", { instructions: "", tools: [] });
+    const request = { model: route.model.id, context: { instructions: "", messages: [] } };
+    for await (const event of session.run(createRootContext(), request)) void event;
+    const avoided = await f.config.liveControllerRoute("unrelated-account");
+    expect(avoided.model.providerId).toBe("voice");
+    expect(avoided.provider).toBe(f.provider);
+    // Every enabled account having failed still freezes one; the call reports its failure itself.
+    f.config.setProviderEnabled("voice", false);
+    expect((await f.config.liveControllerRoute()).model.providerId).toBe("controller");
+    await session.destroy();
+});
 it("reloads the selected native credential once without refreshing or changing accounts", async () => {
     const credential = CodexSessionCredential.fromAuth(
         { accessToken: "old", accountId: "fixture" },

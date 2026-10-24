@@ -8,6 +8,7 @@ import {
     type SessionEvent,
 } from "@slopus/happy-providers";
 import type { Context } from "@steve.kite/stdlib";
+import type { ProviderAccountFailures } from "./ProviderAccountFailures.js";
 import type { ProviderExecutionObservations } from "./ProviderExecutionObservations.js";
 import type { ProviderSignIn } from "./ProviderCredentialsUnavailableError.js";
 import type { CredentialDiagnosticSanitizer } from "./credentialDiagnosticSanitizer.js";
@@ -33,6 +34,7 @@ export function observeProviderExecution(
     providerType?: string,
     diagnostics?: CredentialDiagnosticSanitizer,
     signIn?: ProviderSignIn,
+    accountFailures?: ProviderAccountFailures,
 ): BaseProvider {
     if (observedProviders.has(provider)) return provider;
     const createSession = provider.session.bind(provider);
@@ -150,6 +152,7 @@ export function observeProviderExecution(
                             if (result.done) record();
                             else if (result.value.type === "done") {
                                 const event = result.value;
+                                accountFailures?.observe(providerId, event);
                                 record(
                                     event.state !== "error"
                                         ? undefined

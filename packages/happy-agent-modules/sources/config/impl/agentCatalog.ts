@@ -42,6 +42,7 @@ import {
 } from "./createForeignAgentProvider.js";
 import { foreignAgentModels } from "./foreignAgentModels.js";
 import { CredentialDiagnosticSources } from "./credentialDiagnosticSanitizer.js";
+import type { ProviderAccountFailures } from "./ProviderAccountFailures.js";
 import type { ProviderCredentialFailures } from "./ProviderCredentialFailures.js";
 import { ProviderCredentialsUnavailableError } from "./ProviderCredentialsUnavailableError.js";
 import type { ProviderExecutionObservations } from "./ProviderExecutionObservations.js";
@@ -548,6 +549,7 @@ export function agentProviders(
     concreteProviders?: AgentProviders,
     observations?: ProviderExecutionObservations,
     credentialFailures?: ProviderCredentialFailures,
+    accountFailures?: ProviderAccountFailures,
 ): AgentProviders {
     const providers = new AgentProviders();
     const retryLimit = configuration.values.settings.inferenceMaxRetries;
@@ -564,7 +566,17 @@ export function agentProviders(
                     if (provider === null) throw new Error(`Provider "${id}" is unavailable.`);
                     return observations === undefined
                         ? provider
-                        : observeProviderExecution(provider, observations, id, null);
+                        : observeProviderExecution(
+                              provider,
+                              observations,
+                              id,
+                              null,
+                              undefined,
+                              undefined,
+                              undefined,
+                              undefined,
+                              accountFailures,
+                          );
                 },
                 type,
             );
@@ -615,6 +627,7 @@ export function agentProviders(
                               provider.type,
                               diagnostics,
                               sources.signIn,
+                              accountFailures,
                           );
                 } catch (error) {
                     // Discovery may throw before a credential exists. Only inputs already passed
