@@ -298,6 +298,12 @@ ends with one line naming every left-out row by its heading and saying to read t
 where they go. Another run moved a bot active an hour ago into a folded section, so the prompt says
 never to fold away recent work "even when you move it into a section".
 
+With rows read again, Prioritizing still filed the quiet tasks into folded topic sections rather
+than Archive or Stale, since the prompt only said they "may go" there, and once more folded a bot
+active an hour ago, not counting a bot as work. The prompt now says to offer a finished task under
+Archive and an unfinished quiet one under Stale rather than folding it into a topic section, and
+never to fold away anything active in the last two hours, "bot or task".
+
 ## Prioritizing shows its own row, once
 
 Notes in Happy's chat interrupted the main agent: "the focus agent normally should never bother the
