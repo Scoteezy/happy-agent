@@ -253,4 +253,12 @@ export const spaceMigrations = [
         "008-sidebar-attachments",
         async (_ctx: Context, _database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {},
     ],
+    [
+        // Prioritizing's own row (role "focus", an "agent" target), sidebar_proposal artifacts,
+        // and their records in each person's state are unreadable to earlier builds, so this
+        // marks the change. Nothing is rewritten: an existing Prioritizing gets its row and an
+        // update notice at the next start, and decides itself what to do from its history.
+        "009-sidebar-proposals",
+        async (_ctx: Context, _database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {},
+    ],
 ] as const;

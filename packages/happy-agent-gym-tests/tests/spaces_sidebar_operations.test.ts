@@ -42,13 +42,13 @@ it("lands the person's drags and Prioritizing's queued edit together, whichever 
     try {
         await h.read();
         await h.unseed();
-        await h.hold();
         const start = await full(h);
         const cursor = (await h.gym.client.getEvents()).latestCursor;
 
-        // Prioritizing queues a Releases section right after the divider.
+        // Prioritizing queues a Releases section right after the divider, and is still deciding.
         const view = await prioritizingView(h);
         expect(view.version).toBe(start.version);
+        const release = h.holdTurn();
         expect(
             (
                 await h.call("edit_sidebar", {
@@ -74,8 +74,9 @@ it("lands the person's drags and Prioritizing's queued edit together, whichever 
         });
         expect(dragged.version).toBe(start.version + 1);
 
-        // At calm Prioritizing's section still lands, where the divider stood.
-        await h.calm();
+        // When its turn ends Prioritizing's section still lands, where the divider stood.
+        release();
+        await h.settle();
         const tidied = await h.gym.waitUntil(async () => {
             const doc = await full(h);
             return doc.version === start.version + 2 ? doc : undefined;
@@ -85,7 +86,6 @@ it("lands the person's drags and Prioritizing's queued edit together, whichever 
         expect(tidied.html).toContain('<happy-section id="tasks" label="Tasks" collapsed="true"/>');
 
         // A drag the person made before the tidy arrived still applies on top of it.
-        await h.hold();
         const late = await h.gym.client.applySpaceSidebarOperations({
             mutationId: "drag-2",
             baseVersion: start.version + 1,
@@ -247,7 +247,6 @@ it("keeps widgets away from older clients and the person's widget away from Prio
     try {
         await h.read();
         await h.unseed();
-        await h.hold();
         const start = await full(h);
         const card = "<div class='card'>3 reviews <b>waiting</b> &amp; one <i>blocked</i></div>";
         const added = await h.gym.client.applySpaceSidebarOperations({
@@ -326,7 +325,7 @@ it("keeps widgets away from older clients and the person's widget away from Prio
                 })
             ).text,
         ).toContain("queued");
-        await h.calm();
+        await h.settle();
         const tidied = await h.gym.waitUntil(async () => {
             const doc = await full(h);
             return doc.version === put.version + 1 ? doc : undefined;

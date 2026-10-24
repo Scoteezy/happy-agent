@@ -94,7 +94,8 @@ async function setup() {
             } as unknown as Accepted,
         );
     const briefs = async () => (await queryOwnerState(database.context, OWNER))?.sidebarBrief ?? [];
-    return { database, hooks, replies, invoked, send, briefs };
+    const wakeAt = async () => (await queryOwnerState(database.context, OWNER))?.sidebarWakeAt;
+    return { database, spaces, hooks, replies, invoked, send, briefs, wakeAt };
 }
 
 it("forwards the person's messages in stem-cell work with the agent's reply before each", async () => {
@@ -123,9 +124,12 @@ it("forwards the person's messages in stem-cell work with the agent's reply befo
                 "Person: Looks good, merge it.",
             ].join("\n"),
         );
-        // Calm briefing waits; nothing reached Prioritizing yet.
+        // Work still waiting for its first placement wakes Prioritizing, since a message may make
+        // its subject clear; the brief itself follows after the commit, so nothing was sent yet.
+        expect(await h.wakeAt()).toBeTypeOf("number");
         expect(h.invoked).toEqual([]);
     } finally {
+        await h.spaces.close();
         h.database.close();
     }
 });
@@ -144,11 +148,12 @@ it("keeps only the latest few notices of one conversation, each bounded", async 
         ]);
         for (const brief of kept) expect(brief.length).toBeLessThan(1_500);
     } finally {
+        await h.spaces.close();
         h.database.close();
     }
 });
 
-it("tells Prioritizing about new work's first message at once instead of waiting", async () => {
+it("wakes Prioritizing with new work's first message, whoever wrote it", async () => {
     const h = await setup();
     try {
         await insertSpace(
@@ -156,10 +161,23 @@ it("tells Prioritizing about new work's first message at once instead of waiting
             row("spacefreshaaaaaaaaaaaaaa", "agentfreshaaaaaaaaaaaaaa", true),
         );
         await h.send("agentfreshaaaaaaaaaaaaaa", "Plan the Android beta.");
-        expect(h.invoked).toHaveLength(1);
-        expect(h.invoked[0]!.arguments.text).toContain("Plan the Android beta.");
-        expect(await h.briefs()).toEqual([]);
+        expect((await h.briefs()).join("\n")).toContain("Plan the Android beta.");
+        expect(await h.wakeAt()).toBeTypeOf("number");
+        // Work another agent created has no stem-cell icon, and its first message is the agent's.
+        const { icon: _icon, ...created } = row(
+            "spacemadeaaaaaaaaaaaaaaa",
+            "agentmadeaaaaaaaaaaaaaaa",
+            true,
+        );
+        await insertSpace(h.database.context, created);
+        await h.send("agentmadeaaaaaaaaaaaaaaa", "Fix the Telegram webhook retries.", "agent");
+        await h.send("agentmadeaaaaaaaaaaaaaaa", "Also check the logs.", "agent");
+        const briefs = await h.briefs();
+        expect(briefs.filter((brief) => brief.includes("spacemadeaaaaaaaaaaaaaaa"))).toEqual([
+            expect.stringContaining("Fix the Telegram webhook retries."),
+        ]);
     } finally {
+        await h.spaces.close();
         h.database.close();
     }
 });

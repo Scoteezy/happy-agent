@@ -62,16 +62,18 @@ it("discards pending organisation edits when disabled, including after re-enabli
     running.add(h.gym);
     await h.read();
     await h.unseed();
-    await h.hold();
     const before = await h.read();
+    // The edit stays queued while Prioritizing's turn is still open.
+    const release = h.holdTurn();
     await h.edit(
         before.html.replace("</nav>", '<happy-section id="releases" label="Releases"/></nav>'),
     );
     await h.gym.client.saveUserSetting(SETTING, { value: null });
-    await h.calm();
+    release();
+    await h.settle();
     expect((await h.read()).html).toBe(before.html);
     await h.gym.client.saveUserSetting(SETTING, { value: true });
-    await h.calm();
+    await h.gym.http.ok("POST", "/v0/spaces/attention", { state: "calm" });
     expect((await h.read()).html).toBe(before.html);
     expect(h.gym.errors).toEqual([]);
 }, 30_000);

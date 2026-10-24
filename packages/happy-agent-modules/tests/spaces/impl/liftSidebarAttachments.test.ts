@@ -157,7 +157,8 @@ describe("sidebar attachments", () => {
             recent: new Set(),
             manual: new Set(),
             fresh: new Set(),
-            moveLimit: undefined,
+            focusId: undefined,
+            direct: false,
         };
         const result = applyPrioritizingOperations(
             revealed,

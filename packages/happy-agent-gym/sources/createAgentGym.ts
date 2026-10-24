@@ -214,7 +214,7 @@ export interface AgentGym {
     listFiles(): Promise<readonly string[]>;
 
     /** Stop the daemon and start it again on the same folder, the way a restart really happens. */
-    restart(): Promise<void>;
+    restart(options?: { readonly whileStopped?: () => Promise<void> }): Promise<void>;
     /** Stop everything and delete the folder. Always call this, including when a test fails. */
     dispose(): Promise<void>;
 }
@@ -543,11 +543,16 @@ class AgentGymInstance implements AgentGym {
             .sort();
     }
 
-    async restart(): Promise<void> {
+    /**
+     * Close the daemon and start another on the same folder. `whileStopped` runs in between, for
+     * a scenario that edits stored data the way an older or newer release would have left it.
+     */
+    async restart(options: { readonly whileStopped?: () => Promise<void> } = {}): Promise<void> {
         await this.#running.close();
         this.#daemon = undefined;
         this.#client = undefined;
         this.#http = undefined;
+        await options.whileStopped?.();
         await this.start();
     }
 

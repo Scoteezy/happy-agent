@@ -11,11 +11,11 @@ import {
     applyPrioritizingOperations,
     projectSidebar,
 } from "../../../sources/spaces/impl/applyPrioritizingOperations.js";
-import { recordSidebarAuthorship } from "../../../sources/spaces/impl/recordSidebarAuthorship.js";
 import {
-    SIDEBAR_MOVE_LIMIT,
-    type PrioritizingRules,
-} from "../../../sources/spaces/impl/reviewPrioritizingOperation.js";
+    affirmSidebarAuthorship,
+    recordSidebarAuthorship,
+} from "../../../sources/spaces/impl/recordSidebarAuthorship.js";
+import { type PrioritizingRules } from "../../../sources/spaces/impl/reviewPrioritizingOperation.js";
 
 const doc = (...items: string[]) =>
     parseSpaceSidebar(`<nav><happy-search/><happy-create/>${items.join("")}</nav>`);
@@ -43,12 +43,35 @@ function rules(
         recent: new Set(["busy"]),
         manual: new Set(),
         fresh: new Set(["fresh"]),
-        moveLimit: undefined,
+        focusId: undefined,
+        direct: false,
         ...overrides,
     };
 }
 
 describe("Prioritizing's operations", () => {
+    it("keeps a row open that the person opened again, though their set changed nothing", () => {
+        const open = applySpaceSidebarOperations(base, [
+            { type: "set", id: "mine", expanded: true },
+        ]).document;
+        const requested: SpaceSidebarOperation[] = [{ type: "set", id: "mine", expanded: true }];
+        // The client drops a set that changes nothing, so the person's batch applies no operation.
+        expect(applySpaceSidebarOperations(open, requested).operations).toEqual([]);
+        const authorship = affirmSidebarAuthorship({}, open, [
+            ...requested,
+            { type: "set", id: "gone", expanded: true },
+        ]);
+        expect(authorship).toEqual({ mine: { fold: "person" } });
+        const result = applyPrioritizingOperations(
+            open,
+            [{ type: "set", id: "mine", expanded: false }],
+            rules(authorship, { direct: false }),
+            undefined,
+        );
+        expect(result.operations).toEqual([]);
+        expect(result.notes.join(" ")).toContain("Keep the person's own folds.");
+    });
+
     it("drops only what overrides the person, and applies the rest", () => {
         const authorship = recordSidebarAuthorship(
             {},
@@ -113,34 +136,29 @@ describe("Prioritizing's operations", () => {
         );
     });
 
-    it("places new work and adds sections freely, but moves only a few placed rows per batch", () => {
+    it("applies at calm only new work's placement, Distractions, its own row, and nested changes", () => {
         const sidebar = doc(
             '<happy-space id="happy"/>',
             '<happy-space id="cell"/>',
             '<happy-section id="desktop" label="Desktop"/>',
             '<happy-space id="a"/>',
             '<happy-space id="b"/>',
-            '<happy-space id="c"/>',
             '<happy-section id="bots" label="Bots"/>',
             '<happy-space id="helper"/>',
         );
-        const limited = rules(
+        const direct = rules(
             {},
             {
-                rows: new Set(["happy", "cell", "a", "b", "c", "helper"]),
+                rows: new Set(["happy", "cell", "a", "b", "helper", "focus"]),
                 untouched: new Set(),
                 recent: new Set(),
                 fresh: new Set(["cell"]),
-                moveLimit: SIDEBAR_MOVE_LIMIT,
+                focusId: "focus",
+                direct: true,
             },
         );
-        const operations: SpaceSidebarOperation[] = [
-            {
-                type: "insert",
-                node: { type: "section", id: "research", label: "Research" },
-                to: { after: "helper" },
-            },
-            { type: "move", id: "cell", to: { after: "research" } },
+        const allowed: SpaceSidebarOperation[] = [
+            { type: "insert", node: { type: "space", id: "focus" }, to: { after: "happy" } },
             {
                 type: "insert",
                 node: {
@@ -149,55 +167,55 @@ describe("Prioritizing's operations", () => {
                     label: "Distractions",
                     collapsed: true,
                 },
-                to: { after: "cell" },
+                to: { after: "helper" },
             },
-            { type: "move", id: "a", to: { after: "distractions" } },
-            { type: "move", id: "b", to: { after: "a" } },
-            { type: "move", id: "c", to: { after: "b" } },
-            // A section carries its rows, so moving it moves placed rows too.
-            { type: "move", id: "bots", to: { after: "happy" } },
+            { type: "move", id: "cell", to: { after: "distractions" } },
+            { type: "insert", node: { type: "space", id: "session1" }, to: { parent: "a" } },
+            { type: "set", id: "a", expanded: true },
         ];
-        const result = applyPrioritizingOperations(sidebar, operations, limited, undefined);
-        expect(result.operations).toEqual(operations.slice(0, 5));
-        expect(result.moved).toEqual(new Set(["a", "b"]));
-        expect(result.notes).toEqual([
-            "Dropped move c after b: one batch moves at most 2 rows already in place. Place new work instead, and move another row in a later batch only if it still matters.",
-            "Dropped move bots after happy: one batch moves at most 2 rows already in place. Place new work instead, and move another row in a later batch only if it still matters.",
-        ]);
-        // Earlier proposals of the same batch already spent the limit.
+        const refused: SpaceSidebarOperation[] = [
+            { type: "move", id: "a", to: { after: "helper" } },
+            { type: "move", id: "desktop", to: { after: "helper" } },
+            {
+                type: "insert",
+                node: { type: "section", id: "research", label: "Research" },
+                to: { after: "helper" },
+            },
+            // A heading among placed rows regroups them, which needs consent.
+            { type: "insert", node: { type: "separator", id: "split" }, to: { after: "a" } },
+            { type: "set", id: "desktop", collapsed: true },
+            { type: "set", id: "desktop", label: "Desktop app" },
+            { type: "remove", id: "b" },
+            {
+                type: "insert",
+                node: { type: "widget", id: "card", html: "<b>2 waiting</b>" },
+                to: { after: "happy-create" },
+            },
+        ];
+        const result = applyPrioritizingOperations(
+            sidebar,
+            [...allowed, ...refused],
+            direct,
+            undefined,
+        );
+        expect(result.operations).toEqual(allowed);
+        expect(result.notes).toHaveLength(refused.length);
+        for (const note of result.notes) expect(note).toContain("propose_sidebar");
+        // What the person asked for in their own words needs no proposal.
+        expect(
+            applyPrioritizingOperations(sidebar, refused, { ...direct, direct: false }, undefined)
+                .operations,
+        ).toEqual(refused);
+        // Its own row, once placed, stays where the person can find it.
+        const placed = applySpaceSidebarOperations(sidebar, [allowed[0]!]).document;
         expect(
             applyPrioritizingOperations(
-                sidebar,
-                [{ type: "move", id: "c", to: { after: "helper" } }],
-                limited,
+                placed,
+                [{ type: "move", id: "focus", to: { after: "helper" } }],
+                { ...direct, direct: false },
                 undefined,
-                new Set(["a", "b"]),
-            ).operations,
-        ).toEqual([]);
-        // A heading inserted among placed rows regroups the rows after it, which counts.
-        expect(
-            applyPrioritizingOperations(
-                sidebar,
-                [
-                    {
-                        type: "insert",
-                        node: { type: "section", id: "split", label: "Split" },
-                        to: { after: "a" },
-                    },
-                ],
-                { ...limited, moveLimit: 1 },
-                undefined,
-            ).operations,
-        ).toEqual([]);
-        // When the person asked for the reorganisation, there is no limit.
-        expect(
-            applyPrioritizingOperations(
-                sidebar,
-                operations,
-                { ...limited, moveLimit: undefined },
-                undefined,
-            ).operations,
-        ).toEqual(operations);
+            ).notes[0],
+        ).toContain("Your own row stays where it is");
     });
 
     it("keeps a widget the person last edited", () => {

@@ -2,22 +2,31 @@
 
 - `applySpaceChanges` — applies queued changes to a sidebar in memory and returns the stored
   updates and the from/to diff. Missing targets are dropped; empty new sections are not made.
-- `composeSpaceBatchNote` — Happy's one-line note, built from the diff.
-- `formatConversationBrief` — the short calm-brief notice of one message the person wrote in new
+- `composeSpaceBatchNote` — the batch's one-line note in Prioritizing's conversation, built from the
+  diff.
+- `formatConversationBrief` — the short notice of one message the person wrote in new
   work, with the agent's reply before it, or of a session under it that stopped.
 - `formatPrioritizingInstructions` — Prioritizing's whole system prompt, with the tidy rules and
   the icon slugs.
 - `selectPrioritizingRoute` — the model Prioritizing runs on: the default from Settings.
 - `sidebarLayout` — the seed document, where new work goes, what is shown, where an item stands,
   and which items came to sit under another heading.
+- `formatConversationTurns` — what `read_conversations` returns for one conversation: its latest
+  turns, oldest first, without tool calls, bounded.
 - `applyPrioritizingOperations` — applies Prioritizing's operations one by one through the shared
-  rebase, dropping each one `reviewPrioritizingOperation` refuses, or that moves placed rows past
-  the batch's move limit, with a note; also draws queued proposals into the document Prioritizing
+  rebase, dropping each one `reviewPrioritizingOperation` refuses, or, without the person's words,
+  `reviewDirectOperation`, with a note; also draws queued edits into the document Prioritizing
   reads.
+- `reviewDirectOperation` — whether an operation is small enough to apply without a proposal: new
+  work's first placement, the Distractions section, Prioritizing's own row, or nested changes.
+- `reviewProposalOperations` — Prioritizing's revision of a proposal, without changes to what the
+  person set in it, age labels other than `Stale`, or archive offers that may not be archived; and
+  the proposal's Archive block.
 - `reviewPrioritizingOperation` — why one of Prioritizing's operations may not apply: it would
   override the person's authorship or move Happy, new work, or recent work.
 - `recordSidebarAuthorship` — who last set each node's place, fold, label, fold ribbon, and
-  widget content after a batch.
+  widget content after a batch; `affirmSidebarAuthorship` records the person's `set`s that changed
+  nothing.
 - `liftSidebarAttachments` — keeps attachments in the sidebar: a removed one moves to the top
   level after its row, and a leaving row's attachments move out before it goes.
 - `migrateLegacySidebar` — the one-time rewrite of a first-grammar document.

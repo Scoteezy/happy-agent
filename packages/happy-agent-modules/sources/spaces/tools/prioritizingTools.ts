@@ -25,11 +25,27 @@ const editsSchema = Type.Object(
     },
     { additionalProperties: false },
 );
-const conversationSchema = Type.Object(
+const conversationsSchema = Type.Object(
     {
-        id: cuid2Schema,
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 40 })),
+        ids: Type.Array(cuid2Schema, { minItems: 1, maxItems: 12, uniqueItems: true }),
+        turns: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+        replies: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })),
     },
+    { additionalProperties: false },
+);
+const proposalPresentationSchema = Type.Object(
+    {
+        type: Type.Literal("artifact"),
+        artifactId: cuid2Schema,
+        version: Type.Integer({ minimum: 1 }),
+        artifactType: Type.Literal("sidebar_proposal"),
+        title: Type.String({ minLength: 1, maxLength: 256 }),
+        shows: Type.Literal("latest"),
+    },
+    { additionalProperties: false },
+);
+const proposalResultSchema = Type.Object(
+    { text: Type.String(), presentation: Type.Optional(proposalPresentationSchema) },
     { additionalProperties: false },
 );
 const iconSchema = Type.Object(
@@ -37,7 +53,7 @@ const iconSchema = Type.Object(
     { additionalProperties: false },
 );
 
-/** One fixed tool surface; layout changes all enter the existing calm batch. */
+/** One fixed tool surface; layout changes are queued until its turn ends, or proposed. */
 export function prioritizingTools(
     spaces: SpacesModule,
     ownerUserId: string,
@@ -60,26 +76,60 @@ export function prioritizingTools(
             toLLM,
         }),
         defineAgentTool({
-            name: "read_row_conversation",
+            name: "read_conversations",
             defer: false,
-            capabilities: ["Read what was said in a sidebar row's conversation."],
+            capabilities: ["Read what was said in several sidebar rows' conversations."],
             description:
-                "Read what the person, the agent, and other agents writing to it (such as the task a subtask was given, or a subtask reporting back) said in a row's conversation (its space ID) or a session under a row (its agent ID), newest first. Tool calls, their output and reasoning are left out; long messages are shortened and the whole answer is capped. A last resort: use it only when a decision is genuinely unclear from the notices.",
-            parameters: conversationSchema,
+                "Read up to 12 conversations at once, each a row (its space ID) or a session under a row (its agent ID): its title, when it was last active, and its latest turns (default 4), oldest first. A turn is a message from the person or another agent (such as a subtask's task or report) with the agent's last replies to it (default 1). Tool calls, their output, and reasoning are left out, and long messages are shortened.",
+            parameters: conversationsSchema,
             returnType: resultSchema,
             durable: true,
             shouldReviewInAutoMode: () => false,
-            execute: async (ctx, input: Static<typeof conversationSchema>) => ({
-                text: await spaces.rowConversation(ctx, ownerUserId, input.id, input.limit ?? 12),
+            execute: async (ctx, input: Static<typeof conversationsSchema>) => ({
+                text: await spaces.readConversations(ctx, ownerUserId, {
+                    ids: input.ids,
+                    turns: input.turns ?? 4,
+                    replies: input.replies ?? 1,
+                }),
             }),
             toLLM,
+        }),
+        defineAgentTool({
+            name: "propose_sidebar",
+            defer: false,
+            capabilities: ["Propose a larger sidebar change for the person to accept."],
+            description:
+                'Propose a change the person accepts or declines: exact-text edits, each oldText occurring once. With no open proposal they apply to the sidebar as list_sidebar shows it and baseVersion is its version; otherwise they revise list_sidebar\'s proposal and baseVersion is the proposal\'s version. Rows under <happy-section id="archive" label="Archive"/> are archived on accept. The proposal shows inline in your conversation. Edits that override the person\'s edits of the proposal are dropped with a note.',
+            parameters: editsSchema,
+            returnType: proposalResultSchema,
+            durable: true,
+            shouldReviewInAutoMode: () => false,
+            execute: async (ctx, input: Static<typeof editsSchema>, call) => {
+                const result = await spaces.proposeSidebar(ctx, ownerUserId, input, call.id);
+                return {
+                    text: result.text,
+                    ...(result.artifact === undefined
+                        ? {}
+                        : {
+                              presentation: {
+                                  type: "artifact" as const,
+                                  artifactId: result.artifact.id,
+                                  version: result.artifact.latestVersion,
+                                  artifactType: "sidebar_proposal" as const,
+                                  title: result.artifact.title,
+                                  shows: "latest" as const,
+                              },
+                          }),
+                };
+            },
+            toLLM: (result) => [{ type: "text" as const, text: result.text }],
         }),
         defineAgentTool({
             name: "edit_sidebar",
             defer: false,
             capabilities: ["Edit the person's sidebar artifact."],
             description:
-                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Leave Happy, Search, Create, the person's manual moves and folds, their widgets, new work without a first message, and recent work in place, and move at most a couple of placed rows per batch: a change that breaks this is dropped, the rest still queues, and the result lists what was dropped. Placing new pending work is always allowed.",
+                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Only placing new work, adding Distractions, adding your own row, and changes nested under a row apply without the person asking; anything else, and anything touching the person's moves, folds, widgets, new work before its first message, or recent work, is dropped with a note, and the rest still queues.",
             parameters: editsSchema,
             returnType: resultSchema,
             durable: true,

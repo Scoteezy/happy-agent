@@ -1,4 +1,4 @@
-import { createAgentGym } from "@slopus/happy-agent-gym";
+import { createAgentGym, type GymInferenceRequest, type GymTurn } from "@slopus/happy-agent-gym";
 
 export type SidebarDocument = {
     artifactId: string;
@@ -24,13 +24,25 @@ export type SidebarStem = {
     agent: { id: string };
 };
 
-/** Every operation enters through the real API and the manager's real tool loop. */
-export async function sidebarGym() {
+/**
+ * Every operation enters through the real API and the manager's real tool loop. `prioritizing`
+ * answers Prioritizing's own turns, such as a notice, before the default reply; `undefined` falls
+ * through to it.
+ */
+export async function sidebarGym(
+    options: {
+        readonly prioritizing?: (
+            request: GymInferenceRequest,
+        ) => GymTurn | undefined | Promise<GymTurn | undefined>;
+    } = {},
+) {
     let command: { token: string; name: string; args: unknown } | undefined;
     let sequence = 0;
+    /** While set, Prioritizing's reply after a tool result waits, so its turn stays open. */
+    let gate: Promise<void> | undefined;
     const gym = await createAgentGym({
         timeoutMs: 30000,
-        inference: (request) => {
+        inference: async (request) => {
             if (request.instructions.includes("<outcome>"))
                 return {
                     content: [
@@ -51,10 +63,17 @@ export async function sidebarGym() {
                     ],
                 };
             const last = request.messages.at(-1);
+            // A notice may join the scenario's request in one run, so every message since the
+            // last reply is searched for the request.
+            const trailing = request.messages.slice(
+                request.messages.findLastIndex((message) => message.role === "assistant") + 1,
+            );
             if (
                 command !== undefined &&
-                last?.role === "user" &&
-                JSON.stringify(last).includes(command.token)
+                trailing.some(
+                    (message) =>
+                        message.role === "user" && JSON.stringify(message).includes(command!.token),
+                )
             ) {
                 const call = command;
                 command = undefined;
@@ -68,6 +87,11 @@ export async function sidebarGym() {
                         },
                     ],
                 };
+            }
+            if (request.instructions.includes("You are Prioritizing")) {
+                if (gate !== undefined && last?.role === "tool") await gate;
+                const turn = await options.prioritizing?.(request);
+                if (turn !== undefined) return turn;
             }
             return {
                 delayMs:
@@ -93,7 +117,11 @@ export async function sidebarGym() {
         sessionId ??= await manager();
         const token = `sidebar_scenario_${++sequence}`;
         command = { token, name, args };
-        await gym.send(`Execute sidebar request ${token}.`, { sessionId });
+        // A turn held open never finishes, so the request is sent without waiting for it.
+        await gym.send(`Execute sidebar request ${token}.`, {
+            sessionId,
+            ...(gate === undefined ? {} : { wait: false }),
+        });
         return await gym.waitUntil(
             () => gym.inference.toolResults().find((result) => result.callId === token),
             "the sidebar tool result",
@@ -106,9 +134,29 @@ export async function sidebarGym() {
             edits: [{ oldText: current.html, newText: html }],
         });
     };
-    const calm = async () => await gym.http.ok("POST", "/v0/spaces/attention", { state: "calm" });
-    const hold = async () =>
-        await gym.http.ok("POST", "/v0/spaces/attention", { state: "interacting" });
+    /**
+     * Keep Prioritizing's turn open after its next tool call, so its queued changes wait while the
+     * scenario acts; the returned function lets the turn finish.
+     */
+    const holdTurn = () => {
+        let release!: () => void;
+        gate = new Promise((resolve) => {
+            release = resolve;
+        });
+        return () => {
+            gate = undefined;
+            release();
+        };
+    };
+    /** Prioritizing's changes apply when its turn ends; wait for that. */
+    const settle = async () => {
+        const id = await manager();
+        await gym.waitUntil(
+            async () =>
+                (await gym.client.getAgent(id)).agent.status === "idle" ? true : undefined,
+            "Prioritizing to finish its turn",
+        );
+    };
     const create = async (sectionId?: string) =>
         await gym.http.ok<SidebarStem>(
             "POST",
@@ -124,5 +172,5 @@ export async function sidebarGym() {
             "the end of the seed",
         );
     };
-    return { gym, read, call, edit, calm, hold, create, manager, unseed };
+    return { gym, read, call, edit, settle, holdTurn, create, manager, unseed };
 }

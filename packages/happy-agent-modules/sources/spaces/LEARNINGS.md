@@ -42,7 +42,7 @@ section that holds Happy, untouched new work, or work active in the last two hou
 ## Writes are operations by node ID
 
 Whole-document writes with compare-and-swap made every concurrent change a conflict: a person's
-drag while Prioritizing's batch waited discarded the batch, and a drag racing the calm apply was
+drag while Prioritizing's batch waited discarded the batch, and a drag racing the apply was
 refused. Kirill approved moving to operations ("lets make these changes"). Every node has a stable
 ID, and every write is a batch of `insert`, `move`, `remove`, and `set` by ID, applied with the
 client's `applySpaceSidebarOperations` — the same function clients use for optimistic updates, so
@@ -59,7 +59,7 @@ Authorship is recorded per node and aspect (place, fold, label, fold ribbon, wid
 starts with: a section the person added keeps its label. Prioritizing's operation that touches a
 person-set aspect, or breaks its other rules, is dropped with a note and the rest still applies.
 At queue time the notes come back in `edit_sidebar`'s result (an edit with nothing left is an
-error); at the calm apply the queued operations are reviewed again against the current version and
+error); when the batch applies the queued operations are reviewed again against the current version and
 drops go into the next brief. Daemon lifecycle changes record nobody, and their removals take the
 authorship along. Authorship keeps the 2,000 most recently set nodes.
 
@@ -136,7 +136,7 @@ icons.
 ## A stem cell stays one until the person speaks
 
 Kirill saw new work turn into something before saying what it was. The row was briefed to
-Prioritizing on insertion, and its opening and calm briefs let it give an icon and place the row.
+Prioritizing on insertion, and its opening and later briefs let it give an icon and place the row.
 Now insertion of untouched new work briefs nothing, and an icon, move, or fold of a stem cell whose
 first message has not arrived is refused (`briefedAt` marks that message).
 
@@ -175,24 +175,28 @@ daemon would have let Prioritizing move work active minutes ago, and `list_sideb
 row "not placed yet". Creating the document now records every mirrored row, except untouched new
 work, as placed.
 
-## Prioritizing hears the person, and reads threads only as a last resort
+## Prioritizing hears the person, and reads threads by turn
 
 Placing by title and timestamps alone misjudged what work was about and whether it was done.
-`read_row_conversation` takes a row's space ID or a session's agent ID and returns what the person
-and the agent said, and what other agents wrote to it (a subtask's task, a report back), newest
-first, without tool calls or reasoning, capped at 40 messages and about 16,000 characters, through
-History's public page read.
+Reading one row at a time, newest message first, made tidying slow and drowned it in replies.
+Kirill asked for a reader that is "easier to filter, remove the tool calls, and limit to only the
+last X assistant messages per turn". `read_conversations {ids, turns, replies}` reads up to twelve
+rows or sessions at once: each with its title and last activity, then its latest turns oldest
+first, a turn being one message from the person or another agent and the agent's last text
+replies to it. Tool calls, reasoning, and hidden messages are left out, and each message (1,200
+characters), conversation (about 4,000), and answer (about 24,000) is bounded
+(`formatConversationTurns`).
 
 Reading every thread made each turn long, and the first message alone often said too little to
 place new work. Kirill: send every message the person writes in stem-cell chats to the focus
 agent, "and the last text message before", so it has enough context. Each later message the person
-writes in work that started as a stem cell, or in a session under it, is now a short calm-brief
+writes in work that started as a stem cell, or in a session under it, is now a short
 notice quoting the agent's last text reply (400 characters) and the message (900), without tool
 calls; a session under such work that stops is one too, with its last reply. Only the latest three
-notices per row wait, so a busy chat never crowds the rest out. They wait for calm like every other
-notice, never waking Prioritizing while the person works. Stem-cell origin is read from the
-subject-naming mark, which only `createStemCell` sets and which covers chats under it. The prompt
-now calls `read_row_conversation` a last resort, for when a decision is genuinely unclear.
+notices per row wait, so a busy chat never crowds the rest out. They wait for the next wake rather
+than causing one, except while the work still waits for its first placement, when a message may
+make its subject clear. Stem-cell origin is read from the subject-naming mark, which only
+`createStemCell` sets and which covers chats under it.
 
 ## Sections are the layout, and Prioritizing inserts rather than reshuffles
 
@@ -204,14 +208,47 @@ topic sections the layout, keeps one `distractions` section labelled Distraction
 work outside the person's focus, places new work once its messages make the subject clear, adds a
 new section where no existing row changes section, and moves a placed row only for a strong reason.
 A session that needs the person (review, approval, an answer) is nested under its row, expanded,
-and taken out again afterwards. The daemon enforces the cheap part: one calm batch moves at most
-two rows already placed (`SIDEBAR_MOVE_LIMIT`), counting carried and regrouped rows across every
-proposal in the batch; placing new pending work does not count, a request the person made in their
-own words lifts the limit, and further moves are dropped with a note. In the first live run
-Prioritizing still filed related work beside a row in the default Tasks section instead of making
-a topic section; the prompt now says Bots and Tasks are defaults, not topics, and that a placed
-row that clearly belongs in a new topic section may be the batch's one move. The prompt was
-rewritten shorter, from about 9,600 to about 6,500 characters.
+and taken out again afterwards. A move limit per batch came first; it is replaced by consent (see
+below). In the first live run Prioritizing still filed related work beside a row in the default
+Tasks section instead of making a topic section; the prompt now says Bots and Tasks are defaults,
+not topics. The prompt was rewritten shorter, from about 9,600 to about 5,000 characters.
+
+## Larger changes are proposals the person accepts
+
+Kirill: "We should not just completely replace the sidebar without the consent of the person.
+Similar style to Arc." Prioritizing's own batches now apply only small changes
+(`reviewDirectOperation`): new work's first placement, the folded Distractions section, its own
+row, and what is nested under a row (sessions, attachments, `expanded`). Everything else is dropped
+with a note naming `propose_sidebar`, unless the person asked in their own words. A proposal is a
+`sidebar_proposal` artifact whose version 1 is the sidebar it was drafted from, shown inline at
+full height in Prioritizing's conversation. The person edits it live through the proposal
+operations route, and the aspects they set are recorded on the proposal so Prioritizing's
+revisions keep them (`reviewProposalOperations`). Accepting applies the difference between its
+first and latest version as the person's batch, rebased one operation at a time, so what the person
+accepted is theirs; declining changes nothing. At most one is open.
+
+Kirill also asked it to "offer to completely archive the stuff that looks completed based off the
+agents' history" and to put unfinished quiet work "in a new section called Stale". A proposal may
+carry a `<happy-section id="archive" label="Archive"/>` block of top-level task rows that are
+neither new nor active in the last two hours; accepting archives those tasks with the person's own
+archive authority and leaves the block out of the sidebar. `Stale`, exactly, is the one age label
+Prioritizing may use, and never a required one. The heuristics (finished means the last reply
+reports it done, the person acknowledged or never followed up, and nothing waited for two days)
+live in the prompt. Kirill also suggested a recipe for the prompt; this repository has no recipe
+runtime that carries a system prompt and tool set, so the prompt stays in
+`formatPrioritizingInstructions`, and the example arrangement in it is advice, never a rule the
+daemon enforces.
+
+## Prioritizing shows its own row, once
+
+Notes in Happy's chat interrupted the main agent: "the focus agent normally should never bother the
+main Happy agent". Prioritizing has a row of its own (role `focus`, target kind `agent`), which is
+how the person learns a proposal exists. The daemon makes the space but never puts it in the
+document; Prioritizing inserts it, even during the seed, on its first run and whenever it finds it
+missing, unless the person removed it, and may never move it. Inserting it twice is a duplicate ID.
+A Prioritizing from before its row gets the space on the first start of a newer daemon, and one
+upgrade notice; what to do from there it decides from its own conversation. Archiving Prioritizing
+removes its row.
 
 ## Prioritizing runs on the default model from Settings
 
@@ -228,7 +265,7 @@ permission to move anything, folds already live in the document, and the reports
 Prioritizing, so the route, its schema, and its brief were removed. An older desktop that still
 sends it gets a 404 and ignores it.
 
-## Notes in Happy's chat are one factual line
+## Batch notes are one factual line in Prioritizing's conversation
 
 Kirill and the UX review asked for terse notes such as "Put Preview viewer release in Releases."
 with no narration; folded work is "tucked away", never "Older", because quiet is not done. Prioritizing no longer writes free text: the note is composed from the batch's
@@ -236,20 +273,43 @@ own diff, so it can only describe what moved; a batch of several moves names two
 rest. Prioritizing gives no reasons: a cheap model's clause ("Hid Quick Sanity Check finished
 one-off check.") broke the line, and nothing else read them.
 
-## The client decides when the person is calm
+## Events wake Prioritizing; attention does not
 
-Applying a batch on every focus change moved rows while the person was still navigating, so
-there is no focus report. The client signals `interacting` (hold everything) and `calm`; only
-`calm`, idle, or a move the person asked for in their own words apply a batch, and never while
-`interacting` or mid-Prioritizing-turn. Applying a batch never changes what the person has
-selected.
+Batches once waited for a calm moment: the client reported `interacting` and `calm`, and the daemon
+fell back to five idle minutes. Rows still moved under a person reading between clicks, and work
+sat unplaced while they kept typing. Once larger changes needed consent, the hover gate protected
+nothing, and Kirill asked for it to go: Prioritizing is now woken by events and its changes apply
+when its turn ends. The person's committed sidebar changes, new work or sessions appearing, new
+work's first message, proposal edits and decisions, placement requests, and Tidy wake it; other
+notices wait for the next wake. Its own writes never wake it, so it cannot loop. A wake waits two
+seconds for the rest of its burst, a wake during a turn waits for that turn to end, and the
+fifteen-second check only picks up what a restart or a lost timer left. `POST /v0/spaces/attention`
+is still accepted so older desktops keep working: `calm` applies a waiting batch, `interacting`
+does nothing. Every row a batch folds out of view is named in its note, because that is the change
+the person can no longer see.
 
-`calm` once also meant "a navigation gesture just finished". That let a click on one row fold
-others away into new collapsed sections, which reads as rows vanishing because of the click.
-`calm` now means the person is not using the app: five minutes without input, or the window or
-sidebar out of sight. A client never sends it for a gesture. The daemon's own fallback is also
-five minutes: two still landed while the person was reading between clicks. Every row a batch
-folds out of view is named in its note, because that is the change the person can no longer see.
+## Notices stay owed until a run succeeds
+
+Live, a Prioritizing whose model had no credentials failed nine runs in a row, and every notice
+from that time was lost: a brief cleared its notices when the delivery was enqueued. A brief now
+moves them to `sidebarBriefSent`; a run that ends well clears them, and a failed run puts them
+back for the next wake. A failure never wakes it by itself, so a broken model cannot spin.
+
+## Work another agent creates is placed too
+
+Tasks made with `create_task` sat under Happy forever: only the person's messages were briefed, a
+task's first message arrived before its row existed, and the prompt said to wait for a first
+message. A new row's notice now carries its title and wakes Prioritizing, the first message of the
+conversation counts whoever wrote it (a later report from a subtask does not), a row made after its
+first message is told that message at once, and the prompt says pending work is placeable once its
+subject is clear.
+
+## A set that changes nothing is still the person's
+
+The desktop sends `set {expanded: true}` for "Show subtasks" on a row that may already be open. The
+client drops an operation that changes no value, so the person was never recorded as the fold's
+author and Prioritizing could fold the row later. The person's requested `set`s now record their
+named aspects as the person's even when nothing changed (`affirmSidebarAuthorship`).
 
 ## People who never opted in are untouched
 
@@ -257,7 +317,7 @@ Spaces is an experiment, and a person who has not turned it on must see the daem
 as before. The first sidebar read or write, or the first stem cell creates
 the person's owner state and sidebar document; Prioritizing additionally requires the person's
 Stem Cells setting as described below. Everything else (lifecycle
-inserts, new-session and new-work briefs, the calm check, notes in Happy's chat) works from that
+inserts, new-session and new-work briefs, the wake check, batch notes) works from that
 state and so does nothing without it. The `request_space_placement` tool is offered only to
 conversations whose person has a live Prioritizing, and asking for a placement never creates an
 owner.
@@ -392,7 +452,8 @@ worktrees are still drawn by clients under the session that works in them.
 Separate move, discard, and collapse routes were replaced by `PATCH /v0/spaces/:id` (`sectionId`,
 `afterId`, `visibility`, or `removed`) and `PATCH /v0/spaces/sections/:id`, like other resources.
 Tidy had its own apply-at-once machinery; it is now only the automatic message "Tidy the sidebar
-now." in Prioritizing's conversation, and its changes wait for calm like any other batch.
+now." in Prioritizing's conversation, and its changes apply when that turn ends like any other
+batch.
 
 ## The organiser is Prioritizing, a real subtask of Happy
 
@@ -402,8 +463,8 @@ still saw as not a true subtask. It is now made through `SubtasksModule.create`,
 makes any subtask, with an opening task and nothing special-cased; it is found by the agent ID in
 the person's bookkeeping. It is created lazily with the person's first stem cell — not on seed or
 the first read — and before that briefs and tidy do nothing. As an ordinary subtask it reported every reply into
-Happy's chat beside the batch note, so it is created `unreported`: Happy's chat gains exactly one
-message per applied batch, and turns that change nothing say nothing.
+Happy's chat, so it is created `unreported`, and batch notes go to its own conversation: Happy's
+chat hears nothing from it.
 
 ## Recent work is never tucked away
 

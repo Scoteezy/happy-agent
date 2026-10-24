@@ -89,6 +89,8 @@ import {
     type ServiceTierOption,
     agentWaitSchema,
     spaceSidebarOperationsRequestSchema,
+    acceptSpaceSidebarProposalRequestSchema,
+    declineSpaceSidebarProposalRequestSchema,
 } from "@slopus/happy-agent-client";
 import {
     cuid2Schema,
@@ -6961,6 +6963,14 @@ export class ApiModule implements AgentModule {
             case "batch_applied":
                 append("space.batch.applied", { batch: spaceBatchResource(event.batch) });
                 return;
+            case "proposal_changed":
+                append("space.sidebar.proposal.changed", {
+                    proposal: event.proposal,
+                    previousVersion: event.previousVersion,
+                    author: event.author,
+                    operations: event.operations,
+                });
+                return;
             case "sidebar_changed":
                 append("space.sidebar.changed", {
                     artifactId: event.artifactId,
@@ -6983,6 +6993,79 @@ export class ApiModule implements AgentModule {
         if (spaces === undefined || !url.pathname.startsWith("/v0/spaces")) return false;
         const owner = this.#spaceOwner(ctx);
         try {
+            const proposal =
+                /^\/v0\/spaces\/sidebar\/proposals\/([a-z][a-z0-9]*)(?:\/(operations|accept|decline))?$/.exec(
+                    url.pathname,
+                );
+            if (proposal !== null) {
+                const artifactId = proposal[1] as string;
+                const action = proposal[2];
+                if (action === undefined && request.method === "GET") {
+                    sendJson(response, 200, await spaces.sidebarProposal(ctx, owner, artifactId));
+                    return true;
+                }
+                if (action === "operations" && request.method === "POST") {
+                    const body = await bodyAs(
+                        request,
+                        spaceSidebarOperationsRequestSchema,
+                        "proposal operations",
+                    );
+                    sendJson(
+                        response,
+                        200,
+                        await this.#withMutationId(
+                            body.mutationId,
+                            async () =>
+                                await spaces.applyProposalOperations(ctx, owner, artifactId, body),
+                        ),
+                    );
+                    return true;
+                }
+                if (action === "accept" && request.method === "POST") {
+                    const body = await bodyAs(
+                        request,
+                        acceptSpaceSidebarProposalRequestSchema,
+                        "proposal acceptance",
+                    );
+                    sendJson(
+                        response,
+                        200,
+                        await this.#withMutationId(
+                            body.mutationId,
+                            async () =>
+                                await spaces.acceptProposal(
+                                    ctx,
+                                    owner,
+                                    artifactId,
+                                    body.mutationId,
+                                ),
+                        ),
+                    );
+                    return true;
+                }
+                if (action === "decline" && request.method === "POST") {
+                    const body = await bodyAs(
+                        request,
+                        declineSpaceSidebarProposalRequestSchema,
+                        "proposal decline",
+                    );
+                    sendJson(
+                        response,
+                        200,
+                        await this.#withMutationId(
+                            body.mutationId,
+                            async () =>
+                                await spaces.declineProposal(
+                                    ctx,
+                                    owner,
+                                    artifactId,
+                                    body.mutationId,
+                                ),
+                        ),
+                    );
+                    return true;
+                }
+            }
             if (request.method === "POST" && url.pathname === "/v0/spaces/sidebar/operations") {
                 const body = await bodyAs(
                     request,
@@ -9435,7 +9518,11 @@ export class ApiModule implements AgentModule {
                     : { stemCellIdentities: true }),
                 ...(this.#spaces === undefined
                     ? {}
-                    : { sidebarOperations: true, sidebarAttachments: true }),
+                    : {
+                          sidebarOperations: true,
+                          sidebarAttachments: true,
+                          sidebarProposals: true,
+                      }),
                 ...(this.#live === undefined
                     ? {}
                     : { desktopLiveCapabilities: [...this.#live.desktopCapabilities] }),

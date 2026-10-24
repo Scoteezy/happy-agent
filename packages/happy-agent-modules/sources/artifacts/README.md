@@ -180,8 +180,12 @@ The grammar is the client's `parseSpaceSidebar`, which every client uses too; `S
 wraps it as `readSidebarDocument`, turning its refusals into `SidebarValidationError` with source
 diagnostics. Sidebar writes require the immutable `baseVersion` and run the parser on every path.
 An ordinary update of a sidebar is handed to Spaces' `writeSidebarArtifact`, which turns it into
-operations and commits the person's at once or queues Prioritizing's for the calm batch;
+operations and commits the person's at once or queues Prioritizing's until its turn ends;
 `commitSidebar` is the path Spaces writes every version through.
+
+A `sidebar_proposal` artifact holds one proposed sidebar in the same grammar. Only Spaces creates
+one (`validateProposalWrite`), and an ordinary update of it is refused: Prioritizing revises it
+through `propose_sidebar` and the person through the proposal routes, both via `commitSidebar`.
 
 `stageSidebarText` keeps the bounded daemon-authored HTML in an artifact-owned content table,
 with its upload and expiry intent in the caller's transaction. Lifecycle rollback therefore

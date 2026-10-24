@@ -283,6 +283,11 @@ script, its cursor, models, and log survive the restart, and each provider's run
 call indexes continue. A script may therefore span both processes without retaining provider
 decorations from the previous daemon. Configured routes share that start's provider set.
 
+`gym.restart({ whileStopped })` runs `whileStopped` while no daemon is running. With
+`runGymSql(gym.happyHome, statements)` a scenario rewrites stored data the way an earlier release
+left it, then starts the current build on it to test an upgrade. `recordGymMigration` does the same
+for a newer release's migration ledger.
+
 ## Waiting
 
 Wait for state, never for time. `gym.waitUntil(check, description, timeoutMs)` polls until `check`

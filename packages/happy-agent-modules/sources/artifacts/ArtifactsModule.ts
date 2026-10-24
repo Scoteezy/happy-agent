@@ -598,6 +598,12 @@ export class ArtifactsModule implements AgentModule {
                     );
                 }
             }
+            if (input.type === "sidebar_proposal") {
+                readSidebarDocument(await this.#sidebarText(txCtx, entry.sha256));
+                if (this.#spaces === undefined || input.id === undefined)
+                    throw new ArtifactInputError("Sidebar proposals are made by Prioritizing.");
+                await this.#spaces.validateProposalWrite(txCtx, input.id);
+            }
             if (input.type === "sidebar") {
                 const html = await this.#sidebarText(txCtx, entry.sha256);
                 readSidebarDocument(html);
@@ -750,6 +756,18 @@ export class ArtifactsModule implements AgentModule {
                     );
                 }
             }
+            // A proposal changes only through Prioritizing's proposals and the person's routes.
+            if (current.type === "sidebar_proposal") {
+                if (!sidebarBatch)
+                    throw new ArtifactInputError(
+                        "A sidebar proposal is changed only by Prioritizing and the proposal routes.",
+                    );
+                if (input.baseVersion !== current.latestVersion)
+                    throw new ArtifactConflictError(
+                        "The proposal changed. Read its current version before editing.",
+                        current,
+                    );
+            }
             if (current.type === "sidebar") {
                 if (input.baseVersion === undefined)
                     throw new ArtifactInputError("Sidebar writes require baseVersion.");
@@ -784,6 +802,8 @@ export class ArtifactsModule implements AgentModule {
                 current.type !== "sidebar" || sidebarBatch || input.author.kind !== "agent",
             );
             const now = Math.max(Date.now(), current.updatedAt + 1);
+            if (current.type === "sidebar_proposal")
+                readSidebarDocument(await this.#sidebarText(txCtx, entry.sha256));
             if (current.type === "sidebar") {
                 const html = await this.#sidebarText(txCtx, entry.sha256);
                 readSidebarDocument(html);
@@ -1211,7 +1231,10 @@ export class ArtifactsModule implements AgentModule {
         try {
             entry = checkArtifactFiles(type, files, notUtf8);
         } catch (error: unknown) {
-            if (type === "sidebar" && error instanceof ArtifactInputError)
+            if (
+                (type === "sidebar" || type === "sidebar_proposal") &&
+                error instanceof ArtifactInputError
+            )
                 throw new SidebarValidationError(error.message);
             throw error;
         }

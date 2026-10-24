@@ -39,7 +39,6 @@ it("seeds the sidebar as a mirror of the classic one and lets Prioritizing chang
         expect(seeded.html).not.toContain("expanded");
         expect(seeded.html).not.toMatch(/older|done/i);
         // Turning Spaces on moves nothing: Prioritizing may not rearrange the mirror.
-        await h.hold();
         expect(
             (await h.edit(seeded.html.replace(`  <happy-space id="${release.id}"/>\n`, ""))).text,
         ).toContain("classic sidebar");
@@ -124,7 +123,6 @@ it("gives every session an icon, keeps sessions hidden until Prioritizing shows 
             [subtask]: { type: "library", slug: "testing" },
             [helper]: { type: "library", slug: "docs" },
         });
-        await h.hold();
         const before = await h.read();
         // Creating subtasks and collaborators shows nothing in the sidebar by itself.
         expect(before.html).not.toContain(subtask);
@@ -146,7 +144,7 @@ it("gives every session an icon, keeps sessions hidden until Prioritizing shows 
             ).text,
         ).toContain("not a session");
         expect((await h.edit(shown)).text).toContain("queued");
-        await h.calm();
+        await h.settle();
         await h.gym.waitUntil(
             async () => ((await h.read()).html === shown ? true : undefined),
             "the shown subtask",

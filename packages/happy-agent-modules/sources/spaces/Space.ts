@@ -23,8 +23,15 @@ export const spaceTextSchema = Type.String({
 });
 export const spaceIconSlugSchema = Type.Union(SPACE_ICON_SLUGS.map((slug) => Type.Literal(slug)));
 
-/** Happy is row one, exactly once per person; every other row is an item. */
-export const spaceRoleSchema = Type.Union([Type.Literal("happy"), Type.Literal("item")]);
+/**
+ * Happy is row one, exactly once per person; `focus` is Prioritizing's own conversation, at most
+ * once per person; every other row is an item.
+ */
+export const spaceRoleSchema = Type.Union([
+    Type.Literal("happy"),
+    Type.Literal("item"),
+    Type.Literal("focus"),
+]);
 
 /** Pending means Prioritizing has not placed the row yet; its position is still its section. */
 export const spacePlacementSchema = Type.Union([Type.Literal("pending"), Type.Literal("settled")]);
@@ -82,6 +89,11 @@ export const spaceRefSchema = Type.Union([
             surfaceId: cuid2Schema,
             surfaceType: spaceSurfaceTypeSchema,
         },
+        { additionalProperties: false },
+    ),
+    /** A conversation that is neither a task's nor a bot's: Prioritizing's own. */
+    Type.Object(
+        { kind: Type.Literal("agent"), agentId: cuid2Schema },
         { additionalProperties: false },
     ),
 ]);
@@ -244,6 +256,50 @@ export const sidebarAuthorshipSchema = Type.Object(
 export type SidebarAuthorship = Static<typeof sidebarAuthorshipSchema>;
 export type SidebarAspect = keyof SidebarAuthorship;
 
+/**
+ * One sidebar proposal: a `sidebar_proposal` artifact whose version 1 is the sidebar it was drafted
+ * from. `authorship` records what the person set in it, so Prioritizing's revisions keep it.
+ */
+export const sidebarProposalRecordSchema = Type.Object(
+    {
+        artifactId: cuid2Schema,
+        baseVersion: spaceVersionSchema,
+        status: Type.Union([
+            Type.Literal("open"),
+            Type.Literal("accepted"),
+            Type.Literal("declined"),
+        ]),
+        createdAt: spaceTimestampSchema,
+        decidedAt: Type.Optional(spaceTimestampSchema),
+        acceptedVersion: Type.Optional(spaceVersionSchema),
+        /** The mutation that decided it, so a retried decision answers as the first did. */
+        decisionMutationId: Type.Optional(Type.String({ minLength: 1, maxLength: 1100 })),
+        archived: Type.Optional(Type.Array(cuid2Schema, { maxItems: 1000 })),
+        authorship: Type.Optional(
+            Type.Record(Type.String({ minLength: 1, maxLength: 128 }), sidebarAuthorshipSchema, {
+                maxProperties: 2000,
+            }),
+        ),
+    },
+    { additionalProperties: false },
+);
+export type SidebarProposalRecord = Static<typeof sidebarProposalRecordSchema>;
+
+/** A proposal as clients see it. */
+export const sidebarProposalSchema = Type.Object(
+    {
+        artifactId: cuid2Schema,
+        version: spaceVersionSchema,
+        baseVersion: spaceVersionSchema,
+        status: sidebarProposalRecordSchema.properties.status,
+        createdAt: spaceTimestampSchema,
+        decidedAt: Type.Union([spaceTimestampSchema, Type.Null()]),
+        acceptedVersion: Type.Union([spaceVersionSchema, Type.Null()]),
+    },
+    { additionalProperties: false },
+);
+export type SidebarProposal = Static<typeof sidebarProposalSchema>;
+
 /** Each person's sidebar bookkeeping. */
 export const spaceOwnerStateSchema = Type.Object(
     {
@@ -300,11 +356,19 @@ export const spaceOwnerStateSchema = Type.Object(
             ),
         ),
         sidebarBrief: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 32 })),
+        /** Notices already told, kept until a run of Prioritizing ends well. */
+        sidebarBriefSent: Type.Optional(
+            Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 32 }),
+        ),
+        /** When an event first asked to wake Prioritizing since its last brief. */
+        sidebarWakeAt: Type.Optional(spaceTimestampSchema),
         prioritizingAgentId: Type.Optional(cuid2Schema),
+        /** Prioritizing's proposals, newest last; at most one is open. */
+        sidebarProposals: Type.Optional(Type.Array(sidebarProposalRecordSchema, { maxItems: 20 })),
         prioritizingGeneration: Type.Optional(Type.Integer({ minimum: 0 })),
         /**
          * The person asked for something to happen now — a move in their own words, or a new sidebar to organise —
-         * so the queued changes apply as soon as Prioritizing finishes, without waiting for calm.
+         * so the queued changes apply as soon as Prioritizing finishes, without the consent limits.
          */
         applyRequestedAt: Type.Optional(spaceTimestampSchema),
     },
@@ -354,7 +418,7 @@ export interface SpaceSnapshot {
 
 /** What a click on a row opens. */
 export interface SpaceTarget {
-    readonly kind: "task" | "bot" | "surface";
+    readonly kind: "task" | "bot" | "surface" | "agent";
     readonly id: string;
     readonly agentId?: string;
     readonly workspaceId?: string;

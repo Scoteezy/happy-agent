@@ -7,17 +7,15 @@ it("keeps section names and identities unique and refuses sections named for age
         await h.read();
         await h.unseed();
         const initial = await h.read();
-        await h.hold();
         const section = '  <happy-section id="movies" label="Movies"/>\n';
         expect((await h.edit(initial.html.replace("</nav>", `${section}</nav>`))).text).toContain(
             "queued",
         );
-        await h.calm();
+        await h.settle();
         const valid = await h.gym.waitUntil(async () => {
             const doc = await h.read();
             return doc.version > initial.version ? doc : undefined;
         }, "the movies section");
-        await h.hold();
         const append = (item: string) => valid.html.replace("</nav>", `${item}</nav>`);
         expect(
             (await h.edit(append('  <happy-section id="films" label=" movies"/>\n'))).text,

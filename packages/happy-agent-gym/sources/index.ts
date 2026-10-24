@@ -15,7 +15,7 @@ export {
     type GymSessionRecord,
 } from "./createAgentGym.js";
 export { createUnixSocketFetch } from "./createUnixSocketFetch.js";
-export { recordGymMigration } from "./recordGymMigration.js";
+export { recordGymMigration, runGymSql } from "./recordGymMigration.js";
 export {
     BridgeUpgradeError,
     connectBridgeWebSocket,

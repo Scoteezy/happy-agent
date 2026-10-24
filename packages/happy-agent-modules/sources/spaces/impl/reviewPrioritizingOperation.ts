@@ -28,15 +28,14 @@ export interface PrioritizingRules {
     readonly manual: ReadonlySet<string>;
     /** New rows waiting for their first placement: placing one is an insertion, not a move. */
     readonly fresh: ReadonlySet<string>;
+    /** Prioritizing's own row, which it may insert once and never moves afterwards. */
+    readonly focusId: string | undefined;
     /**
-     * How many rows already in place one batch may move, or `undefined` when the person asked for
-     * the change in their own words.
+     * Whether only the small changes a batch makes without consent apply; `false` when the
+     * person asked for the change in their own words.
      */
-    readonly moveLimit: number | undefined;
+    readonly direct: boolean;
 }
-
-/** Rows already in place that one calm batch may move unless the person asked for more. */
-export const SIDEBAR_MOVE_LIMIT = 2;
 
 /** The seed's default sections, which only the person may remove or rename. */
 export const DEFAULT_SIDEBAR_SECTION_IDS: readonly string[] = ["bots", "tasks"];
@@ -71,6 +70,8 @@ export function reviewPrioritizingOperation(
             return "Search and Create are the person's to move.";
         if (rules.person(id, "place") || rules.manual.has(id))
             return "Keep the person's manual placement.";
+        if (id === rules.focusId && operation.type !== "insert")
+            return "Your own row stays where it is; only the person moves it.";
     }
     if (operation.type === "set") {
         if (
@@ -133,28 +134,16 @@ export function reviewPrioritizingOperation(
     return undefined;
 }
 
-/**
- * The rows one operation moves, carries, or regroups under another heading. Removing a row is not
- * counted: it leaves rather than moving.
- */
-export function travelledSidebarIds(
-    before: SpaceSidebarDocument,
-    after: SpaceSidebarDocument,
-    operation: SpaceSidebarOperation,
-): Set<string> {
-    const travelled = new Set<string>(regroupedSidebarIds(before, after));
-    if (operation.type === "move") {
-        const at = locateSpaceSidebarNode(before, operation.id);
-        if (at !== undefined) {
-            const from = at.siblings.indexOf(at.node);
-            const run = at.siblings.slice(from, from + spaceSidebarRunLength(at.siblings, from));
-            for (const node of run) sidebarIds([node]).forEach((id) => travelled.add(id));
-        }
-    }
-    return travelled;
-}
+/** The one age label Prioritizing may use: the default place for unfinished work that went quiet. */
+export const STALE_SECTION_LABEL = "Stale";
 
-/** An "Older" or "Done" section reads as finished work; sections name subjects instead. */
+/**
+ * An "Older" or "Done" section reads as finished work; sections name subjects instead. "Stale" is
+ * the one exception, which the person asked for.
+ */
 export function agedLabel(label: string): boolean {
-    return /\b(old|older|oldest|done|finished|archive|archived|stale)\b/i.test(label);
+    return (
+        label.trim() !== STALE_SECTION_LABEL &&
+        /\b(old|older|oldest|done|finished|archive|archived|stale)\b/i.test(label)
+    );
 }

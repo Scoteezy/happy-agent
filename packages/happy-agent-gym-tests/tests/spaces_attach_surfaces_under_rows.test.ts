@@ -117,7 +117,6 @@ it("lets Prioritizing attach an existing chat under its work, and never puts bac
         });
         // A chat has a row on membership alone.
         const chatRow = await surfaceRow(h, chat.id);
-        await h.hold();
         const before = await h.read();
         expect(before.html).toContain(`  <happy-space id="${chatRow}"/>\n`);
 
@@ -128,7 +127,7 @@ it("lets Prioritizing attach an existing chat under its work, and never puts bac
                 `  <happy-space id="${cell.space.id}" expanded="true">\n    <happy-space id="${chatRow}"/>\n  </happy-space>\n`,
             );
         expect((await h.edit(nested)).text).toContain("queued");
-        await h.calm();
+        await h.settle();
         await h.gym.waitUntil(
             async () => ((await h.read()).html === nested ? true : undefined),
             "the chat under the launch work",
@@ -147,7 +146,6 @@ it("lets Prioritizing attach an existing chat under its work, and never puts bac
         expect(dragged.html).toContain(`  <happy-space id="${chatRow}"/>\n`);
 
         // Neither Prioritizing nor the work's own conversation moves it back.
-        await h.hold();
         expect((await h.edit(nested)).text).toContain("manual placement");
         const again = await h.call("attach_to_my_row", { surfaceId: chat.id }, cell.agent.id);
         expect(again.text).toContain("stays where it is");
@@ -191,7 +189,6 @@ it("keeps sessions under their own parent and keeps a person's reveal in view", 
             mutationId: "session-elsewhere-put",
         });
         expect(put.status).toBe(400);
-        await h.hold();
         expect((await h.edit(underPricing)).text).toContain("not a session");
         expect(
             (await h.call("attach_to_my_row", { spaceId: subtask }, pricing.agent.id)).text,

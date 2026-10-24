@@ -6,6 +6,7 @@ export const artifactTypeSchema = Type.Union([
     Type.Literal("markdown"),
     Type.Literal("html"),
     Type.Literal("sidebar"),
+    Type.Literal("sidebar_proposal"),
     Type.Literal("image"),
     Type.Literal("image_series"),
     Type.Literal("video"),

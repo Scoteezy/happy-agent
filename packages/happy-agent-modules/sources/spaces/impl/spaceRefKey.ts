@@ -6,6 +6,7 @@ import type { SpaceRecord, SpaceRef } from "../Space.js";
  */
 export function spaceRefKey(space: Pick<SpaceRecord, "contents" | "id" | "role">): string {
     if (space.role === "happy") return "happy";
+    if (space.role === "focus") return "focus";
     const primary = space.contents[0];
     return primary === undefined ? `space:${space.id}` : spaceContentKey(primary);
 }
@@ -19,5 +20,7 @@ export function spaceContentKey(ref: SpaceRef): string {
             return `bot:${ref.botId}`;
         case "surface":
             return `surface:${ref.surfaceId}`;
+        case "agent":
+            return `agent:${ref.agentId}`;
     }
 }

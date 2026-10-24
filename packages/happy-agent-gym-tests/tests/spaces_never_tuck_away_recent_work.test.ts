@@ -11,7 +11,6 @@ it("refuses to move, remove, or fold away recent or running work", async () => {
         for (const cell of cells)
             await h.gym.send("Start this work.", { sessionId: cell.agent.id });
         await h.unseed();
-        await h.hold();
         const current = await h.read();
         const without = cells.reduce(
             (html, cell) => html.replace(line(cell.space.id), ""),
@@ -23,7 +22,7 @@ it("refuses to move, remove, or fold away recent or running work", async () => {
         );
         // New pending work may receive its first placement even though it is recent.
         expect((await h.edit(grouped)).text).toContain("queued");
-        await h.calm();
+        await h.settle();
         await h.gym.waitUntil(
             async () => ((await h.read()).html === grouped ? true : undefined),
             "the initial Work placements",
@@ -39,12 +38,11 @@ it("refuses to move, remove, or fold away recent or running work", async () => {
                     : undefined,
             "the running task",
         );
-        await h.hold();
         expect((await h.edit(without)).text).toContain("last two hours");
         expect(
             (await h.edit(grouped.replace('label="Work"', 'label="Work" collapsed="true"'))).text,
         ).toContain("last two hours");
-        await h.calm();
+        await h.settle();
         expect((await h.read()).html).toBe(grouped);
         expect(
             (await h.gym.http.ok<{ batches: unknown[] }>("GET", "/v0/spaces/batches")).batches,

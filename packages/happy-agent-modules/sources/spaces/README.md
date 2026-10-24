@@ -21,7 +21,7 @@ A document in the first grammar is migrated once on read. Every write is a batch
 node ID: `applySidebarOperations` commits the person's batch, rebased onto the current version and
 answered once per mutation ID; `updateSidebar` (the older whole-document route) and the person's
 ordinary artifact updates are diffed into the same batch; `editSidebar` and Prioritizing's artifact
-updates are diffed into operations queued for the calm batch, one version per proposal. Each
+updates are diffed into operations queued until its turn ends, one version per edit. Each
 version records who set each node's place, fold, label, fold ribbon, and widget content, and is
 announced with its operations. New rows go right below Happy (or after the section or separator
 they were made under, or after Create when Happy is gone or folded away); archived rows and
@@ -31,33 +31,44 @@ to conversations of a person with Stem Cells, attaches a row, a Surface, or a ne
 calendar, or chat Surface under the caller's own row at once, as Prioritizing's write.
 
 Prioritizing reads `list_sidebar` (the document, row facts, every session under the rows, and the
-shown count against the visible budget of ten), reads threads with `read_row_conversation`,
-writes `edit_sidebar` or `update_artifact`, reads the grammar with `get_sidebar_styles`, and sets
-row and session icons with `set_space_icon`. It may not move Happy, Search, or Create, override
+shown count against the visible budget of ten, and its open proposal), reads several threads by
+turn with `read_conversations`, writes `edit_sidebar` or `update_artifact`, proposes larger changes
+with `propose_sidebar`, reads the grammar with `get_sidebar_styles`, and sets row and session icons
+with `set_space_icon`. It may not move Happy, Search, or Create, override
 anything the person last set, or move work active in the last two hours, and it may not touch a
-stem cell before its first message; a section it moves carries its rows under the same rules. One
-calm batch moves at most two rows already placed, unless the person asked in their own words;
-placing new work does not count. An operation that breaks a rule is dropped with a note and the
-rest still applies. Its section
-labels name subjects, never age or doneness, and are unique, and it keeps the Bots and Tasks
-sections. Its prompt makes topic sections the layout, with one folded Distractions section for
+stem cell before its first message; a section it moves carries its rows under the same rules.
+Without the person's words, its batches apply only new work's first placement, the folded
+Distractions section, its own row, and what is nested under a row; anything else is proposed. An
+operation that breaks a rule is dropped with a note and the rest still applies. Its section
+labels name subjects, never age or doneness (`Stale` alone excepted), and are unique, and it keeps
+the Bots and Tasks sections. Its prompt makes topic sections the layout, with one folded Distractions section for
 work outside the person's focus, and prefers inserting new work over moving anything. Sessions
 stay hidden unless one needs the person, such as for a review, and a shown session counts toward
 the budget.
-One applied batch records one factual note.
+One applied batch records one factual note in Prioritizing's own conversation.
+
+## Proposals
+
+A proposal is a `sidebar_proposal` artifact: version 1 is the sidebar it was drafted from, later
+versions are Prioritizing's drafts and the person's edits, and it is shown inline in Prioritizing's
+conversation through the tool result's artifact presentation. The person's edits go through the
+proposal operations route, rebased like a sidebar batch, and the aspects they set are kept from
+Prioritizing's revisions. Accepting applies the difference from version 1 to the latest version as
+the person's batch and archives the tasks offered in its Archive block; declining changes nothing.
+At most one proposal is open, and the last few decided ones are listed for Prioritizing.
 
 One flat sidebar per person, kept tidy by Prioritizing, a subtask of Happy.
 
 ```text
 person ── GET /v0/spaces ───────────────┐
-        ── stem cell / PATCH row, section┤  explicit actions apply at once
-        ── attention: interacting|calm ─┤
+        ── stem cell / PATCH row, section┤  explicit actions apply at once, and wake it
+        ── proposal edit / accept ───────┤
                                         ▼
                                SpacesModule ── rows, sections, pending changes, batches
                                         ▲
-Prioritizing (subtask of Happy) ────────┘  place / visibility / section: queued
-  list_sidebar, read_row_conversation,     icon: applied at once
-  set_space_icon, ...
+Prioritizing (subtask of Happy) ────────┘  small edits: queued until its turn ends
+  list_sidebar, read_conversations,        larger ones: propose_sidebar
+  set_space_icon, ...                      icon: applied at once
 other agents ── request_space_placement ─► briefed to Prioritizing
 tidy ── "Tidy the sidebar now." ─────────► briefed to Prioritizing
 ```
@@ -79,10 +90,11 @@ A stem cell is a fresh unnamed task — its own folder, no project, no bot — w
 the same transaction. The client may choose the row's ID and the task, workspace, and agent IDs,
 so it can show the conversation before the daemon answers; the row's ID is the retry key. Without a section it waits right below Happy as `pending`; made under a section or
 separator it is settled right after it. Nothing touches it before its first human message: Prioritizing is not
-briefed, and its icon, moves, and folds are refused. That message briefs Prioritizing at once,
-which names an icon and places the row when its subject is clear. Every later message the person
-writes in work that started as a stem cell, or in a session under it, waits for the calm brief
-with the agent's last text before it (`formatConversationBrief`, the latest three per row), as
+briefed, and its icon, moves, and folds are refused. That message wakes Prioritizing, which names
+an icon and places the row when its subject is clear; so does the first message of work another
+agent created, whose row also wakes it on arrival. Every later message the person writes in work
+that started as a stem cell, or in a session under it, waits for the next brief with the agent's
+last text before it, waking Prioritizing only while the row still waits for its first placement (`formatConversationBrief`, the latest three per row), as
 does a session under it that stops, so Prioritizing can place the row once there is signal
 without reading the thread. Stem-cell origin is the subject-naming mark `createStemCell` sets. Removing a stem cell nobody wrote in archives its
 task.
@@ -92,22 +104,27 @@ task.
 One long-running subtask of Happy per person, made through `SubtasksModule.create` — the path
 every subtask takes — with the person's first stem cell, and made again with the next one if the
 person archived it. Until then there is none, and briefs and tidy requests are dropped; its
-opening task places whatever was seeded before it existed. It appears in Happy's subtasks like any
-other, but is created `unreported`: Happy hears from it only through the batch note, exactly one
-line per applied batch. It is recognised by the agent ID stored
+opening task adds its own row and gives icons. It appears in Happy's subtasks like any other, but
+is created `unreported`, and its notes go to its own conversation, which has a row of its own
+(role `focus`) that Prioritizing inserts itself: Happy hears nothing from it. It is recognised by
+the agent ID stored
 in the person's bookkeeping, not by metadata. It runs on the default model from Settings at that
 model's default effort, and
 its whole tool array and system prompt come from this module, so it can do nothing else. Briefs
 reach it through the `spaces.briefPrioritizing` durable function, committed with whatever caused
 them. Tidy is one such brief and nothing more.
 
-## Calm batches
+## Wakes and batches
 
-Every move, visibility change, and section change Prioritizing makes is queued, one entry per
-target, and the latest word wins. A batch applies in one transaction when the person is calm:
-the client reports `calm` after five minutes without input or while the app or sidebar is out of
-sight (never for a click or navigation), or five minutes pass with no sign of work. Nothing applies while the client reports `interacting`, or while Prioritizing is
-mid-turn. A move the person asked another agent for in their own words applies as soon as
-Prioritizing finishes. Each batch
-records its diff (from and to per row), writes one line into Happy's chat built from that diff,
-and is published as `batch_applied`. The person's own `PATCH` removes any queued change of that row.
+Notices collect in the owner state. Events — the person's committed changes, new work and
+sessions, new work's first message, proposal edits and decisions, placement requests, Tidy — also
+set `sidebarWakeAt` and wake Prioritizing two seconds after commit with every waiting notice in one
+brief; a wake during a turn waits for the turn to end. Prioritizing's own writes never wake it.
+Briefed notices stay in `sidebarBriefSent` until a run ends well; a failed run puts them back for
+the next wake. A fifteen-second check picks up wakes and batches a restart left behind.
+
+Every edit Prioritizing makes is queued and applies in one transaction when its turn ends, one
+version per edit. Each batch records its diff (from and to per row), writes one line built from
+that diff into Prioritizing's conversation, and is published as `batch_applied`. The person's own
+`PATCH` removes any queued change of that row. `POST /v0/spaces/attention` is still accepted and
+changes nothing a turn's end would not.

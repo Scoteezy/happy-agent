@@ -52,7 +52,7 @@ it("moves a section with its rows as one block and protects the person's section
             ).batches.map((batch) => batch.note);
         const apply = async (html: string, what: string) => {
             expect((await h.edit(html)).text).toContain("queued");
-            await h.calm();
+            await h.settle();
             return await h.gym.waitUntil(async () => {
                 const doc = await h.read();
                 return doc.html === html ? doc : undefined;
@@ -60,7 +60,6 @@ it("moves a section with its rows as one block and protects the person's section
         };
 
         // Prioritizing gives the new work a section of its own: its first placement.
-        await h.hold();
         const before = await h.read();
         const ideas = `${section("ideas", "Ideas")}${line(cell.space.id)}`;
         const placed = await apply(
@@ -76,7 +75,6 @@ it("moves a section with its rows as one block and protects the person's section
                 '  <happy-separator id="divider"/>\n',
                 `  <happy-separator id="divider"/>\n${ideas}`,
             );
-        await h.hold();
         expect((await h.edit(raised)).text).toContain("last two hours");
 
         // The person may: dragging the block marks only its heading as placed by hand.
@@ -96,7 +94,6 @@ it("moves a section with its rows as one block and protects the person's section
             dragged.html.replace("</nav>", `${research}</nav>`),
             "the Research section",
         );
-        await h.hold();
         await apply(
             added.html
                 .replace(research, "")
@@ -106,7 +103,6 @@ it("moves a section with its rows as one block and protects the person's section
         expect((await notes()).slice(0, 2)).toEqual(["Moved Research.", "Added Research."]);
 
         // Bots and Tasks are the person's defaults.
-        await h.hold();
         const latest = await h.read();
         expect(
             (await h.edit(latest.html.replace('  <happy-section id="bots" label="Bots"/>\n', "")))

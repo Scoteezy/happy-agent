@@ -9756,13 +9756,12 @@ Prioritizing. While enabled, Prioritizing is created on the first sidebar-docume
 conversation of its own, shown as its own row (see "Prioritizing's row"), where the person may
 write to it; it never writes into Happy's conversation. After a new conversation's first
 message it gives the row an icon and decides where it belongs, and it tidies the list when asked.
-Its placement, visibility, and section changes are not applied one by one: they wait and apply
-together as one **batch** at a calm moment — when the client reports `calm`, or after five minutes
-without a report or a message from the person — and never while the client reports
-`interacting`. Each batch adds one short line to Prioritizing's conversation, such as "Moved Preview
-viewer release to Releases.", that names every row it folded out of view, and is recorded with
-its diff. Only small changes apply this way; a larger reorganisation is a proposal the person
-accepts or declines (see "Proposals"). Icons apply at once, because they move
+Prioritizing runs when an event wakes it (see "Notices"), never on a timer and never because of its
+own writes. Its placement, visibility, and section changes are not applied one by one: they wait
+and apply together as one **batch** when its turn ends. Each batch adds one short line to
+Prioritizing's conversation, such as "Moved Preview viewer release to Releases.", that names every
+row it folded out of view, and is recorded with its diff. Only small changes apply this way; a
+larger reorganisation is a proposal the person accepts or declines (see "Proposals"). Icons apply at once, because they move
 nothing. A person's own changes through `PATCH` apply immediately and are never queued. Other
 agents may ask Prioritizing to move a row through their `request_space_placement` tool; only
 Prioritizing changes organisation. Disabling Stem Cells stops that person's Prioritizing,
@@ -10159,7 +10158,10 @@ or `remove`), its fold (`collapsed` or `expanded`), its `label`, its `foldRibbon
 and any `foldRibbon` it names, a widget's `html`. The author is the person (through these routes
 and ordinary artifact updates) or Prioritizing. Lifecycle changes the daemon makes itself — inserting new work, removing archived
 work — record no author, and a node they remove takes its authorship with it. Moving a section
-records its heading only: the items in its block are carried and keep their own authorship.
+records its heading only: the items in its block are carried and keep their own authorship. A
+person's `set` records them as the author of every aspect it names, even when the value was
+already the same and the operation changes nothing, so an explicit `expanded: true` on an open row
+keeps Prioritizing from folding it.
 
 Prioritizing never overrides the person: an operation of Prioritizing's that would change an aspect
 the person last set, or would hide a session whose place the person last set, is dropped, as is one
@@ -10200,8 +10202,8 @@ Prioritizing may read and update its artifact using ordinary artifact tools. Its
 HTML: the daemon compares its proposed document with the document it read, including its own queued
 proposals, by node ID with `diffSpaceSidebar`, and queues the resulting operations. A stale
 `edit_sidebar` base still applies when each old text occurs exactly once in the current document; a
-stale whole-document update is a conflict. Queued operations wait for the existing calm batch, then
-apply through the same rebase and authorship rules, one version per proposal; a person's change in
+stale whole-document update is a conflict. Queued operations wait for the end of Prioritizing's
+turn, then apply through the same rebase and authorship rules, one version per proposal; a person's change in
 the meantime no longer discards them. `get_sidebar_styles` returns the elements, their attributes
 and children, and the rules above. `list_sidebar` returns the document, facts about each row, every
 session under the person's rows with its parent, whether or not it is shown, and
@@ -10230,11 +10232,14 @@ proposals, and answer it. The daemon makes that space when it makes Prioritizing
 start of a daemon that serves proposals, for every person whose Prioritizing predates its row. The
 space has `target.kind: "agent"`, the icon `{ "type": "library", "slug": "prioritize" }`, the title
 of Prioritizing's conversation, and `placement: "settled"`. Like any space, it shows only where the
-document names it, and the daemon never inserts it into the document itself. Prioritizing checks
-whether its row is in the document and, when it is missing, inserts it with an ordinary edit,
-usually right below Happy. That edit is allowed even while `seed` is set, and it applies at calm
-like Prioritizing's other edits. The insertion is authored `prioritizing`, so the person may move
-or remove the row like any other, and once they have, Prioritizing never puts it back.
+document names it, and the daemon never inserts it into the document itself. The row is how the
+person learns that a proposal exists, so Prioritizing shows it without being asked: on every run it
+checks whether its row is in the document, reading the document again when it is unsure its view
+is current, and inserts it with an ordinary edit, usually right below Happy, only when it is
+missing. A row already there is left as it is: never inserted twice and never moved. That edit is
+allowed even while `seed` is set, and it applies when Prioritizing's turn ends like its other
+edits. The insertion is authored `prioritizing`, so the person may move or remove the row like any
+other, and once they have removed it, Prioritizing never puts it back.
 
 Prioritizing is told what to check, once: a new Prioritizing in its opening task; an upgraded one in
 a notice that the daemon was updated. From its own conversation it then decides what is still
@@ -10244,12 +10249,12 @@ once placed, and it is never briefed as new work. When Prioritizing is archived,
 sidebar; the next Prioritizing gets a row of its own.
 
 A message the person writes in Prioritizing's conversation is a request in their own words: the
-changes Prioritizing queues while answering it apply as soon as that turn finishes, unless the
-client reports `interacting`, and without the limits below.
+changes Prioritizing queues while answering it apply as soon as that turn finishes, without the
+limits below.
 
-#### What applies at calm
+#### What applies without a proposal
 
-A calm batch applies only these operations of Prioritizing's:
+A batch applies only these operations of Prioritizing's:
 
 - the first placement of new work: a `move` of a row that is still `placement: "pending"` and has
   never been placed, after any heading or row at the top level;
@@ -10259,7 +10264,7 @@ A calm batch applies only these operations of Prioritizing's:
 - changes nested under a row: inserting, moving, or removing a session or an attachment there, and
   `set` of `expanded` on a row or session.
 
-Every other operation is dropped from the calm batch with a note that names it and says to propose
+Every other operation is dropped from the batch with a note that names it and says to propose
 it: moving or removing any other top-level item; inserting any other section, separator, row, or
 widget; `set` of `collapsed`, `label`, `foldRibbon`, or `html`; and any operation after which a row
 that was already placed sits under a different heading. The rest of the batch still applies. When
@@ -10344,8 +10349,7 @@ with `baseVersion` naming a proposal version, and answers in the same shape, wit
 artifact ID and version. Rebase, conflicts, document rules, and retries by `mutationId` are those of
 the sidebar route. The new version is authored by the person, and the daemon records which nodes'
 aspects the person set in this proposal; Prioritizing's later revisions keep them. A proposal that
-is no longer open is `409 conflict`. Prioritizing hears of the person's edits in its next calm
-brief.
+is no longer open is `409 conflict`. The person's edit wakes Prioritizing (see "Notices").
 
 ##### `POST /v0/spaces/sidebar/proposals/:artifactId/accept`
 
@@ -10412,12 +10416,35 @@ durable: a repeated call creates and attaches once. It requires Auto or Full acc
 writes shared Surface data, and a call that creates a Surface is reviewed in Auto.
 
 Fold state lives in the document; clients report nothing else about what the person sees.
-Committed manual document changes enter the next calm brief and preserve the person's authority
-over the moved or folded items. After new work's first message, every later message the person
-writes in it, or in a session under it, also enters the next calm brief, with the agent's last
-text reply before it; both are shortened, without tool calls, and only the latest three notices
-per row are kept. So does a session under such work that stops, with its last reply. Work that did
-not start as new work through `POST /v0/spaces/stem-cells` is not forwarded.
+
+#### Notices
+
+Prioritizing learns what happened through notices, delivered as automatic messages in its own
+conversation. These events **wake** it:
+
+- the person's committed sidebar changes, through any route, including a `set` that changes no
+  value;
+- new work or a new session appearing under the person's rows, with its title when it has one;
+- new work's first message, whoever writes it: the person, or the agent that created the task
+  (shortened to 1,500 characters), and every later message the person writes in it while it still
+  waits for its first placement, since that message may make its subject clear;
+- the person's edit of a proposal, and their accepting or declining it;
+- another agent's `request_space_placement`, "Tidy now", and the person's own messages to it.
+
+Other notices wait for the next wake without causing one: every later message the person writes in
+placed new work, or in a session under it, with the agent's last text reply before it (both shortened,
+without tool calls, and only the latest three notices per row kept); a session under such work
+that stops, with its last reply; work that finished or paused, left, or was renamed; and the
+operations dropped from Prioritizing's own batches. Work that did not start as new work through
+`POST /v0/spaces/stem-cells` has its first message told but no later messages forwarded.
+Prioritizing's own writes — its batches, its proposals, its row — never wake it.
+
+A wake waits two seconds for the rest of its burst, and every waiting notice goes into one message;
+while Prioritizing is still deciding, the wake waits for its turn to end, so a burst causes at most
+one more run. Wakes and notices are durable: a restart in between delivers them afterwards. A
+notice stays owed until a run that received it ends without a failure; when the run fails, such as
+for a model without credentials, its notices are delivered again with the next wake, which a
+failure itself never causes.
 
 New spaces are inserted immediately after Happy's top-level `happy-space` element, below everything
 nested in it, or immediately after the section or separator named at creation. When Happy's row is
@@ -10434,14 +10461,14 @@ section or separator counts as moved. Moves are attributed at block level: when 
 changes position, its heading counts as moved and its rows as carried, so a person's section drag
 protects the section, not each row. Prioritizing may not move a block that carries Happy, untouched
 new work, or work active in the last two hours, and may not remove or relabel the default `bots`
-and `tasks` sections. What else its calm batches may change is set out under "What applies at
-calm"; everything beyond that is dropped with a note and belongs in a proposal. Prioritizing's new or
+and `tasks` sections. What else its batches may change is set out under "What applies without a
+proposal"; everything beyond that is dropped with a note and belongs in a proposal. Prioritizing's new or
 renamed section labels may not name age
 or whether work is finished (such as Older, Done, Archive, or Stale) and may not repeat another
 section's label ignoring case and spacing; the person may label sections freely. The one exception
 is the label `Stale`, exactly, which Prioritizing may give one section, `<happy-section id="stale"
-label="Stale" collapsed="true"/>`, the default place for unfinished work that has gone quiet. It
-proposes that section like any other reorganisation.
+label="Stale" collapsed="true"/>`, for unfinished work that has gone quiet. It is never required,
+and Prioritizing proposes it like any other reorganisation.
 
 Each applied manager batch adds exactly one factual diff-derived note to Prioritizing's
 conversation and publishes the ordinary live message event so open conversations update
@@ -10550,20 +10577,14 @@ unknown section.
 
 ### `POST /v0/spaces/attention`
 
-The client's view of the person's attention, which decides when a batch may apply.
+The client's view of the person's attention. It is accepted but no longer needed: nothing waits
+for it, and a client may stop sending it.
 
 Request: `{ "state": "interacting" }` or `{ "state": "calm" }`.
 
-- `interacting` — the person is in the middle of something in the sidebar: pointing at it,
-  dragging, or using a menu. No batch applies until the client reports `calm`, or ten minutes
-  pass without a report.
-- `calm` — the person is not using the app: there has been no input for five minutes, or the app
-  or its sidebar is not visible (the window is hidden or minimised, or the sidebar is collapsed).
-  A client never reports `calm` for a click, a navigation, or a selection. A waiting batch applies
-  now; if Prioritizing is still deciding, it applies as soon as Prioritizing finishes.
-
-Without any report, the daemon treats the person as calm after five minutes with neither an
-attention report nor a message from them.
+- `interacting` — changes nothing.
+- `calm` — applies a batch that is still waiting, such as one left by a restart, unless
+  Prioritizing is deciding; batches otherwise apply when its turn ends.
 
 Response — `200`: `{ "batch": { ... } }` for the batch this report applied, or `{ "batch": null }`.
 A batch moves rows only and never changes what the person has selected.
@@ -10574,7 +10595,7 @@ Posts "Tidy the sidebar now" into Prioritizing's conversation as an automatic me
 nothing more; before the person's first new work there is no Prioritizing, and it does nothing.
 Request: `{}` or `{ "mutationId": "..." }`.
 
-Response — `202` with no body. The changes Prioritizing makes wait for a calm moment like any
+Response — `202` with no body. The changes Prioritizing makes apply when its turn ends, like any
 other batch.
 
 ## Artifacts

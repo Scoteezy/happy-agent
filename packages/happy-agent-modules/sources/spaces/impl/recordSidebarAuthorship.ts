@@ -74,3 +74,23 @@ export function recordSidebarAuthorship(
     for (const id of keys.slice(0, Math.max(0, keys.length - KEPT))) delete next[id];
     return next;
 }
+
+/**
+ * The authorship after the person's `set` operations that changed nothing, such as
+ * `expanded: true` on a row already open: the aspects they name are still the person's choice, so
+ * Prioritizing may not change them later. Operations on nodes no longer in the document are skipped.
+ */
+export function affirmSidebarAuthorship(
+    authorship: Readonly<Record<string, SidebarAuthorship>>,
+    document: SpaceSidebarDocument,
+    requested: readonly SpaceSidebarOperation[],
+): Record<string, SidebarAuthorship> {
+    const sets = requested.filter(
+        (operation) =>
+            operation.type === "set" &&
+            locateSpaceSidebarNode(document, operation.id) !== undefined,
+    );
+    return sets.length === 0
+        ? { ...authorship }
+        : recordSidebarAuthorship(authorship, document, document, sets, "person");
+}

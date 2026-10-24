@@ -4,6 +4,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { Context } from "@steve.kite/stdlib";
 
 import {
+    sidebarProposalSchema,
     spaceBatchSchema,
     spaceOwnerIdSchema,
     spaceRecordSchema,
@@ -57,6 +58,21 @@ export const spaceEventSchema = Type.Union([
             previousVersion: spaceVersionSchema,
             version: spaceVersionSchema,
             author: spaceSidebarAuthorSchema,
+            operations: Type.Array(spaceSidebarOperationSchema),
+        },
+        { additionalProperties: false },
+    ),
+    /**
+     * A proposal's new version, whose operations turn `previousVersion` into `proposal.version`, or
+     * its new status, with no operations.
+     */
+    Type.Object(
+        {
+            ...envelope,
+            type: Type.Literal("proposal_changed"),
+            proposal: sidebarProposalSchema,
+            previousVersion: spaceVersionSchema,
+            author: Type.Union([Type.Literal("person"), Type.Literal("prioritizing")]),
             operations: Type.Array(spaceSidebarOperationSchema),
         },
         { additionalProperties: false },

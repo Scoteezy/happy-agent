@@ -19,7 +19,7 @@ const requestSpacePlacementSchema = Type.Object(
         personAsked: Type.Optional(
             Type.Boolean({
                 description:
-                    "True when the person explicitly asked for this change, so it applies at once instead of waiting for a calm moment.",
+                    "True when the person explicitly asked for this change, so it applies without the limits on Prioritizing's own changes.",
             }),
         ),
     },
@@ -42,7 +42,7 @@ export function requestSpacePlacementTool(spaces: SpacesModule, actingAgentId: s
         ],
         searchKeywords: ["sidebar", "move to section", "organize sidebar", "put this in"],
         description:
-            "Ask Prioritizing, the helper that organises the person's sidebar, to move a conversation's row: into a section, under a collapsed section, or out of sight. Prioritizing decides and applies it at a calm moment, or at once when the person explicitly asked.",
+            "Ask Prioritizing, the helper that organises the person's sidebar, to move a conversation's row: into a section, under a collapsed section, or out of sight. Prioritizing decides shortly; when the person explicitly asked, it applies without the limits on Prioritizing's own changes.",
         parameters: requestSpacePlacementSchema,
         returnType: resultSchema,
         durable: true,

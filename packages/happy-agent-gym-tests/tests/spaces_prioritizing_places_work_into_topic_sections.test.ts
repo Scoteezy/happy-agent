@@ -22,23 +22,20 @@ it("hears the person's messages in new work, files it into topic sections and a 
         );
         expect(prioritizingSaw("If its subject is clear")).toBe(true);
 
-        // Later messages wait for a calm moment, each with the agent's reply it answers.
-        await h.hold();
+        // A later message in work not yet placed may make its subject clear, so it wakes
+        // Prioritizing, with the agent's reply it answers.
         await h.gym.send("Ship the Android beta by Friday.", { sessionId: release.agent.id });
         const brief = [
             `Conversation in ${release.space.id}: the person wrote in row ${release.space.id}.`,
             "Agent before it: Done.",
             "Person: Ship the Android beta by Friday.",
         ].join("\\n");
-        expect(prioritizingSaw(brief)).toBe(false);
-        await h.calm();
         await h.gym.waitUntil(
             () => (prioritizingSaw(brief) ? true : undefined),
             "the conversation brief",
         );
 
         // With the subject clear, Prioritizing places both: a topic section, and Distractions folded.
-        await h.hold();
         const before = await h.read();
         const row = (id: string) => `  <happy-space id="${id}"/>\n`;
         const placed = before.html
@@ -54,14 +51,14 @@ it("hears the person's messages in new work, files it into topic sections and a 
                 ].join("\n"),
             );
         expect((await h.edit(placed)).text).toContain("queued");
-        expect((await h.read()).html).toBe(before.html);
-        await h.calm();
+        await h.settle();
         await h.gym.waitUntil(
             async () => ((await h.read()).html === placed ? true : undefined),
             "the placement",
         );
 
-        // A subtask that stops waiting for review is told to Prioritizing under its row.
+        // A subtask that stops waiting for review is told to Prioritizing under its row, with the
+        // next notice: here, the person asking for a tidy.
         const subtask = /Created subtask ([a-z0-9]+)/.exec(
             (
                 await h.call(
@@ -78,18 +75,18 @@ it("hears the person's messages in new work, files it into topic sections and a 
             ).text,
         )![1]!;
         await h.gym.waitUntil(async () => {
-            await h.calm();
+            await h.settle();
+            await h.gym.http.request("POST", "/v0/spaces/tidy", {});
             return prioritizingSaw(`session ${subtask} under row ${release.space.id} stopped`)
                 ? true
                 : undefined;
         }, "the stopped-session brief");
-        await h.hold();
         const reviewing = (await h.read()).html.replace(
             row(release.space.id),
             `  <happy-space id="${release.space.id}" expanded="true">\n    <happy-space id="${subtask}"/>\n  </happy-space>\n`,
         );
         expect((await h.edit(reviewing)).text).toContain("queued");
-        await h.calm();
+        await h.settle();
         await h.gym.waitUntil(
             async () => ((await h.read()).html === reviewing ? true : undefined),
             "the session shown for review",

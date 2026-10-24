@@ -336,6 +336,7 @@ const historyArtifactPresentationSchema = Type.Object(
         artifactType: Type.Union([
             Type.Literal("markdown"),
             Type.Literal("html"),
+            Type.Literal("sidebar_proposal"),
             Type.Literal("image"),
             Type.Literal("image_series"),
             Type.Literal("video"),

@@ -80,7 +80,6 @@ it("lets the person drag stem cells anywhere and keeps Prioritizing off them, be
         ).spaces.find((space) => space.id === first.space.id)!;
         expect(row.placedByPerson).toBe(true);
         expect(row.newWork).toBeUndefined();
-        await h.hold();
         current = await h.read();
         const movedBack = current.html
             .replace(line(first.space.id), "")

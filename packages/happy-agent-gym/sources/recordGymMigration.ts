@@ -25,6 +25,19 @@ export async function recordGymMigration(
     }
 }
 
+/**
+ * Run statements against a stopped daemon's main database, in order: how a scenario leaves stored
+ * data the way an earlier release wrote it.
+ */
+export async function runGymSql(happyHome: string, statements: readonly string[]): Promise<void> {
+    const opened = await openHappyAgentDatabase(join(happyHome, "agent", "agent.sqlite"));
+    try {
+        for (const statement of statements) await opened.database.run(statement);
+    } finally {
+        await opened.close();
+    }
+}
+
 /** A SQL string literal. */
 function quote(value: string): string {
     return `'${value.replaceAll("'", "''")}'`;

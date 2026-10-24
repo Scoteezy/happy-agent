@@ -3,7 +3,7 @@ import { sidebarGym } from "./support/sidebarGym.js";
 
 const line = (id: string) => `  <happy-space id="${id}"/>\n`;
 
-it("lets Prioritizing read what was said in a row or session, newest first, without tool calls", async () => {
+it("lets Prioritizing read several rows and sessions by turn, without tool calls", async () => {
     const h = await sidebarGym();
     try {
         await h.read();
@@ -27,33 +27,40 @@ it("lets Prioritizing read what was said in a row or session, newest first, with
         )![1]!;
 
         // The subtask reports back into the row's conversation, which answers it.
+        const read = async (args: unknown) => (await h.call("read_conversations", args)).text;
         const thread = await h.gym.waitUntil(async () => {
-            const text = (await h.call("read_row_conversation", { id: cell.space.id })).text;
-            return /^Agent, .* ago: Done\.\n\nAnother agent, /.test(text) ? text : undefined;
+            const text = await read({ ids: [cell.space.id] });
+            return /\nAnother agent, .* ago: [^]*\nAgent, .* ago: Done\.$/.test(text)
+                ? text
+                : undefined;
         }, "the subtask's report in the row's thread");
-        // The person's words, the agent's replies, and the report, newest first.
-        expect(thread).toMatch(/Person, .* ago: Execute sidebar request/);
-        expect(thread).toMatch(/Person, .* ago: Ship the release\.$/);
-        expect(thread.indexOf("Execute sidebar request")).toBeLessThan(
-            thread.indexOf("Ship the release."),
+        // Turns oldest first: the person's words or a report, each with the reply that answered it.
+        expect(thread.startsWith(`Row ${cell.space.id} (`)).toBe(true);
+        expect(thread).toMatch(/Person, .* ago: Ship the release\.\nAgent, .* ago: Done\./);
+        expect(thread.indexOf("Ship the release.")).toBeLessThan(
+            thread.indexOf("Execute sidebar request"),
         );
         // Tool calls and their output stay out.
         expect(thread).not.toContain("create_subtask");
         expect(thread).not.toContain("Created subtask");
 
-        // The limit caps the messages returned, newest first.
-        expect(
-            (await h.call("read_row_conversation", { id: cell.space.id, limit: 1 })).text,
-        ).toMatch(/^Agent, .* ago: Done\.$/);
+        // `turns` keeps the latest turns and says how many were left out.
+        const latest = await read({ ids: [cell.space.id], turns: 1 });
+        expect(latest).toMatch(/\n\(2 earlier turns left out\)\nAnother agent, /);
+        expect(latest).not.toContain("Ship the release.");
 
-        // A session under the person's row is read by its agent ID, with the task it was given.
-        expect((await h.call("read_row_conversation", { id: subtask })).text).toMatch(
-            /^Agent, .* ago: Done\.\n\nAnother agent, .* ago: Message from agent [a-z0-9]+:\n\nFix the failing tests\.$/,
+        // Several conversations at once; a session under the person's row is read by its agent
+        // ID, with the task it was given; anything else is not the person's to read.
+        const both = (
+            await read({ ids: [cell.space.id, subtask, "zzzzzzzzzzzzzzzzzzzzzzzz"] })
+        ).split("\n\n---\n\n");
+        expect(both).toHaveLength(3);
+        expect(both[1]).toMatch(
+            /^Session [a-z0-9]+ \("Fix tests"\):\nAnother agent, .* ago: Message from agent [a-z0-9]+:\n\nFix the failing tests\.\nAgent, .* ago: Done\.$/,
         );
-        // Anything else is not the person's to read.
-        expect(
-            (await h.call("read_row_conversation", { id: "zzzzzzzzzzzzzzzzzzzzzzzz" })).text,
-        ).toMatch(/not found/i);
+        expect(both[2]).toBe(
+            "zzzzzzzzzzzzzzzzzzzzzzzz is not one of the person's rows or sessions.",
+        );
     } finally {
         await h.gym.dispose();
     }
