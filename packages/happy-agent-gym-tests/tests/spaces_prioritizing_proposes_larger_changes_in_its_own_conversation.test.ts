@@ -209,9 +209,8 @@ it("proposes a reorganisation the person edits and accepts, archives what it off
                 },
             ],
         });
-        expect(proposed.text).toMatch(
-            /^Proposal <happy-artifact id="[a-z0-9]+"\/> is at version 2\./,
-        );
+        expect(proposed.text).toMatch(/^Proposal [a-z0-9]+ is at version 2\./);
+        expect(proposed.text).not.toContain("<happy-artifact");
         const live = await h.read();
         expect(live.html).toBe(before.html);
         const { proposal } = await h.gym.http.ok<{
@@ -277,13 +276,39 @@ it("proposes a reorganisation the person edits and accepts, archives what it off
         // What the person accepted is theirs: Prioritizing may not move it back.
         expect((await h.edit(before.html)).text).toContain("manual placement");
 
+        // What the person keeps above the separator stays there, even in a proposal.
+        const pinned = await h.read();
+        await h.gym.client.applySpaceSidebarOperations({
+            mutationId: "pin-release-notes",
+            baseVersion: pinned.version,
+            operations: [{ type: "move", id: ship, to: { after: happy.id } }],
+        });
+        await h.settle();
+        const listed = JSON.parse((await h.call("list_sidebar", {})).text) as {
+            version: number;
+            spaces: { id: string; keepInPlace?: true }[];
+        };
+        expect(listed.spaces.find((row) => row.id === ship)?.keepInPlace).toBe(true);
+        expect(
+            (
+                await h.call("propose_sidebar", {
+                    baseVersion: listed.version,
+                    edits: [
+                        { oldText: line(ship), newText: "" },
+                        { oldText: "</nav>", newText: `${line(ship)}</nav>` },
+                    ],
+                })
+            ).text,
+        ).toContain(`The person keeps ${ship} above the separator`);
+        await h.settle();
+
         // A declined proposal changes nothing.
         const current = await view(h);
         const second = await h.call("propose_sidebar", {
             baseVersion: current.version,
             edits: [{ oldText: "</nav>", newText: '  <happy-separator id="later"/>\n</nav>' }],
         });
-        const secondId = /id="([a-z0-9]+)"/.exec(second.text)![1]!;
+        const secondId = /^Proposal ([a-z0-9]+) /.exec(second.text)![1]!;
         expect(secondId).not.toBe(proposal.artifactId);
         const sidebarBefore = await h.read();
         const declined = await h.gym.client.declineSpaceSidebarProposal(secondId, {});

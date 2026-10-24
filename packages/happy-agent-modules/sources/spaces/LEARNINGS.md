@@ -257,6 +257,14 @@ made the first real-inference proposal on a new sidebar empty, since every task 
 grouping recent work is allowed in a proposal because accepting it is consent, and hiding it never
 is. `list_sidebar` marks rows with nothing to read.
 
+A later rerun (18 runs) still moved a row the person kept above the separator in 12 of them, though
+the prompt said to keep it, put finished tasks into Stale, pasted the proposal's tag into replies,
+and left 16 to 19 rows shown. The daemon now refuses moving a top-level row above the first
+separator whose place the person set, and `list_sidebar` marks it `keepInPlace`; `propose_sidebar`
+returns the proposal's ID without its reference tag, and says when the proposal leaves the visible
+budget exceeded, without refusing it. The prompt says finished work goes under Archive and Stale is
+for unfinished work, and that a reply says what changed, never what did not.
+
 ## Prioritizing shows its own row, once
 
 Notes in Happy's chat interrupted the main agent: "the focus agent normally should never bother the

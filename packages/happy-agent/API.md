@@ -10292,13 +10292,17 @@ stale `baseVersion` is a conflict, and so is an edit whose old text does not occ
 edit that would change an aspect of a node that the person last set in this proposal is dropped
 with a note, and the rest of the call applies. A proposal may regroup and fold rows whose place the
 person last set in the sidebar, because accepting it is the person's own change. It may still not
-move, fold away, or remove Search, Create, Happy, its own row, or new work before its first message,
-and it may group but never fold away or remove work running or active in the last two hours; its new or renamed section labels follow the
+move, fold away, or remove Search, Create, Happy, its own row, new work before its first message,
+or a top-level row above the sidebar's first separator whose place the person last set, which is
+what the person keeps at the top; `list_sidebar` marks such rows `keepInPlace`. It may group but never fold away or remove work running or active in the last two hours; its new or renamed section labels follow the
 label rules under "Authorship"; such edits are dropped with a note. In a proposal, the rows of a
 section labelled `Stale` are only task rows quiet for at least two days: a bot, a shared list, or
 work active more recently is dropped from it with a note. The call presents the artifact (an `artifact`
-presentation with `shows: "latest"`) and returns its reference tag, so the proposal appears inline
-in Prioritizing's conversation at its full height and again after every revision. `list_sidebar`
+presentation with `shows: "latest"`), so the proposal appears inline in Prioritizing's
+conversation at its full height and again after every revision. The call returns the proposal's
+artifact ID and version, not its reference tag, so that Prioritizing does not repeat the card in its
+reply. A proposal may leave more rows shown than the visible budget; the call then says so, so that
+Prioritizing can fold quiet sections in a revision. `list_sidebar`
 also returns the open proposal, its document, the nodes the person last set in it, and the
 decisions on the person's last proposals.
 

@@ -3,6 +3,7 @@ import { formatSpaceSidebar, parseSpaceSidebar } from "@slopus/happy-agent-clien
 
 import {
     archiveOffers,
+    keptAboveSeparator,
     reviewProposalOperations,
     withoutArchive,
 } from "../../../sources/spaces/impl/reviewProposalOperations.js";
@@ -107,6 +108,55 @@ describe("sidebar proposals", () => {
                     '<happy-space id="helper"/>',
                     '<happy-section id="stale" label="Stale" collapsed="true"/>',
                     '<happy-space id="quiet"/>',
+                ),
+            ),
+        );
+    });
+
+    it("keeps what the person placed above the separator where it is", () => {
+        const pinned = doc(
+            '<happy-space id="happy"/>',
+            '<happy-space id="libraries"/>',
+            '<happy-space id="drafted"/>',
+            '<happy-separator id="top"/>',
+            '<happy-space id="below"/>',
+        );
+        const placed = (id: string) => id === "libraries" || id === "below";
+        const kept = keptAboveSeparator(pinned, placed);
+        expect([...kept]).toEqual(["libraries"]);
+        expect(keptAboveSeparator(doc('<happy-space id="libraries"/>'), placed).size).toBe(0);
+
+        const result = reviewProposalOperations(
+            pinned,
+            [
+                {
+                    type: "insert",
+                    node: { type: "section", id: "tools", label: "Tools" },
+                    to: { after: "below" },
+                },
+                { type: "move", id: "libraries", to: { after: "tools" } },
+                { type: "move", id: "drafted", to: { after: "tools" } },
+                { type: "move", id: "below", to: { after: "tools" } },
+            ],
+            {
+                ...rules,
+                person: () => false,
+                mayNotMove: (id) =>
+                    kept.has(id) ? `The person keeps ${id} above the separator.` : undefined,
+            },
+        );
+        expect(result.notes).toEqual([
+            "Dropped move libraries after tools: The person keeps libraries above the separator.",
+        ]);
+        expect(formatSpaceSidebar(result.document)).toBe(
+            formatSpaceSidebar(
+                doc(
+                    '<happy-space id="happy"/>',
+                    '<happy-space id="libraries"/>',
+                    '<happy-separator id="top"/>',
+                    '<happy-section id="tools" label="Tools"/>',
+                    '<happy-space id="below"/>',
+                    '<happy-space id="drafted"/>',
                 ),
             ),
         );

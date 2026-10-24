@@ -45,6 +45,24 @@ function sectionBlock(
     );
 }
 
+/**
+ * The top-level rows above the sidebar's first separator whose place the person set: what they
+ * keep at the top, which a proposal builds around and never moves. Without a separator, none.
+ */
+export function keptAboveSeparator(
+    document: SpaceSidebarDocument,
+    placedByPerson: (id: string) => boolean,
+): Set<string> {
+    const end = document.items.findIndex((item) => item.type === "separator");
+    if (end < 0) return new Set();
+    return new Set(
+        document.items
+            .slice(0, end)
+            .filter((item) => item.type === "space" && placedByPerson(item.id))
+            .map((item) => item.id),
+    );
+}
+
 /** The proposal as the sidebar would take it: no Archive heading and none of `leaving`. */
 export function withoutArchive(
     document: SpaceSidebarDocument,

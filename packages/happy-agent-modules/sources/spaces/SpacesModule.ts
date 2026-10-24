@@ -26,7 +26,6 @@ import {
     diffSpaceSidebar,
     formatSpaceSidebar,
     locateSpaceSidebarNode,
-    formatHappyReferenceTag,
     SpaceSidebarError,
     SpaceSidebarOperationError,
     type SpaceSidebarDocument,
@@ -140,6 +139,7 @@ import {
 import { type PrioritizingRules } from "./impl/reviewPrioritizingOperation.js";
 import {
     archiveOffers,
+    keptAboveSeparator,
     reviewProposalOperations,
     withoutArchive,
 } from "./impl/reviewProposalOperations.js";
@@ -1330,6 +1330,12 @@ export class SpacesModule implements AgentModule {
         const state = await this.#ownerState(ctx, ownerUserId);
         const view = await this.#prioritizingView(ctx, state);
         const authorship = state.sidebarAuthorship ?? {};
+        const kept = keptAboveSeparator(
+            view.current.document,
+            (id) =>
+                authorship[id]?.place === "person" ||
+                current.spaces.some((space) => space.id === id && space.manualAt !== undefined),
+        );
         const now = Date.now();
         const age = (at: number | undefined) =>
             at === undefined ? undefined : `${formatAge(now - at)} ago`;
@@ -1385,6 +1391,7 @@ export class SpacesModule implements AgentModule {
                       ? { newWork: "not placed yet" }
                       : {}),
                 ...(placedByPerson ? { placedByPerson: true } : {}),
+                ...(kept.has(space.id) ? { keepInPlace: true } : {}),
                 // Nothing to read with read_conversations.
                 ...(space.role === "focus" || space.contents[0]?.kind === "surface"
                     ? { noConversation: true }
@@ -1440,7 +1447,6 @@ export class SpacesModule implements AgentModule {
         const latest = await this.#sidebarDocument(ctx, open.artifactId);
         return {
             artifactId: open.artifactId,
-            tag: formatHappyReferenceTag({ kind: "artifact", id: open.artifactId }),
             version: latest.version,
             html: formatSpaceSidebar(latest.document),
             personSet: Object.entries(open.authorship ?? {})
@@ -1603,7 +1609,7 @@ export class SpacesModule implements AgentModule {
         input: { baseVersion: number; edits: readonly { oldText: string; newText: string }[] },
         operationId: string,
     ): Promise<{ readonly text: string; readonly artifact?: ArtifactRecord }> {
-        await this.sidebar(ctx, ownerUserId);
+        const { artifactId: sidebarId } = await this.sidebar(ctx, ownerUserId);
         return await ctx.inTx(async (txCtx) => {
             await this.#requirePrioritizingEnabled(txCtx, ownerUserId);
             const artifacts = this.#requireArtifacts();
@@ -1655,6 +1661,11 @@ export class SpacesModule implements AgentModule {
                 quiet.set(row.id, at === undefined || Date.now() - at >= SPACE_STALE_AFTER_MS);
             }
             const authorship = open?.authorship ?? {};
+            // What the person keeps above the separator in the live sidebar stays where it is.
+            const kept = keptAboveSeparator(
+                (await this.#sidebarDocument(txCtx, sidebarId)).document,
+                (id) => rules.person(id, "place") || rules.manual.has(id),
+            );
             const reviewed = reviewProposalOperations(
                 base.document,
                 sidebarDiff(base.document, readSidebarDocument(html), { widgets: true }),
@@ -1676,6 +1687,8 @@ export class SpacesModule implements AgentModule {
                             return "Your own row stays where it is; only the person moves it.";
                         if (rules.untouched.has(id))
                             return "Leave new work alone until the person sends its first message.";
+                        if (kept.has(id))
+                            return `The person keeps ${id} above the separator; leave it where it is and build sections around it.`;
                         return undefined;
                     },
                     mayNotHide: (id) =>
@@ -1707,6 +1720,18 @@ export class SpacesModule implements AgentModule {
                 reviewed.document,
                 placedSidebarIds(reviewed.operations),
             );
+            // Over the budget is allowed in a proposal, but Prioritizing hears it.
+            const exempt = new Set([
+                ...[rules.happyId, rules.focusId].filter((id) => id !== undefined),
+                ...rules.untouched,
+            ]);
+            const shown = shownSidebarRows(
+                withoutArchive(reviewed.document, new Set(archiveOffers(reviewed.document))),
+            ).filter((id) => !exempt.has(id)).length;
+            const overBudget =
+                shown > SIDEBAR_VISIBLE_BUDGET
+                    ? ` It leaves ${String(shown)} rows shown, over the budget of ${String(SIDEBAR_VISIBLE_BUDGET)}; fold quiet sections in a revision.`
+                    : "";
             const actor = await artifacts.actorFor(txCtx, agentId);
             let record = open;
             if (record === undefined) {
@@ -1761,7 +1786,7 @@ export class SpacesModule implements AgentModule {
                 },
             ]);
             return {
-                text: `Proposal ${formatHappyReferenceTag({ kind: "artifact", id: record.artifactId })} is at version ${String(artifact.latestVersion)}. The person sees it inline in your conversation and may edit, accept, or decline it.${notes}`,
+                text: `Proposal ${record.artifactId} is at version ${String(artifact.latestVersion)}. The person sees it as a card in your conversation and may edit, accept, or decline it; do not repeat it or its tag in your reply.${overBudget}${notes}`,
                 artifact,
             };
         });
