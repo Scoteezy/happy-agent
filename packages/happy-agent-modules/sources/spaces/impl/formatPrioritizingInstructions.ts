@@ -2,6 +2,13 @@ import { SIDEBAR_VISIBLE_BUDGET } from "./sidebarLayout.js";
 import { SPACE_ICON_SLUGS } from "./spaceIconSlugs.js";
 
 /**
+ * The revision of Prioritizing's instructions. Raise it with every change to them, so every running
+ * Prioritizing is told once on the next start to check the sidebar against them; a test pins it to
+ * the instructions' text.
+ */
+export const PRIORITIZING_REVISION = 2;
+
+/**
  * The whole system prompt of Prioritizing. It is a subtask of Happy with one job, so it hears
  * nothing else: no shell, no files, no other agents.
  */

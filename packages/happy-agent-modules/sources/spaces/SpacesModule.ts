@@ -87,7 +87,10 @@ import {
 import { composeSpaceBatchNote } from "./impl/composeSpaceBatchNote.js";
 import { formatConversationReads } from "./impl/formatConversationReads.js";
 import { formatConversationAge, formatConversationTurns } from "./impl/formatConversationTurns.js";
-import { formatPrioritizingInstructions } from "./impl/formatPrioritizingInstructions.js";
+import {
+    formatPrioritizingInstructions,
+    PRIORITIZING_REVISION,
+} from "./impl/formatPrioritizingInstructions.js";
 import {
     PRIORITIZING_DEFAULT_MODEL_SETTING,
     selectPrioritizingRoute,
@@ -181,11 +184,6 @@ const PRIORITIZING_UPGRADED =
     "Happy Agent was updated. You now have a conversation and a row of your own, your notes go to your conversation, and larger changes are proposals the person accepts. Check the sidebar and your history: add your own row if it is missing and the person never removed it, and if the person has not seen a proposal from you yet, propose once how to file the work they already have.";
 const PRIORITIZING_UPDATED =
     "Happy Agent was updated, and your instructions may have changed. Check the sidebar against them, starting with where your own row stands.";
-/**
- * The revision of Prioritizing's instructions. Raise it when they change how an existing sidebar
- * should look, so every Prioritizing is told once on the next start.
- */
-const PRIORITIZING_REVISION = 1;
 /** The icon of Prioritizing's own row. */
 const FOCUS_ICON: SpaceIconSlug = "prioritize";
 /** How many bytes `read_conversations` returns at most, and for one conversation. */

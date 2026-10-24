@@ -328,7 +328,9 @@ Prioritizing's call (Kirill: "it should move ITSELF"). The prompt keeps the row 
 unless the person put it elsewhere, moving its own row applies without a proposal and is never
 capped, and a row the person placed is theirs. Raising `PRIORITIZING_REVISION` when the
 instructions change tells each running Prioritizing once, on the next start, to check the sidebar
-against them, starting with its row.
+against them, starting with its row. Six prompt changes shipped without raising it, so Kirill's
+Prioritizing was never told and its row stayed third; the revision now lives beside the prompt, and
+a unit test pins it to the prompt's digest, so a prompt change without a new revision fails.
 
 ## Prioritizing runs on the default model from Settings
 
