@@ -285,7 +285,11 @@ prompt now says to move such a bot above Bots first. A row the person kept above
 still folded with a quiet neighbour in 5 of 18 runs, even with "never in a folded section", because
 the model had to work out which rows the line meant from authorship and document order.
 `list_sidebar` marks them `keepInPlace: true` again, as information only, and the prompt names the
-mark: never move or fold a row marked keepInPlace, even a shared list.
+mark. With it the row stayed shown in every run, but "never move" was read loosely, since
+regrouping around the row moves it; what matters is that it stays shown at the top, so the line is
+now "never folds a row marked keepInPlace or moves it below the separator". One run folded work
+active 1.7 hours ago that `list_sidebar` rounded to "2 h ago", right at the two hours the prompt
+counts from; ages now read in minutes up to three hours.
 
 ## Prioritizing shows its own row, once
 

@@ -85,7 +85,7 @@ import {
     rowKeyAtTop,
 } from "./impl/applySpaceChanges.js";
 import { composeSpaceBatchNote } from "./impl/composeSpaceBatchNote.js";
-import { formatConversationTurns } from "./impl/formatConversationTurns.js";
+import { formatConversationAge, formatConversationTurns } from "./impl/formatConversationTurns.js";
 import { formatPrioritizingInstructions } from "./impl/formatPrioritizingInstructions.js";
 import {
     PRIORITIZING_DEFAULT_MODEL_SETTING,
@@ -1352,7 +1352,7 @@ export class SpacesModule implements AgentModule {
         );
         const now = Date.now();
         const age = (at: number | undefined) =>
-            at === undefined ? undefined : `${formatAge(now - at)} ago`;
+            at === undefined ? undefined : `${formatConversationAge(now - at)} ago`;
         const spaces = [];
         const sessions: {
             id: string;
@@ -1516,7 +1516,7 @@ export class SpacesModule implements AgentModule {
             if (content.kind === "surface")
                 return `Row ${id} (${title}) is a shared Surface; it has no conversation of its own.`;
             agentId = content.agentId;
-            heading = `Row ${id} (${title})${description.working ? ", running now" : ""}${description.lastActivityAt === undefined ? "" : `, last active ${formatAge(now - description.lastActivityAt)} ago`}:`;
+            heading = `Row ${id} (${title})${description.working ? ", running now" : ""}${description.lastActivityAt === undefined ? "" : `, last active ${formatConversationAge(now - description.lastActivityAt)} ago`}:`;
         } else if (
             row === undefined &&
             (await this.#sessionOwners(ctx, id)).includes(ownerUserId)
@@ -3743,7 +3743,7 @@ export class SpacesModule implements AgentModule {
         if (description.working) return "This row's work is running now";
         const at = description.lastActivityAt;
         if (at !== undefined && Date.now() - at < SPACE_RECENT_WORK_MS) {
-            return `This row was active ${formatAge(Date.now() - at)} ago`;
+            return `This row was active ${formatConversationAge(Date.now() - at)} ago`;
         }
         return undefined;
     }
@@ -4353,12 +4353,4 @@ function surfaceNeedsContent(type: NonNullable<ReturnType<typeof surfaceTypeOf>>
 /** Rows by key; Happy leads because it holds the first key. */
 function sortForDisplay(spaces: readonly SpaceRecord[]): SpaceRecord[] {
     return [...spaces].sort(compareRows);
-}
-
-function formatAge(ms: number): string {
-    const minutes = Math.max(0, Math.round(ms / 60_000));
-    if (minutes < 60) return `${String(minutes)} min`;
-    const hours = Math.round(minutes / 60);
-    if (hours < 48) return `${String(hours)} h`;
-    return `${String(Math.round(hours / 24))} days`;
 }

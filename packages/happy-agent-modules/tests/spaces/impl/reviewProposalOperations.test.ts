@@ -6,7 +6,10 @@ import {
     reviewProposalOperations,
     withoutArchive,
 } from "../../../sources/spaces/impl/reviewProposalOperations.js";
-import { formatConversationTurns } from "../../../sources/spaces/impl/formatConversationTurns.js";
+import {
+    formatConversationAge,
+    formatConversationTurns,
+} from "../../../sources/spaces/impl/formatConversationTurns.js";
 
 const doc = (...items: string[]) =>
     parseSpaceSidebar(`<nav><happy-search/><happy-create/>${items.join("")}</nav>`);
@@ -101,5 +104,14 @@ describe("sidebar proposals", () => {
         expect(
             formatConversationTurns([], { turns: 4, replies: 1, now, messageLimit: 20, limit: 99 }),
         ).toBe("Nothing has been said here yet.");
+    });
+
+    it("gives ages in minutes up to three hours, so recent work never reads as two hours", () => {
+        const hours = (count: number) => count * 60 * 60_000;
+        expect(formatConversationAge(5 * 60_000)).toBe("5 min");
+        expect(formatConversationAge(hours(1.7))).toBe("102 min");
+        expect(formatConversationAge(hours(2.9))).toBe("174 min");
+        expect(formatConversationAge(hours(3))).toBe("3 h");
+        expect(formatConversationAge(hours(72))).toBe("3 days");
     });
 });

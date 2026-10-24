@@ -63,10 +63,13 @@ export function formatConversationTurns(
         : whole;
 }
 
-/** "5 min", "3 h", or "4 days". */
+/**
+ * "5 min", "3 h", or "4 days". Minutes up to three hours, so work active 1.7 hours ago never reads
+ * as the two hours Prioritizing's instructions count from.
+ */
 export function formatConversationAge(ms: number): string {
     const minutes = Math.max(0, Math.round(ms / 60_000));
-    if (minutes < 60) return `${String(minutes)} min`;
+    if (minutes < 180) return `${String(minutes)} min`;
     const hours = Math.round(minutes / 60);
     if (hours < 48) return `${String(hours)} h`;
     return `${String(Math.round(hours / 24))} days`;
