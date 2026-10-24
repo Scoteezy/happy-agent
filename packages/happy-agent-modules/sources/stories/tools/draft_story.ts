@@ -161,7 +161,7 @@ export function draftStoryTool(stories: StoriesModule, scope: AgentModuleScope) 
         name: "draft_story",
         defer: true,
         capabilities: [
-            "Draft a story from this conversation's images and videos for the person to post.",
+            `Draft a story from this conversation's images and videos when the person says "post it" or asks to share what was made; it is a draft only they see until they press Post.`,
         ],
         searchKeywords: ["post it", "story", "share to stories", "draft story", "post update"],
         description: [

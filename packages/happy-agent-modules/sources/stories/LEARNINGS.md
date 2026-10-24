@@ -33,6 +33,13 @@ draft is visible only to its author. Read only refuses it. A revision names the 
 it revises; if the person edited the draft since, the call fails and shows the current draft so
 the agent can start from the person's edits rather than overwrite them.
 
+`draft_story` is deferred like every common tool, so the model first meets it through its
+capability line. A live run with real inference showed that a capability saying only what the
+tool does was not enough: with a social-posting skill installed, the model answered "post it" by
+asking where to post, because it read posting as public. The capability line now names "post it"
+and says the result is a draft only the person sees until they press Post; with it, the model
+drafts the story directly.
+
 ## Frames reference assets, never copy them
 
 Frames name chat media or an artifact file by ID. When the asset is gone, the frame stays and
