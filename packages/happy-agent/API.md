@@ -476,6 +476,16 @@ client and daemon as a one-off exception to additive compatibility. `POST /v0/ag
 user-controlled roots. Agent response parent relationships, ordinary subagents, and subtasks
 remain unchanged. Existing stored agents are not deleted or rewritten.
 
+Stories and stickers are additive and do not increment the protocol version. A daemon that serves
+the routes under `/v0/stories`, the `story` artifact type, the `draft_story` tool, and the
+`story.*` events reports `capabilities.stories: true` from health; one that serves the routes under
+`/v0/stickers` and the `sticker_recents.updated` event reports `capabilities.stickers: true`.
+Older daemons omit both and answer the routes with `404`. Both features are experimental and off
+for every person until that person turns them on (see "Turning Stories on"): while off, the
+capabilities are still reported, and the routes answer that person with `404` as an older daemon
+would. A client that predates stories shows a `story` artifact presentation as it shows every
+artifact type it does not know.
+
 ### Requests and responses
 
 - Request and response bodies are JSON, `content-type: application/json; charset=utf-8`.
@@ -10768,6 +10778,7 @@ Existing `page` presentations remain readable as history.
 | `image_series`     | the first file      | 1–64 images, shown in `path` order          | 32 MiB each, 256 MiB together  |
 | `sidebar`          | `index.html`, UTF-8 | exactly one file                            | 128 KiB                        |
 | `sidebar_proposal` | `index.html`, UTF-8 | exactly one file                            | 128 KiB                        |
+| `story`            | `story.json`, UTF-8 | the entry plus 0–10 images and videos       | entry 256 KiB; media as below  |
 | `video`            | its one file        | exactly one video                           | 256 MiB                        |
 | `document`         | its one file        | exactly one document                        | 64 MiB                         |
 
@@ -10789,6 +10800,15 @@ scripts included, in a sandboxed frame that has no access to the daemon's or the
 storage, or credentials. An artifact's type never changes. The set of types grows with the product;
 a client that meets a `type` it does not recognize shows the title and offers the entry for
 download.
+
+A `story` artifact holds one story, described under Stories, and its versions are the story's
+versions. A version's entry is the story's content as JSON, and its other files are the media
+uploaded for its frames, under `media/`: images of at most 32 MiB each and videos of at most
+256 MiB each. Only the story routes and `draft_story` write one; ordinary artifact writes — `PATCH`,
+`POST /v0/artifacts/:artifactId/delete`, and every artifact tool — are refused with
+`400 invalid_request`. `GET /v0/artifacts` and `list_artifacts` never list story artifacts, and
+the other artifact read routes and `read_artifact` answer `404` to anyone who may not read the
+story. Its `artifact.*` events reach only those who may read it.
 
 **Sources.** `source` says where an artifact was created, as an object discriminated by `kind`:
 
@@ -11616,6 +11636,789 @@ counted in `dropped`, and the request still succeeds. An invalid body is `400`.
 The log lives beside the artifact's data, in `logs.sqlite` in the same directory, and keeps the
 newest 1,000 entries of the last 7 days. It is read by agents through their `read_artifact_logs`
 tool, newest first, filtered by level, user, and time. Pages cannot read it.
+
+## Stories
+
+Stories are short, full-screen posts of what someone's work looks like: one to ten photos or
+videos, each with text, links, stickers, and emoji placed over it, in the style of Telegram
+stories. People see one another's stories as a row of avatar circles at the top of their home
+screen, ordered by how much each author's stories matter to them, and open an author's circle to
+watch that author's stories one frame after another.
+
+A story starts as a **draft** and becomes **posted** only when its author posts it. There are two
+ways to start one, and they make the same objects:
+
+- **"Post it."** The person asks the agent in any conversation to post something. The agent calls
+  `draft_story`, which picks the most telling one or two images or videos of that conversation and
+  makes a draft. The draft appears inline in the conversation with **Post** and **Edit** beside
+  it; nothing is posted until the person presses Post.
+- **By hand.** The person taps "+" on their own circle, chooses photos and videos from their device
+  or from media already in their conversations, and edits and posts the draft themselves.
+
+A story's frames refer to existing media by identity; their bytes are never copied from a
+conversation or uploaded twice. Comments, reactions, and posting outside Happy are not part of
+Stories yet.
+
+### Turning Stories on
+
+Stories are enabled for a person only when their opaque user setting
+`happy-desktop.experiments.stories` is the JSON boolean `true`; missing, cleared, `false`, or any
+other value disables them. The setting is per authenticated member in team mode and belongs to the
+installation's one person in standalone mode, like `happy-desktop.experiments.stemCells`.
+
+For a person with Stories off, nothing changes:
+
+- every route under `/v0/stories` and `/v0/stickers` answers `404 not_found`, exactly as on a
+  daemon without Stories;
+- none of their connections receives a `story.*` or `sticker_recents.updated` event, and no
+  `artifact.*` event for a story artifact;
+- no conversation whose person has Stories off is offered `draft_story`, and its instructions,
+  tools, and model context are byte-for-byte what they would be on a daemon without Stories.
+
+A conversation's person is the sender of its latest accepted human message (`metadata.userId`) in
+team mode, and the installation's one person in standalone mode. A conversation whose latest
+human message has no recorded sender, or none at all, has no person and is not offered
+`draft_story`.
+
+Turning Stories off hides the person's stories and drafts from everyone, themselves included,
+until it is turned on again; nothing is deleted. A posted story's frames stay addressable only to
+people who may read the story, so another person with Stories on stops seeing them in their feed.
+Turning Stories on again restores them unchanged, with the same `expiresAt`.
+
+### The story object
+
+```json
+{
+    "id": "s7k2m9q4w1e5t8y3u6i0o2p5",
+    "status": "draft",
+    "authorUserId": "u1x2y3z4a5b6c7d8e9f0g1h2",
+    "createdBy": { "kind": "agent", "agentId": "a9b8c7d6e5f4g3h2i1j0k9l8" },
+    "source": { "agentId": "a9b8c7d6e5f4g3h2i1j0k9l8", "toolCallId": "c3v5b7n9m1q2w4e6r8t0y2u4" },
+    "caption": "Login redirect loop: fixed.",
+    "frames": [
+        {
+            "id": "f1a2b3c4d5e6f7g8h9i0j1k2",
+            "kind": "image",
+            "width": 1440,
+            "height": 900,
+            "scale": 2,
+            "thumbhash": "3PcNNYSFeXh/d3eld0iHZoZgVwh2",
+            "durationMs": null,
+            "asset": {
+                "type": "chat_media",
+                "agentId": "a9b8c7d6e5f4g3h2i1j0k9l8",
+                "toolCallId": "k8j7h6g5f4d3s2a1q0w9e8r7",
+                "index": 0
+            },
+            "available": true,
+            "placement": { "x": 0.5, "y": 0.5, "scale": 1, "rotation": 0 },
+            "background": ["#1D2B3A", "#4A6A84"],
+            "overlays": [
+                {
+                    "id": "o4r5t6y7u8i9o0p1a2s3d4f5",
+                    "type": "text",
+                    "text": "No more loops",
+                    "style": {
+                        "font": "sanFrancisco",
+                        "fill": "filled",
+                        "color": "#FFFFFF",
+                        "align": "center",
+                        "width": 0.8
+                    },
+                    "transform": { "x": 0.5, "y": 0.2, "scale": 1, "rotation": 0 }
+                },
+                {
+                    "id": "o9p8i7u6y5t4r3e2w1q0a9s8",
+                    "type": "sticker",
+                    "packId": "utyaduck",
+                    "stickerId": "AgAD8gADVp29Cg",
+                    "transform": { "x": 0.78, "y": 0.8, "scale": 0.35, "rotation": -0.2 }
+                }
+            ]
+        }
+    ],
+    "audience": "team",
+    "artifactVersion": 3,
+    "createdAt": 1755300000000,
+    "updatedAt": 1755300500000,
+    "postedAt": null,
+    "expiresAt": null,
+    "seen": false,
+    "viewCount": null,
+    "version": "01991f3a-5c1e-7000-8000-2f9a1b3c4d5e"
+}
+```
+
+- `id` — the story's CUID2, which is also its `story` artifact's ID.
+- `status` — `"draft"`, `"posted"`, or `"deleted"`. A story only ever moves forward: a draft is
+  posted or deleted, and a posted story is deleted. A posted story whose `expiresAt` has passed
+  stays `"posted"`; expiry only takes it out of the feed.
+- `authorUserId` — the installation-local Happy user ID of the person the story belongs to, or
+  `null` in standalone mode. For a story made by hand it is the authenticated caller; for one made
+  by `draft_story` it is that conversation's person when the call ran. It never changes.
+- `createdBy` — `{ "kind": "user", "userId": ... }` for a story made by hand (`userId` is `null`
+  in standalone mode), or `{ "kind": "agent", "agentId": ... }` for one made by `draft_story`.
+- `source` — the conversation and tool call that drafted the story, or `null` for one made by
+  hand. A client offers to open that conversation from the story when the viewer may read it.
+- `caption` — at most 1,024 characters of plain text shown at the bottom of every frame over a
+  dark fade, or `null`.
+- `frames` — one to ten frames, in viewing order. See "Frames".
+- `audience` — who may see the story once it is posted: `"team"` in team mode, meaning every
+  member who has Stories on, and `"self"` in standalone mode. The daemon sets it; it cannot be
+  chosen yet.
+- `artifactVersion` — the number of the story artifact's version this object describes. Every
+  change to the story's content makes a new version.
+- `createdAt`, `updatedAt` — when the story was made and last changed, in epoch milliseconds.
+- `postedAt`, `expiresAt` — when it was posted and when it leaves the feed, exactly 24 hours later;
+  both `null` for a draft.
+- `seen` — whether the caller has seen this story; see `POST /v0/stories/:storyId/seen`. It is
+  caller-relative, and a story's `version` does not change when someone sees it. Always `true` on
+  the caller's own stories and `false` on drafts.
+- `viewCount` — on the author's own posted story, how many other people have seen it; `null` for
+  everyone else and on drafts.
+- `version` — the UUIDv7 resource version, used with `If-Match`.
+
+Who may read a story:
+
+- a draft — only its author;
+- a posted story in team mode — every member with Stories on;
+- a posted story in standalone mode — the installation's one person;
+- a deleted story — its author only, as a tombstone.
+
+Anyone else receives `404 not_found` for it and every route under it.
+
+### Frames
+
+Every frame is drawn on the same **canvas**: a 9:16 portrait rectangle, 1080 × 1920 in canvas
+units, the size of a phone screen. Clients fit the canvas to the screen and letterbox what is
+left in black, so a frame, its media, and its overlays look the same on every client. Positions
+are fractions of the canvas, never of the screen or of the media.
+
+- `id` — the frame's CUID2, stable for the life of the story.
+- `kind` — `"image"` or `"video"`.
+- `width`, `height`, `scale`, `thumbhash` — the media's size in pixels after EXIF orientation, its
+  pixels per point, and its ThumbHash, measured the way chat media measures images. `scale` is
+  absent when it is 1. Videos have `null` `width`, `height`, and `thumbhash` until the daemon
+  measures videos; clients then take them from the player.
+- `durationMs` — a video's length when known, otherwise `null`. Clients show an image for five
+  seconds and a video for its length, at most 60 seconds.
+- `asset` — the media the frame shows, by identity:
+    - `{ "type": "chat_media", "agentId", "toolCallId", "index" }` — one item of a completed tool
+      call's `media` presentation, as served by
+      `GET /v0/agents/:agentId/tool-calls/:toolCallId/media/:index`.
+    - `{ "type": "artifact_file", "artifactId", "version", "path" }` — one image or video file of an
+      exact, immutable artifact version, as served by
+      `GET /v0/artifacts/:artifactId/versions/:number/files/*path`. Media uploaded from a device for
+      this story is kept this way, as a file of the story's own artifact (see "Making a story by
+      hand").
+- `available` — whether the daemon still holds the asset. It becomes `false` when the asset's
+  artifact is deleted, or when the daemon no longer holds the copy of a conversation's media. A
+  conversation being archived does not change it, because archiving keeps the conversation's
+  history and media. A client shows an unavailable frame as its background reading "This photo is
+  no longer available" or "This video is no longer available", with its overlays. A posted story
+  none of whose frames is available leaves the feed.
+- `placement` — where the media sits on the canvas, as a transform (see "Overlays"). At scale `1`
+  with no rotation, the media is fitted whole inside the canvas, centred at `x` and `y`: a
+  screenshot fills the width and leaves bands above and below. Larger scales crop it. When it is
+  omitted on a write the daemon uses the fitted placement.
+- `background` — two `#RRGGBB` colours drawn as a top-to-bottom gradient behind the media, filling
+  the bands. When it is omitted on a write, the daemon picks them from the image's dominant colours
+  at its top and bottom edges; for a video it uses `["#000000", "#000000"]`.
+- `overlays` — at most 32, in drawing order, the last on top. See "Overlays".
+
+A frame's bytes are served by `GET /v0/stories/:storyId/frames/:frameId`, never by the asset's own
+route: the viewer of a story does not need to be able to read the conversation or artifact the
+media came from. Posting a story is its author sharing exactly those frames with its audience.
+
+### Overlays
+
+Overlays are drawn live by the client over the frame from the data below; the daemon never draws
+them into the media. Every overlay has an `id` (a CUID2 the client chooses when it adds one, stable
+afterwards), a `type`, and a `transform`:
+
+- `transform.x`, `transform.y` — the overlay's centre, as fractions of the canvas's width and
+  height, from the top-left corner. Values from `-0.5` through `1.5` are kept, so an overlay may
+  hang off an edge.
+- `transform.scale` — its size, from `0.05` through `10`. For text, `1` sets a base font size of
+  1/16 of the canvas's width; for links, the pill's height at `1` is 1/12 of the canvas's width;
+  for stickers and emoji, it is the fraction of the canvas's width the sticker's longer side takes.
+- `transform.rotation` — clockwise rotation in radians, from `-π` through `π`.
+
+The types:
+
+- `text` — `text` is 1–2,048 characters of plain text, newlines kept. `style.font` is one of
+  `"sanFrancisco"`, `"typewriter"`, `"avenirNext"`, `"courierNew"`, `"noteworthy"`, `"georgia"`,
+  `"papyrus"`, or `"snellRoundhand"`; clients draw it with the matching system font, falling back
+  to their own sans-serif when it is missing. `style.fill` is how the colour is used: `"regular"`
+  draws the text in it; `"filled"` draws a rounded box in it behind black or white text, whichever
+  contrasts; `"semi"` does the same with the box at half opacity; `"stroke"` outlines the text in
+  it with white text inside; and `"blur"` draws white text over a frosted box. `style.color` is a
+  `#RRGGBB` colour. `style.align` is `"left"`, `"center"`, or `"right"`. `style.width` is the
+  fraction of the canvas's width the text wraps at before scaling, from `0.1` through `1`.
+- `link` — `url` is an absolute `http` or `https` URL of at most 2,048 characters, without a user
+  name or password; `label` is 1–64 characters, or `null` to show the URL's host. `style` is
+  `"white"`, `"black"`, `"transparent"`, `"blur"`, or `"custom"` with a `#RRGGBB` `color`. Clients
+  draw it as a pill with a link glyph; tapping it in the viewer shows the URL with an Open button,
+  and the browser opens only after that.
+- `sticker` — `packId` and `stickerId` name a sticker, as described under Stickers. Clients draw
+  it with that sticker's file, animated and looping when its format is animated. A sticker the
+  daemon no longer serves is left out of the drawing; the overlay itself is kept.
+- `emoji` — `emoji` is one emoji, a single extended grapheme cluster, drawn with the client's own
+  emoji font.
+
+A client ignores an overlay of a type it does not know.
+
+The viewer shows one progress segment per frame across the top of the screen, for the author's
+stories in order. Tapping the right third advances and the left third goes back; holding pauses
+and hides the overlays' chrome; swiping down closes.
+
+### Making a story by hand
+
+Media from a device is uploaded first, with `POST /v0/artifact-uploads`, one upload per file.
+Creating or editing a story then places each upload as a frame, and the daemon keeps its bytes as
+a file of the story's own artifact version, under `media/<frameId>` with the file's extension. From
+then on the frame's asset is that file, `{ "type": "artifact_file", "artifactId": <story id>, ... }`,
+like any other.
+
+The person may also choose media from their conversations. `GET /v0/stories/media` lists what
+they may choose from one conversation.
+
+### `GET /v0/stories`
+
+The caller's own stories, newest first. Query parameters: `status` (optional; `draft`, `posted`,
+or `deleted`, repeated for several, default `draft` and `posted`), `cursor` (optional, an opaque
+cursor from a previous page), and `limit` (optional, `1`–`100`, default `50`).
+
+Response — `200`:
+
+```json
+{
+    "stories": [
+        /* story objects */
+    ],
+    "nextCursor": null,
+    "cursor": "01991f3a-..."
+}
+```
+
+`nextCursor` reads the next page, or is `null` on the last one. `cursor` is the event cursor this
+read is current at. A client's editor uses this route to return to a draft.
+
+### `POST /v0/stories`
+
+Makes a draft by hand.
+
+Request:
+
+```json
+{
+    "id": "s7k2m9q4w1e5t8y3u6i0o2p5",
+    "caption": "Friday demo",
+    "frames": [
+        {
+            "id": "f1a2b3c4d5e6f7g8h9i0j1k2",
+            "upload": { "uploadId": "u8p2l4o6a1d3e5f7g9h0j2k4", "name": "IMG_0042.jpg" },
+            "overlays": []
+        },
+        {
+            "asset": {
+                "type": "chat_media",
+                "agentId": "a9b8c7d6e5f4g3h2i1j0k9l8",
+                "toolCallId": "k8j7h6g5f4d3s2a1q0w9e8r7",
+                "index": 1
+            },
+            "overlays": []
+        }
+    ],
+    "mutationId": "..."
+}
+```
+
+- `id` — optional client-chosen CUID2. A repeated `id` returns the story as it now stands with
+  `201` and changes nothing, so a retry after a lost response never makes a second story.
+- `caption` — optional; see the story object.
+- `frames` — required, one to ten. Each has an optional `id`, optional `placement`,
+  `background`, and `overlays` (see "Frames"), and exactly one of:
+    - `upload` — an upload from `POST /v0/artifact-uploads` and the file's `name`, whose extension
+      decides what it is. The upload must decode as a PNG, JPEG, GIF, WebP, or AVIF image of at most
+      32 MiB, or be an MP4, QuickTime, or WebM video of at most 256 MiB. Clients convert HEIC photos
+      to JPEG before uploading. It is used once: the story that places it removes it in the same
+      change.
+    - `asset` — a `chat_media` or `artifact_file` asset the caller may read, which must be an image
+      or a video.
+
+The caller becomes `authorUserId`, `createdBy` is the caller, `source` is `null`, and `status` is
+`"draft"`. Response — `201`: `{ "story": { ... } }`, and `story.created` after commit, echoing
+`mutationId`. An unknown, expired, or already used upload, an asset the caller cannot read, an
+asset that is not an image or video, and media over its limit are `400 invalid_request`, and the
+message names the frame. Nothing is made when any frame fails.
+
+### `GET /v0/stories/media`
+
+Media the caller may put in a story, from one conversation. Query parameters: `agentId`
+(required), `cursor` (optional), and `limit` (optional, `1`–`100`, default `30`).
+
+Response — `200`:
+
+```json
+{
+    "items": [
+        {
+            "asset": {
+                "type": "chat_media",
+                "agentId": "a9b8c7d6e5f4g3h2i1j0k9l8",
+                "toolCallId": "k8j7h6g5f4d3s2a1q0w9e8r7",
+                "index": 0
+            },
+            "kind": "image",
+            "name": "login-fixed.png",
+            "width": 1440,
+            "height": 900,
+            "scale": 2,
+            "thumbhash": "3PcNNYSFeXh/d3eld0iHZoZgVwh2",
+            "createdAt": 1755300000000
+        }
+    ],
+    "nextCursor": null
+}
+```
+
+Items are the images and videos the conversation's completed tool calls presented, followed by
+the image and video files of artifacts it presented, newest first, each once. Artifact items carry
+an `artifact_file` asset pinned to the version that was presented. A client shows each item with
+its existing media URL. `404` when the caller may not read the conversation.
+
+### `GET /v0/stories/:storyId`
+
+Response — `200`: `{ "story": { ... } }`.
+
+### `PATCH /v0/stories/:storyId`
+
+Edits a draft or a posted story. Requires `If-Match` with the story's current `version`. Only the
+author may edit; anyone else receives `403 forbidden`.
+
+Request — any of:
+
+```json
+{
+    "caption": "Login redirect loop: fixed.",
+    "frames": [
+        /* the whole new frame list, as for POST */
+    ],
+    "mutationId": "..."
+}
+```
+
+`frames`, when present, replaces the whole list. A frame that keeps its `id` and gives neither
+`upload` nor `asset` keeps the media it had, so reordering frames and editing overlays never sends
+media again. A frame `id` that is new must carry `upload` or `asset`.
+
+Editing never changes `status`: a draft stays a draft until it is posted, and a posted story keeps
+its `postedAt` and `expiresAt`. A change makes a new artifact version and answers
+`200 { "story": { ... } }`, with `story.updated` after commit. A request that changes nothing
+makes no version and emits nothing. A stale `If-Match` is `409 conflict` with `currentVersion` and
+the current `story`. Editing a deleted story is `409 conflict`.
+
+### `POST /v0/stories/:storyId/post`
+
+Posts a draft. Only the author may post; anyone else, including the agent that drafted it,
+receives `403 forbidden`. No tool posts a story.
+
+Request:
+
+```json
+{ "artifactVersion": 3, "mutationId": "..." }
+```
+
+`artifactVersion` is the version the person was looking at when they pressed Post. When it is not
+the story's latest version, the post is `409 conflict` with the current `story`, so a person never
+posts a version they have not seen; the client shows the latest version and the person presses
+Post again.
+
+Posting sets `status` to `"posted"`, `postedAt` to now, and `expiresAt` to 24 hours later, and
+answers `200 { "story": { ... } }`, with `story.posted` after commit. Posting a story that is
+already posted answers `200` with it unchanged and emits nothing. Posting a deleted story is
+`409 conflict`. A draft with no available frame is `409 conflict`, and the message says the media
+is no longer available.
+
+### `POST /v0/stories/:storyId/delete`
+
+Deletes a draft or a posted story. Requires `If-Match`. Only the author may delete. The body is
+`{}` or `{ "mutationId": "..." }`.
+
+The story becomes a `"deleted"` tombstone: it leaves the feed and every other reader, and its
+frames are no longer served. The author can still read the tombstone. Response — `200`:
+`{ "story": { ... } }`, with `story.deleted` after commit. Deleting a deleted story answers `200`
+and emits nothing.
+
+### `POST /v0/stories/:storyId/seen`
+
+Records that the caller has seen this posted story and every earlier story by the same author.
+The client calls it as soon as it shows a story's first frame, not at its end. The body is `{}`.
+
+Seen state is one mark per viewer and author, the newest story of that author the viewer has
+seen, by `postedAt`. A call naming a story older than the mark changes nothing. Response — `200`:
+`{ "story": { ... } }` from the caller's view, with `story.seen` to the caller's own connections
+after commit, so their other devices update the ring. An author's own stories are always seen.
+Marking a draft is `409 conflict`.
+
+### `GET /v0/stories/:storyId/frames/:frameId`
+
+The bytes of one frame, served from the asset it names. The response follows
+`GET /v0/agents/:agentId/tool-calls/:toolCallId/media/:index` exactly: the file itself with its
+media type and size, a content-digest `ETag` honouring `If-None-Match`,
+`Cache-Control: private, max-age=31536000, immutable` and `Vary: Authorization`,
+`Content-Disposition: inline`, `X-Content-Type-Options: nosniff`, the sandboxing
+`Content-Security-Policy`, and single byte ranges for video.
+
+`404` when the caller may not read the story, when the story is deleted, when it has no such
+frame, or when the frame is not available. Because a frame's asset never changes, neither does the
+response for one URL; replacing a frame's media gives it a new frame ID.
+
+### The inline draft
+
+`draft_story` presents the story it makes or revises with an `artifact` presentation and
+`shows: "latest"`:
+
+```json
+{
+    "type": "artifact",
+    "artifactId": "s7k2m9q4w1e5t8y3u6i0o2p5",
+    "version": 1,
+    "artifactType": "story",
+    "title": "Login redirect loop: fixed.",
+    "shows": "latest"
+}
+```
+
+A client shows a `story` artifact inline as a story drawn from the story object with the same
+components as the full-screen viewer, on its 9:16 canvas, never as raw HTML and
+never as a tool call. It reads the story with `GET /v0/stories/:storyId` and follows it live
+through `story.*` events.
+
+While the story is a draft and the viewer is its author, two plain text buttons sit beside it:
+
+- **Post** — posts the version shown, with `POST /v0/stories/:storyId/post`.
+- **Edit** — opens the story editor on the draft. Saving sends `PATCH` and keeps it a draft; the
+  inline story follows the new version, and Post is still needed.
+
+Anyone else who reads the conversation sees the draft without buttons, labelled "Draft". Once
+posted, the inline story shows its final version labelled "Posted", and opening it opens the
+viewer. Once deleted, it shows "This story was deleted".
+
+### "Post it": `draft_story`
+
+`draft_story` is a fixed common tool, offered to every ordinary agent conversation whose person has
+Stories on and to no other.
+
+| Argument      | Meaning                                                                                                                     |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `frames`      | Optional, one to ten `{ "toolCallId", "index" }` or `{ "artifactId", "version", "path" }` from this conversation, in order. |
+| `caption`     | Optional, at most 1,024 characters.                                                                                         |
+| `overlays`    | Optional, per frame position: `text`, `link`, `sticker`, and `emoji` overlays, as above.                                    |
+| `storyId`     | Optional. A draft this call already made in this conversation, to revise.                                                   |
+| `baseVersion` | Required with `storyId`: the `artifactVersion` the revision is made against.                                                |
+
+The tool's description tells the model that "post it" and similar requests mean making a draft for
+the person to post, not posting; to choose the one or two images or videos that best show the
+outcome the person cares about, preferring the final result over intermediate attempts; and to
+write a short caption in the person's words, without inventing results.
+
+Without `frames`, the daemon chooses: the latest one or two images or videos this conversation
+presented, newest last, preferring images the agent presented with `present_files` or generated
+over images it only read. A frame named in `frames` must have been presented in this conversation;
+any other is refused, and so is a conversation with nothing to choose from. The author is the
+conversation's person, and `createdBy` the agent.
+
+A revision makes a new version of the draft when nobody has changed it since `baseVersion`. If the
+person edited the draft after that version, the call fails and says so, and the agent reads the
+story again before trying once more; the person's edits always win. A story that is posted or
+deleted cannot be revised. A call is keyed by its tool call, so it makes nothing a second time
+after a restart.
+
+The call presents the story inline (see "The inline draft") and returns its story ID and
+`artifactVersion`, not a reference tag, so the agent does not show it twice. It needs no review in
+Auto, because a draft is visible only to its author and nothing is posted; it is refused in Read
+only.
+
+### `GET /v0/stories/feed`
+
+Everything a client needs to draw the stories row: one circle per author, in rank order, with the
+caller's own circle always first.
+
+Response — `200`:
+
+```json
+{
+    "authors": [
+        {
+            "userId": "u1x2y3z4a5b6c7d8e9f0g1h2",
+            "name": "Kirill Dubovitskiy",
+            "photo": "/v0/users/u1x2y3z4a5b6c7d8e9f0g1h2/photo",
+            "thumbhash": "1QcSHQRnh493V4dIh4eXh1h4kJUI",
+            "isSelf": true,
+            "storyIds": ["s7k2m9q4w1e5t8y3u6i0o2p5"],
+            "unseenCount": 0,
+            "draftCount": 1,
+            "latestPostedAt": 1755300000000
+        },
+        {
+            "userId": "u9z8y7x6w5v4u3t2s1r0q9p8",
+            "name": "Steve Korshakov",
+            "photo": "/v0/users/u9z8y7x6w5v4u3t2s1r0q9p8/photo",
+            "thumbhash": null,
+            "isSelf": false,
+            "storyIds": ["s1q2w3e4r5t6y7u8i9o0p1a2", "s3d4f5g6h7j8k9l0z1x2c3v4"],
+            "unseenCount": 1,
+            "draftCount": null,
+            "latestPostedAt": 1755400000000
+        }
+    ],
+    "stories": {
+        "s7k2m9q4w1e5t8y3u6i0o2p5": {
+            /* story object */
+        }
+    },
+    "cursor": "01991f3a-..."
+}
+```
+
+- `authors` — in the order the row shows them. The first is always the caller, with
+  `isSelf: true`, even when they have no story: that circle is "My Story", with a "+" badge at its
+  bottom right. The others are the authors with at least one posted, unexpired story that has an
+  available frame, in rank order (see "Ranking").
+- `userId` — the author's Happy user ID, or `null` for the one person in standalone mode.
+- `name` — the author's current name.
+- `photo` — a daemon-relative path to the author's photo, read with the same bearer token
+  (`/v0/profile/photo` for the standalone person), or `null` when they have none; `thumbhash` is
+  its placeholder. Without a photo, clients draw the author's initials.
+- `storyIds` — the author's posted, unexpired stories in viewing order, oldest first. Empty only
+  for the caller's own circle when they have none.
+- `unseenCount` — how many of `storyIds` the caller has not seen. Always `0` on the caller's own
+  circle.
+- `draftCount` — on the caller's own circle, how many drafts they have; `null` on every other.
+- `latestPostedAt` — when the author's newest story in `storyIds` was posted, or `null`.
+- `stories` — every story `storyIds` names, from the caller's view, keyed by ID.
+- `cursor` — the event cursor this read is current at; follow `story.*` events from it.
+
+How the row behaves, the same in every client:
+
+- Each circle is the author's avatar, with their first name beneath it; the caller's reads
+  "My Story".
+- A circle with `unseenCount > 0` has a coloured ring; one with none unseen has a thin grey ring.
+  The caller's own circle has a ring only when they have a story.
+- Tapping another author's circle opens the full-screen viewer on that author's first unseen story,
+  or on their first story when all are seen. The viewer plays each story's frames in turn, then
+  the author's next story, then the next author in the row, swiping sideways between authors
+  with a cube turn. Its controls are described under "Overlays".
+- On the caller's own circle, tapping "+" opens the editor on a new draft. Tapping the circle opens
+  the editor too when they have no story, and otherwise the viewer on their own stories, which
+  shows each story's `viewCount` at the bottom. A client that shows `draftCount` offers the drafts
+  in the editor.
+- When the viewer shows a story, the client calls `POST /v0/stories/:storyId/seen`.
+
+### Ranking
+
+Ranking is computed per viewer on every feed read, without inference, from data the daemon
+already holds. Authors are ordered in three groups: first the caller; then authors with at least
+one unseen story; then authors whose stories are all seen. Within a group, authors are ordered by
+importance, then by `latestPostedAt`, newest first.
+
+An author's importance to the viewer is the highest importance among the author's stories in the
+feed. A story's importance adds up:
+
+- **Closeness of its work** — the story's source conversation is one the viewer takes part in: the
+  task's or Surface's conversation the viewer joined, or a row shown in the viewer's sidebar.
+  Stories made by hand have no source and get nothing here.
+- **Closeness of its author** — how much the viewer works with the author over the last 14 days:
+  tasks both joined, Surfaces both are members of, and conversations both wrote in.
+- **Interest** — of the author's stories posted in the last 14 days, the share the viewer has
+  seen.
+- **Freshness** — halves every six hours since `postedAt`.
+
+The weights are the daemon's and may change; clients use the order they are given and never sort
+again. In standalone mode the row is the caller's circle alone.
+
+### Events
+
+All `story.*` events are journaled, follow the version-chain rules, and reach only the
+connections of people who may read the story as it is after the change.
+
+- `story.created` — a new story, in full. Only drafts are created, so it reaches the author only.
+- `story.updated` — `storyId`, `previousVersion`, `version`, the whole `story`, and optional
+  `mutationId`.
+- `story.posted` — the whole `story`. It reaches every member of its audience, who reads the feed
+  again or inserts the story into the author's circle.
+- `story.deleted` — `storyId` and `version`. It reaches everyone who could read the story before
+  it was deleted.
+- `story.seen` — `authorUserId` and `storyId`, the viewer's new mark for that author. It reaches
+  only the person who saw it. The author's `viewCount` changes without an event; the author's
+  client reads the story again when it shows the count.
+
+A story that expires emits nothing: clients drop it when its `expiresAt` passes, and the next feed
+read leaves it out.
+
+### Haptics
+
+Clients play the same haptic feedback at the same moments, so stories feel the same everywhere. On
+iOS they use the system feedback named below. On desktop they play the closest feedback where the
+hardware supports it, such as a Force Touch trackpad on a Mac, and otherwise play nothing. The
+daemon never plays haptics.
+
+| Moment          | When                                                                     | iOS feedback         |
+| --------------- | ------------------------------------------------------------------------ | -------------------- |
+| `story.open`    | The viewer opens from a circle or an inline story.                       | Light impact         |
+| `story.advance` | The viewer moves to another frame, story, or author.                     | Selection changed    |
+| `story.post`    | `POST /v0/stories/:storyId/post` answers `200`, not when Post is tapped. | Success notification |
+| `story.delete`  | A confirmed deletion answers `200`.                                      | Warning notification |
+| `sticker.drop`  | A sticker or emoji lands on a frame from the picker.                     | Medium impact        |
+| `overlay.snap`  | A dragged overlay snaps to a guide, once each time (see below).          | Rigid impact, light  |
+| `overlay.trash` | A dragged overlay reaches the delete target.                             | Heavy impact         |
+
+A refused post or deletion plays the error notification instead.
+
+The editor's guides are the canvas's vertical and horizontal centre lines and, for stickers, lines
+inset 1/20 of the canvas's width from each edge. A dragged overlay's centre snaps to a guide within
+2% of the canvas's width, and its rotation snaps to multiples of 45° within about 2°; it stays held
+until the drag moves past twice that distance, and a client shows the guide line while it holds.
+
+## Stickers
+
+The daemon serves a catalog of sticker packs for the story editor's picker, and each person's
+recently used stickers. Story overlays name a sticker by its pack ID and sticker ID.
+
+**Packs live outside the agent.** The daemon ships no packs and no sticker files: nothing from a
+pack is in the package, the binary, or the installer. It serves whatever packs its sticker folder
+holds, `<agent home>/stickers`, which configuration owns. Each pack is one folder named by its ID,
+holding a `pack.json` manifest and the pack's files; an optional `order.json` at the top of the
+folder lists pack IDs in the order the picker shows them, and packs it leaves out follow in title
+order. The daemon reads the folder at startup and when it changes. A pack whose manifest does not
+validate, or whose files do not match their size and digest, is left out. How packs get into the
+folder is outside the API.
+
+Stickers are part of Stories and follow its setting: for a person with Stories off, every route
+under `/v0/stickers` answers `404 not_found`.
+
+### The picker
+
+Clients draw the picker the same way, as Telegram draws its sticker panel:
+
+- A search field at the top. Typing searches with `q`; an emoji category chip under it searches
+  with `emoji`. While a search is active, its results replace the scroll below as one grid.
+- Below it, one continuous vertical scroll. It starts with a **Recently used** section, when the
+  person has recents, with a ✕ that clears them. Then every pack follows in catalog order, each
+  under a centred, uppercase header of its `title`, with its stickers in a grid beneath.
+- The grid has `max(5, floor((width + spacing) / (70 + spacing)))` columns for packs of kind
+  `"stickers"` and the recents, and `max(8, floor((width + spacing) / (40 + spacing)))` for packs
+  of kind `"emoji"`, where `width` is the grid's width in points and `spacing` the gap between
+  cells; cells are square and stickers are fitted inside them.
+- A floating switch at the bottom selects **Stickers** or **Emoji**. Stickers shows packs of kind
+  `"stickers"`; Emoji shows the system emoji by category, for `emoji` overlays, followed by packs
+  of kind `"emoji"`.
+- Tapping a sticker places it at the centre of the frame, plays `sticker.drop`, and records it
+  with `POST /v0/stickers/recents`. Pressing and holding shows it large.
+
+Animated stickers play in the grid while visible and stop when scrolled away. A `tgs` sticker is a
+Lottie animation; clients play it with a Lottie renderer, reading `?as=lottie` when theirs cannot
+read gzip. A `webm` sticker is a VP9 video with an alpha channel; clients that cannot decode VP9
+with alpha through the platform, iOS among them, decode it in software.
+
+### The pack object
+
+```json
+{
+    "id": "utyaduck",
+    "title": "Duck",
+    "kind": "stickers",
+    "thumbnail": "AgAD8gADVp29Cg",
+    "stickerCount": 40,
+    "version": "a34d668493927d74"
+}
+```
+
+- `id` — the pack folder's name: 1–64 characters from `a–z`, `0–9`, `_`, and `-`.
+- `title` — the pack's name, shown uppercase as its header.
+- `kind` — `"stickers"`, shown large in the Stickers tab, or `"emoji"`, custom emoji shown at text
+  size in the Emoji tab.
+- `thumbnail` — the ID of the sticker that stands for the pack.
+- `stickerCount` — how many stickers it holds.
+- `version` — an opaque string that changes whenever the pack's manifest changes.
+
+### The sticker object
+
+```json
+{
+    "packId": "utyaduck",
+    "id": "AgAD8gADVp29Cg",
+    "emoji": ["😂"],
+    "format": "tgs",
+    "width": 512,
+    "height": 512,
+    "size": 5272,
+    "sha256": "a34d668493927d74a2b2032a496f7e31f77d47c2e6f3a4e568933950d293e206"
+}
+```
+
+- `id` — 1–128 characters from `A–Z`, `a–z`, `0–9`, `_`, and `-`, unique within its pack.
+- `emoji` — the emoji the sticker stands for, possibly none; search and the category chips match
+  them.
+- `format` — `"webp"` for a still image, `"tgs"` for a gzip-compressed Lottie animation, or
+  `"webm"` for a VP9 video with transparency. Animated stickers loop.
+- `width`, `height` — its size in pixels, at most 512 on the longer side.
+- `size`, `sha256` — its file's length and digest.
+
+### `GET /v0/stickers/packs`
+
+Every pack in the folder, in catalog order. Response — `200`:
+`{ "packs": [ /* pack objects */ ] }`.
+
+### `GET /v0/stickers/packs/:packId`
+
+Response — `200`: `{ "pack": { ... }, "stickers": [ /* sticker objects, in pack order */ ] }`.
+`404` for an unknown pack.
+
+### `GET /v0/stickers/packs/:packId/stickers/:stickerId/file`
+
+The sticker's file, with the same caching, `ETag`, `nosniff`, and sandboxing headers as frame
+media. `Content-Type` is `image/webp`, `application/x-tgsticker`, or `video/webm`. With
+`?as=lottie`, a `tgs` sticker is served as its uncompressed Lottie JSON, `application/json`; the
+daemon decompresses it on the first request and keeps the result in its cache. Other formats ignore
+`as`. `404` for an unknown pack or sticker.
+
+### `GET /v0/stickers/search`
+
+Query parameters: `q` (optional, 1–64 characters), `emoji` (optional, one emoji), `kind`
+(optional, `stickers` or `emoji`, default `stickers`), and `limit` (optional, `1`–`200`, default
+`100`). One of `q` and `emoji` is required.
+
+Response — `200`: `{ "stickers": [ /* sticker objects */ ] }`. `emoji`, or a `q` that is one emoji,
+matches stickers tagged with that emoji, ignoring skin tone and variation selectors. Any other `q`
+matches the stickers of packs whose title has a word starting with it, ignoring case. Results come
+in catalog order, the person's recents first.
+
+### `GET /v0/stickers/recents`
+
+Response — `200`:
+`{ "recents": [{ "packId": "utyaduck", "stickerId": "AgAD8gADVp29Cg" }], "cursor": "01991f3a-..." }`.
+
+At most 20 stickers the person used, most recent first. Posting a story records every sticker on
+it. A sticker whose pack is no longer in the folder stays in the list; clients leave it out.
+Follow `sticker_recents.updated` from `cursor`. Recents belong to each person: the authenticated
+member in team mode, and the installation's one person in standalone mode.
+
+### `POST /v0/stickers/recents`
+
+`{ "packId": "...", "stickerId": "...", "mutationId": "..." }` moves the sticker to the front of
+the caller's recents, dropping the oldest beyond 20. An unknown sticker is `404`. Response — `200`
+with the list as from `GET`.
+
+### `DELETE /v0/stickers/recents`
+
+Clears the caller's recents, for the ✕ beside Recently used. The body is `{}` or
+`{ "mutationId": "..." }`. Response — `200` with the empty list.
+
+Every change emits `sticker_recents.updated` to that person's connections only, carrying
+`recents` and optional `mutationId`.
 
 ## Live voice sessions
 
@@ -12638,6 +13441,24 @@ version rules. Snapshot-to-stream cursor and version-gap recovery rules remain u
   owner. A write ignored as stale emits nothing.
     - `setting` (the complete setting object; `value` is `null` for a clear).
     - `mutationId` — echoed when the write supplied one.
+
+**Stories**
+
+- `story.created` — the person made a draft. Only its author receives it.
+    - `story` (the full story object), `mutationId`.
+- `story.updated` — a story's content changed. It reaches those who may read the story.
+    - `storyId`, `previousVersion`, `version`, `story` (the full story object), `mutationId`.
+- `story.posted` — a draft was posted. It reaches the story's audience.
+    - `story` (the full story object), `mutationId`.
+- `story.deleted` — a story became a tombstone. It reaches everyone who could read it before.
+    - `storyId`, `version`, `mutationId`.
+- `story.seen` — the person's seen mark for an author moved. Only that person receives it.
+    - `authorUserId`, `storyId`.
+- `sticker_recents.updated` — the person's recently used stickers changed. Only that person
+  receives it. It is a complete replacement of the list.
+    - `recents`, `mutationId`.
+
+For a person with Stories off, none of these is delivered.
 
 The set grows with the product; clients skip event types they do not recognize.
 
