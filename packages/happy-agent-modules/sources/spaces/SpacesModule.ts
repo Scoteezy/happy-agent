@@ -9,6 +9,7 @@ import {
     type AgentSystemRef,
     type AnyAgentTool,
 } from "@slopus/happy-agent-base";
+import type { SessionReasoningEffort, SessionServiceTier } from "@slopus/happy-providers";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import {
@@ -26,6 +27,7 @@ import {
     diffSpaceSidebar,
     formatSpaceSidebar,
     locateSpaceSidebarNode,
+    messageModeSchema,
     SpaceSidebarError,
     SpaceSidebarOperationError,
     type SpaceSidebarDocument,
@@ -3520,8 +3522,6 @@ export class SpacesModule implements AgentModule {
                 return;
             const prioritizingAgentId = await this.#livePrioritizing(ctx, ownerUserId);
             if (prioritizingAgentId === undefined) return;
-            // A notice names no model: Prioritizing keeps running on its own mode, the default
-            // model it was made with until the person chooses another for it.
             await this.#requireAgents().send(
                 ctx,
                 prioritizingAgentId,
@@ -3529,10 +3529,36 @@ export class SpacesModule implements AgentModule {
                 {
                     id: messageId,
                     metadata: { ...AGENT_MESSAGE_ORIGIN_METADATA },
+                    ...(await this.#reportedMode(ctx, prioritizingAgentId)),
                     permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
                 },
             );
         });
+    }
+
+    /**
+     * The mode Prioritizing reports, the one the person last chose in its conversation, while this
+     * installation still offers it. A notice runs on it, so neither a notice nor an earlier daemon's
+     * notice moves Prioritizing off it. Without one, a notice names no model and Prioritizing stays
+     * on what it was made with.
+     */
+    async #reportedMode(ctx: Context, agentId: string) {
+        const mode = (await this.#requireAgents().config(ctx, agentId))?.metadata?.["lastMode"];
+        if (!Value.Check(messageModeSchema, mode)) return {};
+        const model = this.#config.models.find(
+            (candidate) =>
+                candidate.providerId === mode.providerId && candidate.id === mode.modelId,
+        );
+        const effort = mode.effort as SessionReasoningEffort;
+        if (model === undefined || !model.effortLevels.includes(effort)) return {};
+        return {
+            provider: model.providerId,
+            model: model.id,
+            effort,
+            ...(mode.serviceTier === null || model.serviceTiers?.includes(mode.serviceTier) === true
+                ? { serviceTier: mode.serviceTier as SessionServiceTier | null }
+                : {}),
+        };
     }
 
     /** The person's Prioritizing, unless they have none yet or archived it. */

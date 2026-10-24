@@ -342,8 +342,12 @@ route; it writes names with the chat's own model (see the Titles learnings).
 
 That default is only what a new Prioritizing is made on. Every notice also named the current default
 model, so on Kirill's install, where Opus 5.5 had been chosen in Prioritizing's own conversation and
-its mode reported it, every wake ran on the Settings default (GPT-5.6 Sol) instead. Notices now name
-no model, so Prioritizing runs on the mode it reports.
+its mode reported it, every wake ran on the Settings default (GPT-5.6 Sol) instead. Dropping the
+model from notices was not enough: a message without one keeps the model of the last message that
+named one, and that was the old daemon's last notice, so after the update the notice wakes still ran
+on GPT-5.6 Sol until Kirill wrote in the chat. The mode an agent reports is its `lastMode`, which
+only the person's messages set. Each notice now carries that mode while it is still offered, and
+names no model only when there is none.
 
 ## Clients report nothing about what the person sees
 

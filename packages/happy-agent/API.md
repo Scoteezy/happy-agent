@@ -10237,8 +10237,9 @@ left out, and the answer ends with one line naming each of them by its heading, 
 `set_space_icon` takes a
 space ID or a session's agent ID.
 A new Prioritizing is made on the person's default model from Settings at that model's default
-effort. After that it runs on its own mode, as `GET /v0/agents/:agentId/mode` reports it: its notices
-name no model, so a model or effort the person chooses in its conversation stays. It
+effort. After that it runs on its own mode, as `GET /v0/agents/:agentId/mode` reports it: each notice
+carries that mode while the installation still offers it, so a model or effort the person chooses
+in its conversation stays. It
 gives every session an icon but leaves sessions out of the document unless the person is likely to
 want one shown, such as a session changing code in a repository or one waiting for their review.
 It may propose a widget, rarely, where a compact card says more than a row. It may attach a
