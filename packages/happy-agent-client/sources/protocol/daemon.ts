@@ -94,6 +94,11 @@ export const healthResponseSchema = Type.Object({
              * announces each version with `space.sidebar.changed`.
              */
             sidebarOperations: Type.Optional(Type.Boolean()),
+            /**
+             * True when a nested sidebar `happy-space` may name one of the person's spaces, an
+             * attachment, and conversations may attach to their row with `attach_to_my_row`.
+             */
+            sidebarAttachments: Type.Optional(Type.Boolean()),
         }),
     ),
     /** Always `true`; a daemon that cannot answer does not answer. */

@@ -128,7 +128,7 @@ describe("spaces protocol", () => {
                 ready: true,
                 status: "ready",
                 version: { protocol: 32, daemon: "1.0.0" },
-                capabilities: { stemCellIdentities: true },
+                capabilities: { stemCellIdentities: true, sidebarAttachments: true },
             }),
         ).toBe(true);
         expect(Value.Check(updateSpaceRequestSchema, { sectionId: null, afterId: null })).toBe(

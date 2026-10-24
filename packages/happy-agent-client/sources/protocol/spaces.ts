@@ -224,8 +224,9 @@ export const spaceSidebarLabelSchema = Type.String({
 export const spaceSidebarWidgetHtmlSchema = Type.String({ maxLength: 16 * 1024 });
 
 /**
- * A row (top level, by space ID) or a session nested under one (by agent ID). `expanded` draws its
- * nested sessions.
+ * A row (top level, by space ID), or nested under a row or session either a session of that
+ * conversation (by agent ID) or an attachment: another of the person's spaces (by space ID), which
+ * then stands only there. `expanded` draws what is nested.
  */
 export const spaceSidebarSpaceNodeSchema = Type.Recursive((Self) =>
     Type.Object({

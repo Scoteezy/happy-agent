@@ -342,6 +342,12 @@ and the `space.sidebar.changed` event reports `capabilities.sidebarOperations: t
 Older daemons omit it; clients then write whole documents with `PUT /v0/spaces/sidebar`, which
 keeps its contract. Without `widgets=true` the document read leaves widgets out, so clients that
 predate them never meet one.
+Sidebar attachments are additive on the same terms. A daemon that accepts a nested `happy-space`
+naming one of the person's spaces, and offers `attach_to_my_row`, reports
+`capabilities.sidebarAttachments: true` from health. Older daemons omit it and refuse such a write
+with `400 invalid_request`; clients then offer no attaching. A client that predates attachments
+may meet a nested space ID that is not a session; it should draw it as the row that space ID names,
+or leave it out.
 
 Surfaces are additive and do not increment the protocol version. Clients detect them through
 `GET /v0/surfaces`: `404` or `501` means Surface support is unavailable. The desktop bootstrap
@@ -1114,7 +1120,8 @@ Fields:
   Surface catalog and members. `stemCellIdentities: true` advertises client-supplied `taskId`,
   `workspaceId`, and `agentId` on `POST /v0/spaces/stem-cells`, described under Spaces.
   `sidebarOperations: true` advertises `POST /v0/spaces/sidebar/operations`, sidebar widgets, and
-  `space.sidebar.changed`, described under Spaces.
+  `space.sidebar.changed`, described under Spaces. `sidebarAttachments: true` advertises spaces
+  attached under rows and the `attach_to_my_row` tool, described under Spaces.
 - `ready` — `false` while starting, `true` once the agent system is loaded.
 - `status` — `"starting"` or `"ready"`; the human-readable form of `ready`.
 - `version` — one identity object. `protocol` is the wire protocol number, the client's
@@ -9726,8 +9733,8 @@ in team mode every route answers with the authenticated member's sidebar only, a
 events reach only that member's connections. Rows and sections are created by the daemon: the
 first read makes a row for Happy, first in the list, and one row for every other active bot, joined
 task, and joined Surface supported by Spaces that the person already has. Todo, document, and
-calendar Surfaces wait until they contain content; other supported kinds, including references,
-are seeded on membership alone. New work gets a row when it appears; archived or left work loses it.
+calendar Surfaces wait until they contain content, unless attached under a row; other supported
+kinds, including chats and references, are seeded on membership alone. New work gets a row when it appears; archived or left work loses it.
 
 **Prioritizing.** Organisation belongs to Prioritizing, an ordinary subtask of Happy that runs
 on the person's default model. It is enabled only when that person's opaque user setting
@@ -9914,9 +9921,11 @@ moved by the person anywhere in that list:
   attribute other than `id`; it ends the run of the section above it.
 - `<happy-space id="…" expanded="true" fold-ribbon="hover|always">` — a row. A `happy-space` that
   is a direct child of `nav` names one of the person's spaces by space ID. A `happy-space` may
-  contain only `happy-space` elements; a nested one names a session by agent ID, and that agent's
+  contain only `happy-space` elements. A nested one names either a session by agent ID, whose
   parent must be the conversation of the enclosing node (the row's `target.agentId`, or the
-  enclosing session). `expanded="true"` shows the nested sessions; otherwise they are folded.
+  enclosing session), or an attachment: another of the person's spaces by space ID, such as a
+  todo list, document, calendar, or chat Surface, or another task or bot row (see Attachments
+  below). `expanded="true"` shows what is nested; otherwise it is folded.
 - `<happy-widget id="…">…</happy-widget>` — a free-form card, the escape hatch for something the
   other items cannot say, such as a compact status card. Its content is arbitrary HTML: everything
   between the opening tag and the first `</happy-widget>`, kept exactly as written, at most 16 KiB
@@ -9935,8 +9944,8 @@ moved by the person anywhere in that list:
 
 Boolean switches are written `"true"` or `"false"`; an absent switch is false. Attribute values are
 always quoted; empty elements may be self-closing. Outside widget content, text, comments, other
-elements, other attributes, duplicate IDs, unknown space IDs, and nested IDs that are not sessions
-of their parent are rejected, so HTML and XML parsers read the same skeleton. Spaces and sessions
+elements, other attributes, duplicate IDs, unknown space IDs, and nested IDs that are neither
+sessions of their parent nor the person's spaces are rejected, so HTML and XML parsers read the same skeleton. Spaces and sessions
 absent from the document are not shown. Clients draw every element other than a widget's content
 with trusted components; worktrees are drawn under the node whose agent works in them, and hidden
 while that node is folded.
@@ -9957,6 +9966,35 @@ daemon read, write, and apply the document identically.
 
 Validation runs on every artifact write, including ordinary artifact tools. Rejection preserves the
 last valid version and returns diagnostics `[{message, offset}]` (zero-based character offset).
+
+**Attachments.** A space stands in exactly one place, because IDs are unique: at the top level, or
+attached under one row or session. Attaching a space moves it there (`move` with
+`{ "parent": "ID" }` or after a node nested there), or inserts it there when the document does not
+hold it; a space never appears twice. An attachment carries its own sessions nested under it, as a
+top-level row does. A session is never attached: it stands only under the conversation that is its
+parent, so moving or inserting it under any other row or session is refused like any other
+document rule.
+
+- Taking an attachment out with `remove` — the person's or Prioritizing's, including a
+  whole-document write that leaves it out — keeps it in the sidebar: it moves to the top level
+  immediately after the top-level row that held it, and the operations applied and announced show
+  that `move` instead of the `remove`. A client that takes an attachment out sends that move
+  itself, so its optimistic document matches.
+- When the attached space itself leaves (archived, or the person leaves its Surface), it is removed
+  wherever it stands, as today.
+- When the row or session holding attachments is archived or left, its attachments first move to
+  the top level immediately after it, in their order, and it is then removed with its sessions.
+- A todo, document, or calendar Surface row that was attached stays in the sidebar while it holds
+  no content, until the person leaves that Surface. A chat Surface has a row while the person is a
+  member, like a reference.
+
+Revealing a row's sessions is an ordinary batch: a client inserts each of the row's sessions that
+the document does not hold under the row (`insert` of `{ "type": "space", "id": AGENT_ID }` with
+`{ "parent": ROW_ID }` for the first and `{ "after": PREVIOUS_ID }` for the rest) and sets
+`expanded: true` on the row. A row's sessions are its agent's `subtasks` and collaborators, as
+under "Task trees". The person's reveal records them as the sessions' place and the row's fold, so
+Prioritizing never takes those sessions out of the document, folds the row, or folds a section over
+them.
 
 **First document.** The first document mirrors the person's classic sidebar: Search, Create,
 Happy's row, the joined Surfaces in member order, `<happy-separator id="divider"/>`, then the
@@ -10108,8 +10146,8 @@ work — record no author, and a node they remove takes its authorship with it. 
 records its heading only: the items in its block are carried and keep their own authorship.
 
 Prioritizing never overrides the person: an operation of Prioritizing's that would change an aspect
-the person last set is dropped, as is one that breaks Prioritizing's other rules below, and the rest
-of its batch still applies. Each dropped operation is reported to Prioritizing in a note. The
+the person last set, or would hide a session whose place the person last set, is dropped, as is one
+that breaks Prioritizing's other rules below, and the rest of its batch still applies. Each dropped operation is reported to Prioritizing in a note. The
 person's operations are never dropped.
 
 #### Changes and events
@@ -10159,9 +10197,38 @@ the person's messages, messages from other agents (such as a subtask's task or r
 agent's text replies, newest first, without tool calls or reasoning, bounded to 40 messages
 (default 12) and about 16,000 characters. `set_space_icon` takes a space ID or a session's agent ID.
 Prioritizing runs on the person's default model from Settings at that model's default effort. It
-gives every session an icon but leaves sessions out of the document unless there is a strong reason
-to show one, such as a session waiting on the person. It may add and update widgets, rarely, where a
-compact card says more than a row.
+gives every session an icon but leaves sessions out of the document unless the person is likely to
+want one shown, such as a session changing code in a repository or one waiting for their review.
+It may add and update widgets, rarely, where a compact card says more than a row. It may attach a
+Surface under the work it belongs to when the person's messages clearly tie them together, by
+nesting that Surface's row.
+
+#### Attaching from a conversation
+
+`attach_to_my_row` lets a conversation put something under its own row, for example when the person
+asks it to "make me a todo list for this". It is offered only to a conversation that has a row in
+the sidebar of a person whose Stem Cells setting is enabled, or to a session under such a row;
+every other conversation, including every conversation of a person without Stem Cells, is offered
+nothing new. Its arguments are exactly one of:
+
+- `spaceId` — one of that person's rows, such as another task or an existing Surface's row;
+- `surfaceId` — an existing Surface of type `todo`, `document`, `calendar`, or `chat`; its row is
+  made when the person has none;
+- `create: { kind, name }` — a new Surface, `kind` one of `"todo"`, `"document"`, `"calendar"`, or
+  `"chat"`, made as `POST /v0/surfaces` makes it with the person as creator (`null` in standalone
+  mode), so the person joins it. In team mode the other members join it by their own
+  `surfaces.autoJoin` preference; people outside the installation cannot be invited, so a chat with
+  someone else is a chat Surface they are a member of.
+
+It attaches the space under the calling conversation's row (a session's root row), first among
+what is nested there, and sets `expanded: true` on that row unless the person last set its fold.
+The change applies at once as one version authored `prioritizing`, under the same authorship
+rules: it is refused, changing nothing, when it would move a space whose place the person last set,
+Happy, or new work before its first message, or when the calling row is not in the document. Once
+the person moves the attachment, nothing moves it back. The result names the space and, for a
+Surface, its ID and reference tag, so the agent can fill it with the ordinary Surface tools. It is
+durable: a repeated call creates and attaches once. It requires Auto or Full access, because it
+writes shared Surface data, and a call that creates a Surface is reviewed in Auto.
 
 Fold state lives in the document; clients report nothing else about what the person sees.
 Committed manual document changes enter the next calm brief and preserve the person's authority
