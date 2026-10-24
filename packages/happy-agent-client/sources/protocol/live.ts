@@ -66,6 +66,8 @@ export const createLiveSessionRequestSchema = Type.Object(
         desktopCapabilities: Type.Optional(liveDesktopCapabilitiesSchema),
         /** The initial Desktop AppState; valid only with the `appState` capability. */
         appState: Type.Optional(liveAppStateSchema),
+        /** The desktop's connection ID for this daemon; valid only with `agentTargets`. */
+        localConnectionId: Type.Optional(liveDesktopIdSchema),
     },
     { additionalProperties: false },
 );

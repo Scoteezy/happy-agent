@@ -1529,8 +1529,9 @@ Field groups:
     ignored or unusable, such as fast mode on a model without the priority tier or a selected
     model that is no longer enabled. `defaultSystemPrompt` is the built-in voice model prompt, which
     is never persisted; `systemPromptOverride` is the stored replacement or `null`; and
-    `effectiveSystemPrompt` is the prompt a new call uses. The controller's own instructions are
-    fixed and not configurable.
+    `effectiveSystemPrompt` is the prompt a new call uses. The controller is the person's Voice
+    agent (see Live voice sessions); these settings choose the route of its requests in each new
+    call, and its own instructions are fixed and not configurable.
 
     The settings live in the machine configuration's `[voice]` table: `controller_provider`,
     `controller_model`, `controller_effort`, `controller_fast_mode`, and `system_prompt`. Values
@@ -9832,8 +9833,8 @@ of its bot's subtasks the same way; Prioritizing is one of Happy's. Their change
 - `target` — what selecting the row opens. `kind` is `"task"` for nearly every row: new work and
   everything the person does is a task. `"bot"` names a bot's conversation — Happy's row and any
   other bot the person has — and `"surface"` a joined Surface. `"agent"` names a conversation that
-  is neither a task's nor a bot's: Prioritizing's own row, whose `id` and `agentId` are
-  Prioritizing's agent and whose `workspaceId` is Happy's workspace. `id` is that task, bot,
+  is neither a task's nor a bot's: Prioritizing's own row or Voice's own row, whose `id` and
+  `agentId` are that agent and whose `workspaceId` is Happy's workspace. `id` is that task, bot,
   Surface, or agent. `agentId` is the conversation to show and `workspaceId` its
   workspace; both are `null` for a Surface. A client skips a row whose `kind` it does not know.
 - `sectionId` — the section it is in, or `null`.
@@ -10275,6 +10276,19 @@ sidebar; the next Prioritizing gets a row of its own.
 A message the person writes in Prioritizing's conversation is a request in their own words: the
 changes Prioritizing queues while answering it apply as soon as that turn finishes, without the
 limits below.
+
+#### Voice's row
+
+Voice (see Live voice sessions) is another subtask of Happy with a conversation of its own. The
+daemon makes its space when it makes Voice: `target.kind: "agent"`, the icon
+`{ "type": "library", "slug": "ai-agent" }`, the title of Voice's conversation, and
+`placement: "settled"`. With a sidebar document, the daemon inserts it once, authored `daemon`,
+right below Happy, or below Prioritizing's row when that follows Happy; the person may move or
+remove it like any other row, and once they have removed it the daemon never puts it back. The row
+is not work: it never counts toward `visibleRows`, Prioritizing never moves it, and it is never
+briefed as new work. When Voice is archived, its row leaves the sidebar; the next Voice gets a row
+of its own. Voice reads the sidebar but never writes it; its rearrangement requests reach
+Prioritizing as placement requests or as Tidy.
 
 #### What applies without a proposal
 
@@ -12480,12 +12494,27 @@ Every change emits `sticker_recents.updated` to that person's connections only, 
 ## Live voice sessions
 
 GPT-Live controls the initiating desktop window through a fixed set of UI-equivalent actions.
-It is not bound to a coding agent and does not receive that agent's tools. The desktop supplies
-bounded visible context, verifies each action's target and permissions, and executes it through
-its existing UI/state actions. Only public conversation text and task status are shared: no
-coding tools, screen capture, other sessions' audio, private reasoning, or tool logs.
+It is not bound to a coding agent and does not receive that agent's tools. The desktop verifies
+each action's target and permissions and executes it through its existing UI/state actions. Only
+public conversation text is shared: no coding tools, screen capture, other sessions' audio,
+private reasoning, or tool logs. Voice covers only the agents of the daemon serving the call;
+remote connections and peers are never read or acted on.
 
-The text controller runs the machine's voice settings (`config.voice`, see `GET /v0/config`).
+**Voice.** GPT-Live hands every request to the person's Voice agent: one long-running subtask of
+Happy per person, created the first time that person starts a call and kept across calls. Voice is
+an ordinary agent made the same way as Prioritizing (see Spaces): it appears in Happy's `subtasks`,
+is created unreported, has a conversation of its own with its own row in the sidebar, and is
+recognised by an agent ID the daemon stores for the person, not by metadata. When the person
+archives it, the next call creates a new Voice. Voice has a fixed tool array and fixed
+instructions that are not configurable: read-only sidebar tools, a tool that reads the public
+user and assistant text of any conversation on this daemon the person can see, a request to
+Prioritizing for any rearrangement, and every desktop action below for the window of the call it
+is serving, so it can do whatever the person does by clicking. It never edits the sidebar itself.
+Calls in several windows share the person's one Voice and one queue; each request's actions go
+only to the window of the call that made it, and a request the person writes in Voice's
+conversation has no window to act on.
+
+Voice runs the machine's voice settings (`config.voice`, see `GET /v0/config`).
 By default it uses `openai/gpt-6.1-sol` at low effort through the daemon's configured-default
 provider or account pool. The settings may instead name any configured provider, account, or
 account pool, any model that provider offers from any vendor, an effort that model accepts, and
@@ -12493,54 +12522,60 @@ fast mode. Fast mode requests the `priority` service tier only when the selected
 offers it; otherwise it is ignored, and the effective settings say so. The daemon captures the
 selection when the call starts, verifies that the provider is enabled and offers the model and
 effort, resolves one compatible enabled account, and freezes provider, account, model, effort,
-and service tier for the call. Later settings changes affect only new calls. The explicitly
-selected voice credential remains separate. A creation request cannot override this selection. An
-unavailable or incompatible controller route fails with `503 live_unavailable` and a setup
-explanation; the call never silently switches models or accounts. The controller runs through the
-ordinary provider session-with-tools path, with the fixed controller instructions and tool array
-below; its instructions are not configurable.
+and service tier for the call: every request of that call reaches Voice with that exact selection.
+For an account pool it prefers the call's own voice credential account when the pool includes
+it, then an account without a recent sign-in or usage failure. Later settings changes affect only
+new calls. The explicitly selected voice credential remains separate. A creation request cannot
+override this selection. An unavailable or incompatible controller route fails with
+`503 live_unavailable` and a setup explanation; the call never silently switches models or
+accounts. A selection whose model is incompatible with Voice's previous one starts Voice's
+conversation afresh, as any agent's model change does.
 
 The voice model's system prompt is the settings' override when one is stored, otherwise the
 built-in default. It is also captured when the call starts.
 
-Each voice call owns one bounded logical text-controller conversation with only the desktop
-actions below, never the coding-agent runtime. Provider delegations enter a bounded first-in,
-first-out queue; an ordinary follow-up is queued rather than refused as busy. Each request retains
-its original delegation identity and source transcript identities. Its controller turn receives a
-compact projection of the latest accepted desktop context, new attributed transcript fragments,
-and changed selected session snapshots. Every dispatched desktop action uses the current accepted
-context revision. Spoken outcomes use human-readable names rather than internal IDs; ambiguous
-names require clarification.
+Provider delegations enter a bounded first-in, first-out queue per person; an ordinary follow-up
+is queued rather than refused as busy. Voice handles one request at a time: the next request is
+given to it only after the previous one's outcome is delivered, and the desktop has at most one
+outstanding action. Each request retains its original delegation identity and source transcript
+identities. It reaches Voice as one message in Voice's conversation holding the delegation text,
+the call's new attributed user and assistant transcript fragments, and the sidebar outline when it
+changed since Voice last received one. That message is attributed provider context with agent
+origin, never a person's own message, so it is not human authorization. Every dispatched desktop
+action uses the current accepted context revision. Spoken outcomes use human-readable names rather
+than internal IDs; ambiguous names require clarification.
 
-Retained controller history contains only attributed user and assistant text. Existing coding
-tool calls, tool results, private reasoning, and provider metadata are never imported. The
-controller's own function-call protocol is transient within the active request: tool calls and
-matching results permit subsequent inference rounds, but are not copied into GPT-Live, AppState,
-or completed controller history. Completed actions remain recorded in the application's bounded
-deduplication ledger. Failed requests report truthful plain-text outcomes and uncertainty, never
-replay a desktop action, and never leave unmatched tool calls in an active inference exchange.
-Provider reconnection or replacement may continue the same logical conversation for a subsequent
-new request, using the same model, account, and retained text history; it never retries a failed delegation.
+Voice's conversation is durable and persists across calls like any agent's. It holds Voice's own
+tool calls and results; ordinary automatic compaction bounds it. Coding tool calls, tool results,
+private reasoning, and provider metadata of other conversations are never imported, and Voice's
+own tool traffic is never copied into GPT-Live. The person may open Voice's conversation and
+write to it; such a message is the person's own request, and Voice answers in text, not speech.
+Completed actions remain recorded in the call's bounded deduplication ledger. Failed requests
+report truthful plain-text outcomes and uncertainty and never replay a desktop action. A request
+is never retried after it fails. Desktop actions are not durable tool calls: one interrupted by a
+restart becomes an error result and is never executed again.
 
-Each active request is bounded to 120 seconds, excluding queue time, and eight inference rounds.
-Queued requests expire after 120 seconds without starting an action. Retained serialized controller
-history is bounded to 512 KiB. A request that cannot fit receives a fixed, sanitized explanation
-while voice remains open; history is never silently trimmed or reset. Closing voice cancels queued
-requests, aborts active controller work, and releases its provider session. Already-started desktop
-mutations retain the existing uncertainty and deduplication rules.
+Each active request is bounded to 120 seconds, excluding queue time, and eight inference rounds;
+at either limit the daemon stops Voice's turn and delivers a fixed explanation. Queued requests
+expire after 120 seconds without starting an action. Closing voice cancels queued requests and
+stops Voice's active turn; Voice itself remains. Already-started desktop mutations retain the
+existing uncertainty and deduplication rules. When the frozen account's sign-in is rejected or its
+usage runs out, the explanation says so and what the person can do.
 
 A request whose actions all succeed and end in a terminal action — `desktopOpen`, `sessionSend`
 staging, `composerDraftAppend`, `sessionModelChange`, or `taskCreate` — receives a fixed,
-truthful outcome composed by the daemon from the verified results, without a further controller
-inference. Requests that read state or receive a refusal or failure continue through the
-controller. No outcome is delivered to the voice model before the action it describes has a
-verified result.
+truthful outcome composed by the daemon from the verified results, delivered as soon as the last
+result is verified. Voice's turn may continue to completion, but nothing more from that turn is
+spoken. Requests that read state or receive a refusal or failure are answered with Voice's final
+text for that request. No outcome is delivered to the voice model before the action it describes
+has a verified result.
 
-The voice model receives the Desktop AppState as Markdown under a `# Desktop AppState` heading,
-described below, at startup and through bounded quiet updates. AppState is attributed data, not
-instructions, authorization, or an order to speak. The voice model may answer directly when the
-latest supplied AppState is sufficient; missing, ambiguous, stale, or deeper conversation context
-requires the controller. No historical coding tool traffic enters AppState.
+The voice model receives the person's sidebar outline as Markdown under a `# Sidebar` heading,
+described below, when the call starts and again only when the sidebar itself changes. Agent
+activity is never pushed: no run starts or settlements, message briefs, conversation statuses,
+or desktop AppState. The outline is attributed data, not instructions, authorization, or an order
+to speak. The voice model may answer directly from it; anything else, including whether some work
+finished, requires a request to Voice, which looks it up when asked.
 
 Every route uses ordinary API authentication. A session belongs to its creating principal;
 another principal receives `404` for its ID and never receives its journal events. The session
@@ -12644,10 +12679,16 @@ Two optional fields negotiate additive desktop capabilities:
   characters, at most 16. Send it only to a daemon whose `GET /v0/health` lists
   `capabilities.desktopLiveCapabilities`. The daemon accepts the intersection of this list and its
   own; unknown names are ignored, never rejected. Current names are `appState`, `voiceFocus`,
-  `taskCreate`, and `sessionModelChange`. `taskCreate` and `sessionModelChange` are accepted only
-  together with `appState`. Omitted, the call uses only the original contract.
+  `taskCreate`, `sessionModelChange`, and `agentTargets`. `taskCreate`, `sessionModelChange`, and
+  `agentTargets` are accepted only together with `appState`. Omitted, the call uses only the
+  original contract.
 - `appState` — the initial Desktop AppState object described below. It is valid only when
   `desktopCapabilities` includes `appState`, and its serialized form is at most 256 KiB.
+- `localConnectionId` — the desktop's connection ID for the daemon serving this request, an
+  opaque ID as above. It is valid only when `desktopCapabilities` includes `agentTargets`, and is
+  then required; the daemon accepts `agentTargets` only when it is present. Because creation
+  rejects unknown fields, send it only to a daemon whose `capabilities.desktopLiveCapabilities`
+  lists `agentTargets`. The daemon acts only on this connection and refuses any target on another.
 
 The accepted capability list is echoed in control `hello`. A desktop must not send fields,
 frames, task targets, or action results that belong to a capability the daemon did not accept,
@@ -12720,7 +12761,8 @@ normal WebSocket close never invents a provider event or final usage. A transpor
 interrupted start remains `failed`. Closing voice does not abort, archive, or recreate any coding
 session or its tasks.
 Daemon shutdown closes owned calls; restart marks unfinished local sessions failed and never
-replays creation or delegated mutations. Terminal records remain readable for seven days,
+replays creation or delegated mutations. A Voice turn a restart interrupted is stopped, not
+resumed, and its desktop actions are never executed again. Terminal records remain readable for seven days,
 bounded to the newest 1,000 per principal. Evicted records return `404`.
 
 ### Desktop context and targets
@@ -12766,6 +12808,19 @@ its internal worktree identity to wire `workspaceId` explicitly, never by parsin
 A task's or bot's conversation is an ordinary `SessionRef` for the session actions, and the
 desktop lists task conversations in `sessions`.
 
+With the `agentTargets` capability, an action may also name a conversation by this daemon's own
+agent ID, as Voice reads it from the sidebar and conversation tools:
+
+- `AgentTarget`: `{ kind: "agent", connectionId, agentId }` — the conversation of agent `agentId`
+  on connection `connectionId`, which is always the call's `localConnectionId`. `agentId` is the
+  daemon's agent ID, at most 128 characters.
+
+An `AgentTarget` may appear wherever an action takes a `DesktopTarget` or a `SessionRef`. The
+desktop resolves it to its own entity for that agent — a task's, a bot's, a subtask's, or another
+conversation's — and refuses an agent it cannot show with `notFound`. A result whose `target`
+answers an action that named an `AgentTarget` may name either form. Without `agentTargets` the
+daemon never sends an `AgentTarget`, and older desktops are unaffected.
+
 ### Desktop AppState
 
 With the `appState` capability, the desktop also supplies an AppState object: the whole
@@ -12798,48 +12853,42 @@ The desktop sends a complete replacement as the creation request's `appState` an
 `appState` control frame. It is not revisioned, persisted, or journaled; the latest frame wins and
 identical repeats are harmless. AppState changes never advance `desktopContext` revisions, and
 background AppState never stales an action. The desktop coalesces changes before sending them and
-sends only settled message text, never streaming partial text.
+sends only settled message text, never streaming partial text. With the `agentTargets`
+capability the desktop sends the `appState` frame only when a server's `models` change, never for
+activity, status, names, order, focus, or messages.
 
-The daemon serializes AppState for the voice model as Markdown, in the supplied order, without
-re-sorting. Without the `appState` capability it derives the same format from the accepted
-desktop context. Times are local clock times in `timeZone`, with a short date only when the time
-is not today. The header time is the snapshot time and is excluded when detecting changes:
+The daemon uses AppState only to resolve names and targets and to validate model choices for
+Voice's actions. It never pushes AppState, or anything derived from it, to the voice model.
+
+### Sidebar outline
+
+The voice model receives the person's own sidebar on this daemon, never the desktop's: the rows
+of the sidebar document in its order (see Spaces), each section's label, and the sessions the
+document shows under a row. A person without a sidebar document gets Happy, their bots, their
+tasks, and their joined Surfaces in the classic order. The outline holds names only: no
+conversation status, activity times, messages, or IDs. Folded sections and rows are named once,
+with the number of rows they hold:
 
 ```markdown
-# Desktop AppState — 3:42 PM
+# Sidebar
 
-Focused: This Mac / Observatory / Garden / Garden notes
+- Happy
+- Prioritizing
 
-## This Mac (local)
+## Releases
 
-### Bots
+- Preview viewer release
+    - Release notes
 
-- Happy — Running — last activity 3:40 PM
-
-### Projects
-
-- Observatory
-    - Garden
-        - Garden notes — Idle — last activity 3:00 PM
-        - Release notes — Idle — last activity Oct 9, 3:00 PM
-
-## Focused conversation: Garden notes
-
-Latest loaded message (assistant):
-
-> The requested changes are complete.
+## Distractions (folded, 6 rows)
 ```
 
-Only the focused conversation's latest message is included: public user or assistant text,
-never tool calls, capped at 800 UTF-8 bytes on a character boundary with an explicit clipped
-marker. The startup snapshot is bounded to 8 KiB and marks omitted entries explicitly. Later
-changes are pushed as `# Desktop AppState update` Markdown containing the changed and removed
-entries, focus, and the focused conversation's latest message. A focus change always pushes the
-newly focused conversation and its latest loaded message. Updates are coalesced for 250
-milliseconds with one push in flight; an update larger than one provider append is split into
-several appends rather than truncated. Background updates wait while a voice request is being
-handled and are delivered after its outcome. A complete snapshot is pushed again when ten minutes
-pass without one, because GPT-Live compacts older context.
+The outline is bounded to 8 KiB and marks omitted entries explicitly; omitted entries are never
+sent later. It is sent as the call's initial context and again, as a complete replacement under
+the same heading, only when the outline's text changes, such as a new sidebar version, a renamed
+row, or new or archived work. A changed outline waits while a voice request lacks its delivered
+outcome and is sent after it; several changes meanwhile send one outline. Nothing else is pushed
+to the voice model in the background.
 
 ### `GET /v0/live/sessions/:id/control?windowId=...`
 
@@ -12868,7 +12917,9 @@ Client-to-server frames are:
   replacement public snapshot for the active session or one of at most five explicitly watched
   sessions. Unselected or inaccessible targets are rejected. An empty selection never means all.
   After enabling a watch, send its successful action result before the initial snapshot; the
-  server records the selection from that result before accepting the update.
+  server records the selection from that result before accepting the update. Current daemons
+  accept these frames under the same rules but never forward them to the voice model or to
+  Voice; a desktop with the `agentTargets` capability does not send them.
 - `{ type: "appState", appState }` — a complete replacement Desktop AppState, only with the
   `appState` capability.
 
@@ -12894,7 +12945,7 @@ Server-to-client frames after hello are:
   The desktop highlights the target as the entity voice is talking about. It is decorative: it
   authorizes nothing, opens nothing, and is never an action. The daemon sends one as soon as a
   request's target is uniquely resolved — including from an exact, unique name match against
-  AppState before the controller runs — and immediately before each targeted action, using
+  the sidebar outline or AppState before Voice runs — and immediately before each targeted action, using
   `navigation` before `desktopOpen` and `mention` otherwise. It never sends one for a different
   target while an action is outstanding. It clears the highlight with `target: null` when the
   request ends. The desktop ignores `reason` on a clear, ignores stale or unknown targets, and
@@ -12910,7 +12961,7 @@ The action union is:
 | `desktopOpen`         | `target: DesktopTarget`                                   | Focus/open that existing entity.                                                          |
 | `sessionRead`         | `target: SessionRef`                                      | Return bounded public conversation text and status.                                       |
 | `sessionSend`         | `target: SessionRef`, `text`                              | Stage exact text for an independent explicit human Send; never answer a pending question. |
-| `sessionWatch`        | `target: SessionRef`, `enabled`                           | Enable/disable text/status backfeed for that exact session.                               |
+| `sessionWatch`        | `target: SessionRef`, `enabled`                           | Retained for compatibility; current daemons never request it.                             |
 | `composerDraftAppend` | `target: SessionRef`, `text`                              | Append text to that session's draft without replacing it or its attachments.              |
 | `taskCreate`          | `connectionId`, optional `name`, `text`, optional `model` | Create a task, open it, and stage `text` as its unsent draft.                             |
 | `sessionModelChange`  | `target: SessionRef`, `providerId`, `modelId`             | Choose the model for that session's next message through its composer.                    |
@@ -12990,10 +13041,10 @@ person explicitly starts a new call. No transcript or controller mutation is rep
 `changes`. Both are committed before publishing and filtered to the session owner in journal
 pull and SSE. They never contain SDP, provider credentials, transcripts, or raw provider events.
 
-The desktop sends selected public text/status updates over the control connection below.
 Duplicate delivery cannot repeat an operation; late results retain their original action and
-delegation IDs. Background progress is silent context; completion, failure, and requests for
-human input may be spoken. Provider appends respect the selected GPT-Live transport's documented
+delegation IDs. Background progress, completion, failure, and requests for human input are never
+pushed to the voice model; voice learns them only by asking Voice, which reads the conversation
+when asked. Provider appends respect the selected GPT-Live transport's documented
 limit. Queues and transcript windows are bounded; overflow ends the call with a clear failure
 instead of replaying writes or silently losing task state.
 

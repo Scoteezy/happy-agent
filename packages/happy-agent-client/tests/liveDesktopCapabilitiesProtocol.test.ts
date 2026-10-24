@@ -104,13 +104,71 @@ const appState: LiveAppState = {
 };
 
 describe("GPT-Live desktop capability protocol", () => {
-    it("names the four additive capabilities", () => {
+    it("names the five additive capabilities", () => {
         expect(LIVE_DESKTOP_CAPABILITIES).toEqual([
             "appState",
             "voiceFocus",
             "taskCreate",
             "sessionModelChange",
+            "agentTargets",
         ]);
+    });
+
+    it("lets actions and results name a local agent but keeps context and focus on desktop targets", () => {
+        const agent = { kind: "agent", connectionId: "local", agentId: "voiceagent1" } as const;
+        for (const action of [
+            { type: "desktopOpen", target: agent },
+            { type: "sessionRead", target: agent },
+            { type: "sessionSend", target: agent, text: "Please rerun the tests." },
+            { type: "composerDraftAppend", target: agent, text: "Also add tests" },
+            { type: "sessionModelChange", target: agent, providerId: "codex", modelId: "m" },
+        ])
+            expect(Value.Check(liveDesktopActionSchema, action)).toBe(true);
+        expect(
+            Value.Check(liveDesktopActionResultSchema, {
+                status: "succeeded",
+                output: { type: "created", target: agent },
+            }),
+        ).toBe(true);
+        expect(
+            Value.Check(liveDesktopActionResultSchema, {
+                status: "succeeded",
+                output: {
+                    type: "session",
+                    target: agent,
+                    status: "idle",
+                    messages: [],
+                    truncated: false,
+                },
+            }),
+        ).toBe(true);
+        expect(Value.Check(liveDesktopTargetSchema, agent)).toBe(false);
+        expect(
+            Value.Check(liveControlServerMessageSchema, {
+                type: "voiceFocus",
+                focusId: "f1",
+                contextRevision: 1,
+                target: agent,
+                reason: "mention",
+            }),
+        ).toBe(false);
+        expect(
+            Value.Check(liveControlClientMessageSchema, {
+                type: "sessionUpdate",
+                target: agent,
+                status: "idle",
+                messages: [],
+                truncated: false,
+            }),
+        ).toBe(false);
+        for (const invalid of [
+            { ...agent, agentId: "" },
+            { ...agent, agentId: "x".repeat(129) },
+            { ...agent, sessionId: "extra" },
+        ])
+            expect(
+                Value.Check(liveDesktopActionSchema, { type: "desktopOpen", target: invalid }),
+            ).toBe(false);
     });
 
     it("accepts a complete AppState with tasks, models, and every latest-message state", () => {
@@ -238,6 +296,17 @@ describe("GPT-Live desktop capability protocol", () => {
                 appState,
             }),
         ).toBe(true);
+        expect(
+            Value.Check(createLiveSessionRequestSchema, {
+                ...base,
+                desktopCapabilities: ["appState", "agentTargets"],
+                appState,
+                localConnectionId: "local",
+            }),
+        ).toBe(true);
+        expect(
+            Value.Check(createLiveSessionRequestSchema, { ...base, localConnectionId: "" }),
+        ).toBe(false);
         expect(
             Value.Check(createLiveSessionRequestSchema, {
                 ...base,

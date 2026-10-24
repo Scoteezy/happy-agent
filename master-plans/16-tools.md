@@ -89,12 +89,9 @@ Bounded side inference must not use AgentBase, the normal durable agent loop, a
 session manager, or the normal tool-execution loop. It is a small direct
 provider call, not a hidden conversation.
 
-The voice controller is the one exception, by the user's decision in master
-plan 26. Each voice call keeps one Luna provider session for the life of the
-call and runs its queued requests through it. In every other way it follows the
-rules above: it makes direct provider calls outside AgentBase, uses an explicit
-fixed tool list, handles the stream itself, and keeps only user and assistant
-text between requests.
+Voice is not side inference. It is an ordinary long-running agent, a subtask of
+Happy, whose fixed tool array and instructions come from the Live module
+(master plan 26).
 
 ## Vendor truth and golden traces
 

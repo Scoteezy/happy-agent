@@ -3,39 +3,51 @@
 ## Big picture
 
 Voice is a spoken conversation with one desktop window. GPT-Live carries the
-audio. It has no direct tools of its own, so it hands requests to the
-application through client delegation.
+audio. It has no direct tools of its own, so it hands every request to Voice
+through client delegation.
 
-Each call has one controller. It is a single GPT-6 Luna session at low effort
-on the existing Codex account. Requests keep being added to that one session,
-and it acts by calling a fixed set of desktop tools that the client executes.
-A call therefore has exactly two conversations, GPT-Live and the controller.
-There are never several controllers, and never a new controller per request.
+Voice is one agent per person, a long-running subtask of Happy set up the same
+way as Prioritizing: created through `SubtasksModule.create`, unreported, with a
+conversation and a row of its own, and recognised by an agent ID stored in the
+person's bookkeeping. The same Voice serves every call. There is never a new
+Voice or a new controller per call, and never more than one per person. It runs
+GPT-6.1 Sol at low effort by default; the existing voice settings may override
+the provider, model, effort and fast mode.
 
-## One controller, a queue, never busy
+Voice works only with the agents on the machine where the daemon runs. Remote
+connections and peers are out of scope.
 
-A request that arrives while the controller is working waits in a queue. Voice
-never refuses it as busy. Requests run one at a time in the order they
-arrived, and the desktop still receives one action at a time.
+## What Voice can do
+
+Voice has the same context and read tools as Prioritizing: it lists the
+sidebar and reads any conversation's public user and assistant text on this
+machine, on demand. It reads the sidebar but never writes it; any
+rearrangement goes to Prioritizing as a placement request or a tidy.
+
+Voice can do everything the person does by clicking in the window of the
+active call: open and navigate, create tasks with drafts, stage messages,
+append to drafts, and change models. Staging is not sending; a person still
+presses Send.
+
+## One queue, never busy
+
+Requests reach Voice one at a time, in the order they arrived, across every
+call of that person. A request that arrives while Voice is working waits in the
+queue. Voice never refuses it as busy, and the desktop has at most one action
+outstanding.
 
 ## Context
 
-Latency is cut in two ways, and we want both:
+Both Voice and GPT-Live get the person's current sidebar, and get it again
+only when the sidebar itself changes. Nothing else is pushed: no loop started
+or settled, no message briefs, no conversation status updates, and no desktop
+AppState. Voice no longer tells the person on its own that work finished; it
+looks things up when asked.
 
-- compact AppState is pushed to the voice model;
-- the controller answers through tools.
-
-When the call starts, push a snapshot of the most recently active work and the
-entire sidebar, with top-level bots first. Deeper levels are read only when
-needed: the subtasks inside a session or bot, and then a particular subtree.
-
-Only text messages from the user and from the assistant are pushed. Tool calls
-and tool results are not: they are noise most of the time. This covers context
-sent to the voice model, conversation context imported from the app, and the
-controller's own history between requests. Tool calls and results exist only
-while the controller is working on a request.
-
-Resetting context once in a while is deferred.
+GPT-Live receives only the sidebar outline and Voice's spoken outcomes, as
+text. Tool calls and tool results never reach GPT-Live. Voice's own
+conversation keeps its history across calls, like any agent's, and ordinary
+compaction bounds it.
 
 ## Names, not IDs
 
@@ -46,30 +58,35 @@ and are used for targeting.
 
 The voice model's system prompt follows OpenAI's example prompt for GPT-Live.
 GPT-Live documents no reasoning-effort setting for the voice model, so effort
-is set only on the controller.
+is set only on Voice.
 
 ## Not now
 
 - The Decisions API is not used.
 - An OpenAI API key will come later. Until then, voice uses the existing Codex
   account and adds no new billing.
+- Resetting Voice's context on a schedule.
 
 ## Order and criteria
 
-1. Build one controller per call with its queue, so no request is refused as
-   busy and the desktop never has two actions outstanding.
-2. Push the compact AppState snapshot at call start, and keep only user and
-   assistant text between requests.
-3. Verify with real calls in which Luna calls tools. Opus 5.5 reviews the
+1. Make Voice the person's long-running subtask of Happy, with its own row,
+   serving every call through one queue.
+2. Give Voice Prioritizing's read context and tools, its read-only sidebar, and
+   the full set of desktop actions for the active call's window.
+3. Push the sidebar outline to Voice and GPT-Live at call start and only when
+   the sidebar changes, and stop every other background push.
+4. Verify with real calls in which Voice calls tools. Opus 5.5 reviews the
    change, cuts and improves it, and has the final say.
 
 This plan is done when:
 
-- every call has exactly one controller conversation, and follow-ups are
-  queued instead of refused as busy;
-- from the start of the call, voice knows the most recently active work and
-  the top level of the sidebar, bots first, and reads deeper only on demand;
-- only user and assistant text is pushed or retained between requests;
+- every person has exactly one Voice, it persists across calls, and follow-ups
+  are queued instead of refused as busy;
+- Voice reads the sidebar and conversations on this machine, never writes the
+  sidebar, and can do everything the person does by clicking;
+- from the start of a call, voice knows the sidebar, and nothing reaches
+  GPT-Live in the background except a changed sidebar;
 - speech refers to sessions and bots by name;
-- a real call in which Luna calls tools in two requests has passed, and Opus
+- a real call in which Voice calls tools in two requests, and a second call in
+  which Voice still has the first call's conversation, have passed, and Opus
   5.5 has signed off.

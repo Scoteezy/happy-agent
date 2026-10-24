@@ -67,6 +67,22 @@ export const liveDesktopTargetSchema = Type.Union([
     liveTaskTargetSchema,
 ]);
 export type LiveDesktopTarget = Static<typeof liveDesktopTargetSchema>;
+/** The conversation of the daemon's own agent on the call's local connection. Requires `agentTargets`. */
+export const liveAgentTargetSchema = Type.Object(
+    {
+        kind: Type.Literal("agent"),
+        connectionId,
+        agentId: Type.String({ minLength: 1, maxLength: 128, pattern: "\\S" }),
+    },
+    closed,
+);
+export type LiveAgentTarget = Static<typeof liveAgentTargetSchema>;
+/** What an action may name wherever it takes a desktop target. */
+export const liveActionTargetSchema = Type.Union([liveDesktopTargetSchema, liveAgentTargetSchema]);
+export type LiveActionTarget = Static<typeof liveActionTargetSchema>;
+/** What an action may name wherever it takes a session reference. */
+export const liveActionSessionSchema = Type.Union([liveSessionRefSchema, liveAgentTargetSchema]);
+export type LiveActionSession = Static<typeof liveActionSessionSchema>;
 
 /** Additive desktop capabilities, negotiated when a call is created. Unknown names are ignored. */
 export const LIVE_DESKTOP_CAPABILITIES = [
@@ -74,6 +90,7 @@ export const LIVE_DESKTOP_CAPABILITIES = [
     "voiceFocus",
     "taskCreate",
     "sessionModelChange",
+    "agentTargets",
 ] as const;
 export type LiveDesktopCapability = (typeof LIVE_DESKTOP_CAPABILITIES)[number];
 export const liveDesktopCapabilitiesSchema = Type.Array(
@@ -305,7 +322,7 @@ export type LiveAppState = Static<typeof liveAppStateSchema>;
 
 export const liveDesktopActionSchema = Type.Union([
     Type.Object({ type: Type.Literal("desktopState") }, closed),
-    Type.Object({ type: Type.Literal("desktopOpen"), target: liveDesktopTargetSchema }, closed),
+    Type.Object({ type: Type.Literal("desktopOpen"), target: liveActionTargetSchema }, closed),
     Type.Object({ type: Type.Literal("workspaceCreate"), project: liveProjectRefSchema }, closed),
     Type.Object(
         {
@@ -324,15 +341,15 @@ export const liveDesktopActionSchema = Type.Union([
         },
         closed,
     ),
-    Type.Object({ type: Type.Literal("sessionRead"), target: liveSessionRefSchema }, closed),
+    Type.Object({ type: Type.Literal("sessionRead"), target: liveActionSessionSchema }, closed),
     Type.Object(
-        { type: Type.Literal("sessionSend"), target: liveSessionRefSchema, text: actionText },
+        { type: Type.Literal("sessionSend"), target: liveActionSessionSchema, text: actionText },
         closed,
     ),
     Type.Object(
         {
             type: Type.Literal("sessionWatch"),
-            target: liveSessionRefSchema,
+            target: liveActionSessionSchema,
             enabled: Type.Boolean(),
         },
         closed,
@@ -340,7 +357,7 @@ export const liveDesktopActionSchema = Type.Union([
     Type.Object(
         {
             type: Type.Literal("composerDraftAppend"),
-            target: liveSessionRefSchema,
+            target: liveActionSessionSchema,
             text: actionText,
         },
         closed,
@@ -358,7 +375,7 @@ export const liveDesktopActionSchema = Type.Union([
     Type.Object(
         {
             type: Type.Literal("sessionModelChange"),
-            target: liveSessionRefSchema,
+            target: liveActionSessionSchema,
             providerId,
             modelId,
         },
@@ -371,8 +388,15 @@ export const liveDesktopActionOutputSchema = Type.Union([
     Type.Object({ type: Type.Literal("ack") }, closed),
     Type.Object({ type: Type.Literal("staged") }, closed),
     Type.Object({ type: Type.Literal("context"), context: liveDesktopContextSchema }, closed),
-    Type.Object({ type: Type.Literal("created"), target: liveDesktopTargetSchema }, closed),
-    Type.Object({ type: Type.Literal("session"), ...sessionSnapshotProperties }, closed),
+    Type.Object({ type: Type.Literal("created"), target: liveActionTargetSchema }, closed),
+    Type.Object(
+        {
+            type: Type.Literal("session"),
+            ...sessionSnapshotProperties,
+            target: liveActionSessionSchema,
+        },
+        closed,
+    ),
 ]);
 export const liveDesktopActionResultSchema = Type.Union([
     Type.Object(
