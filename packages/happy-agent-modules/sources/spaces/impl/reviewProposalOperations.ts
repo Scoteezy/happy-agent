@@ -63,7 +63,7 @@ export function withoutArchive(
 /**
  * Prioritizing's revision of a proposal, applied one operation at a time. An operation is dropped
  * with a note when it would change what the person set in this proposal, name a section by age or
- * status, move or fold away what may not move, or offer something for archiving or Stale that may
+ * status, move what may not move or fold away what must stay in view, or offer something for archiving or Stale that may
  * not go there; the rest still apply.
  */
 export function reviewProposalOperations(
@@ -74,11 +74,14 @@ export function reviewProposalOperations(
         readonly person: (id: string, aspect: SidebarAspect) => boolean;
         /** Why this item may not be offered for archiving, or `undefined` when it may. */
         readonly mayNotArchive: (id: string) => string | undefined;
-        /**
-         * Why this item may not change section, leave, or fold out of view, such as Happy or work
-         * active in the last two hours, or `undefined` when it may.
-         */
+        /** Why this item may not change section, leave, or fold out of view, such as Happy. */
         readonly mayNotMove: (id: string) => string | undefined;
+        /**
+         * Why this item may not leave or fold out of view, though it may change section, such as
+         * work active in the last two hours: accepting the proposal is the person's consent to
+         * regroup it, never to hide what they are working on.
+         */
+        readonly mayNotHide: (id: string) => string | undefined;
         /** Why this item may not go into Stale, or `undefined` when it may. */
         readonly mayNotStale: (id: string) => string | undefined;
     },
@@ -139,18 +142,19 @@ function review(
     } else if (label !== undefined && agedLabel(label)) {
         return `Section "${label}" sorts by age, status, or whether work is finished; name a subject, or use Stale for quiet unfinished work.`;
     }
-    // What changes section, leaves, or folds out of view; a section moved as a block carries its
-    // rows without regrouping them.
-    const moved = new Set(regroupedSidebarIds(before, after));
-    if (operation.type === "move") moved.add(target);
+    // What leaves or folds out of view, and what changes section; a section moved as a block
+    // carries its rows without regrouping them.
+    const hidden = new Set<string>();
     if (operation.type === "remove") {
         const at = locateSpaceSidebarNode(before, target);
-        for (const id of at === undefined ? [target] : sidebarIds([at.node])) moved.add(id);
+        for (const id of at === undefined ? [target] : sidebarIds([at.node])) hidden.add(id);
     }
     const shownAfter = new Set(shownSidebarRows(after));
-    for (const id of shownSidebarRows(before)) if (!shownAfter.has(id)) moved.add(id);
+    for (const id of shownSidebarRows(before)) if (!shownAfter.has(id)) hidden.add(id);
+    const moved = new Set([...regroupedSidebarIds(before, after), ...hidden]);
+    if (operation.type === "move") moved.add(target);
     for (const id of moved) {
-        const refusal = rules.mayNotMove(id);
+        const refusal = rules.mayNotMove(id) ?? (hidden.has(id) ? rules.mayNotHide(id) : undefined);
         if (refusal !== undefined) return refusal;
     }
     const offered = new Set(archiveOffers(before));

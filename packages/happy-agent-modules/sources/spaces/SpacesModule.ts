@@ -1676,10 +1676,12 @@ export class SpacesModule implements AgentModule {
                             return "Your own row stays where it is; only the person moves it.";
                         if (rules.untouched.has(id))
                             return "Leave new work alone until the person sends its first message.";
-                        if (rules.recent.has(id))
-                            return `${id} was active in the last two hours; leave it where it is, and shown.`;
                         return undefined;
                     },
+                    mayNotHide: (id) =>
+                        rules.recent.has(id)
+                            ? `${id} was active in the last two hours; keep it shown.`
+                            : undefined,
                     mayNotStale: (id) => {
                         const row = rows.get(id);
                         if (row === undefined) return undefined;

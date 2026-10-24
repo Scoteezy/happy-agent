@@ -246,13 +246,16 @@ active 29 minutes earlier, moved work active within the hour, put bots and share
 and kept a 17-row "Active" section untouched; and none offered the clearly finished tasks for
 archiving, because most rows counted as placed by the person through mirroring, and the prompt
 said never to touch those. The daemon now drops, with a note, a proposal edit that moves, removes,
-or folds away Search, Create, Happy, Prioritizing's row, untouched new work, or work active in the
-last two hours, and Stale entries that are bots, shared lists, or tasks active in the last two
+or folds away Search, Create, Happy, Prioritizing's row, or untouched new work, or that folds away
+or removes work active in the last two hours, and Stale entries that are bots, shared lists, or tasks active in the last two
 days. Section labels naming a status (Active, Current, In progress) are refused like age labels.
 The prompt lets a proposal regroup and fold rows the person placed, since accepting is their
 consent, keeps what they put at the top, asks it to section an unsectioned sidebar or a catch-all
 (Kirill: "if it's not sectioned, probably should offer to section it"), and to reply in one
-sentence, since replies ran 80 to 250 words. `list_sidebar` marks rows with nothing to read.
+sentence, since replies ran 80 to 250 words. Refusing to move recent work in proposals at all
+made the first real-inference proposal on a new sidebar empty, since every task was minutes old;
+grouping recent work is allowed in a proposal because accepting it is consent, and hiding it never
+is. `list_sidebar` marks rows with nothing to read.
 
 ## Prioritizing shows its own row, once
 

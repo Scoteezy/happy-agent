@@ -10292,8 +10292,8 @@ stale `baseVersion` is a conflict, and so is an edit whose old text does not occ
 edit that would change an aspect of a node that the person last set in this proposal is dropped
 with a note, and the rest of the call applies. A proposal may regroup and fold rows whose place the
 person last set in the sidebar, because accepting it is the person's own change. It may still not
-move, fold away, or remove Search, Create, Happy, its own row, new work before its first message, or
-work running or active in the last two hours, and its new or renamed section labels follow the
+move, fold away, or remove Search, Create, Happy, its own row, or new work before its first message,
+and it may group but never fold away or remove work running or active in the last two hours; its new or renamed section labels follow the
 label rules under "Authorship"; such edits are dropped with a note. In a proposal, the rows of a
 section labelled `Stale` are only task rows quiet for at least two days: a bot, a shared list, or
 work active more recently is dropped from it with a note. The call presents the artifact (an `artifact`

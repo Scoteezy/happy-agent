@@ -27,11 +27,9 @@ describe("sidebar proposals", () => {
         mayNotArchive: (id: string) =>
             id === "busy" ? "busy is active in the last two hours; it is not finished." : undefined,
         mayNotMove: (id: string) =>
-            id === "busy"
-                ? "busy was active in the last two hours."
-                : id === "happy"
-                  ? "Prioritizing cannot move or hide Happy."
-                  : undefined,
+            id === "happy" ? "Prioritizing cannot move or hide Happy." : undefined,
+        mayNotHide: (id: string) =>
+            id === "busy" ? "busy was active in the last two hours; keep it shown." : undefined,
         mayNotStale: (id: string) => (id === "helper" ? "helper is a bot." : undefined),
     };
 
@@ -54,8 +52,13 @@ describe("sidebar proposals", () => {
                 },
                 { type: "move", id: "quiet", to: { after: "stale" } },
                 { type: "move", id: "helper", to: { after: "stale" } },
-                // Folding Desktop would tuck busy away.
-                { type: "set", id: "desktop", collapsed: true },
+                // Recent work may be grouped in a proposal, but never folded away.
+                {
+                    type: "insert",
+                    node: { type: "section", id: "launch", label: "Launch" },
+                    to: { after: "desktop" },
+                },
+                { type: "set", id: "launch", collapsed: true },
                 {
                     type: "insert",
                     node: { type: "section", id: "older", label: "Older" },
@@ -74,12 +77,15 @@ describe("sidebar proposals", () => {
             "move",
             "insert",
             "move",
+            "insert",
         ]);
         expect(result.notes).toEqual([
-            "Dropped move busy after done: busy was active in the last two hours.",
+            "Dropped move busy after done: busy is active in the last two hours; it is not finished.",
             "Dropped move mine after happy: Keep the person's edit of this proposal.",
             "Dropped move helper after stale: helper is a bot.",
-            expect.stringMatching(/^Dropped .*desktop.*: busy was active in the last two hours\.$/),
+            expect.stringMatching(
+                /^Dropped .*launch.*: busy was active in the last two hours; keep it shown\.$/,
+            ),
             expect.stringMatching(
                 /Section "Older" sorts by age, status, or whether work is finished/,
             ),
@@ -94,6 +100,7 @@ describe("sidebar proposals", () => {
                 doc(
                     '<happy-space id="happy"/>',
                     '<happy-section id="desktop" label="Desktop"/>',
+                    '<happy-section id="launch" label="Launch"/>',
                     '<happy-space id="mine"/>',
                     '<happy-space id="busy"/>',
                     '<happy-section id="bots" label="Bots"/>',
