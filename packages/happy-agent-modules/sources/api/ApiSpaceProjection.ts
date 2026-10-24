@@ -13,6 +13,9 @@ const mutationId = Type.Optional(Type.String({ minLength: 1, maxLength: 1_024 })
 export const createStemCellRequestSchema = Type.Object(
     {
         id: Type.Optional(cuid2Schema),
+        taskId: Type.Optional(cuid2Schema),
+        workspaceId: Type.Optional(cuid2Schema),
+        agentId: Type.Optional(cuid2Schema),
         sectionId: Type.Optional(
             Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
         ),

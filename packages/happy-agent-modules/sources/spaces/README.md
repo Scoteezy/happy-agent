@@ -59,7 +59,8 @@ fits several people even though only the owner's own sidebar is exposed.
 ## New work
 
 A stem cell is a fresh unnamed task — its own folder, no project, no bot — wrapped in a row in
-the same transaction. Without a section it waits right below Happy as `pending`; made under a section or
+the same transaction. The client may choose the row's ID and the task, workspace, and agent IDs,
+so it can show the conversation before the daemon answers; the row's ID is the retry key. Without a section it waits right below Happy as `pending`; made under a section or
 separator it is settled right after it. Nothing touches it before its first human message: Prioritizing is not
 briefed, and its icon, moves, and folds are refused. That message briefs Prioritizing, which
 names an icon at once and queues the placement. Removing a stem cell nobody wrote in archives its

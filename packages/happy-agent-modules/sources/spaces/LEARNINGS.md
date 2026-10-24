@@ -201,6 +201,16 @@ A stem-cell ID reserves both its row and conversation inside one database transa
 check ownership before creating work and return the stored task's agent; an existing ID never
 creates a second task or discloses another person's row.
 
+## New work is named by the client, so it appears in the click's frame
+
+The daemon answered in about 20 ms, yet the desktop could select the new chat and focus its
+composer only after the reply, because the daemon chose the task, workspace, and agent IDs. Kirill:
+"must be instant - so must happen on the client i guess? hmmm we need optimistic writes". New work
+now also takes `taskId`, `workspaceId`, and `agentId`, checked exactly as task creation checks
+them, and health advertises `stemCellIdentities`. The space ID stays the only retry key: a replay
+must name the same conversation or is a conflict, and a child ID arriving under a new space ID is
+always a conflict, never a second row over an existing task.
+
 ## Unnamed work has no title, and untouched work can be removed
 
 The desktop labels a row "New" itself, so a task still carrying its placeholder name is served

@@ -7129,7 +7129,9 @@ export class ApiModule implements AgentModule {
 
     /**
      * New work: a fresh unnamed task with its own folder and no project, wrapped in a stem-cell
-     * row in the same transaction. A repeated ID answers with the row it already made.
+     * row in the same transaction. A repeated ID answers with the row it already made. The client
+     * may name the task, workspace, and agent too, so it can show the conversation before this
+     * answers; a repeated ID must then name the same ones.
      */
     async #createStemCell(
         ctx: Context,
@@ -7137,6 +7139,9 @@ export class ApiModule implements AgentModule {
         owner: SpaceOwnerId,
         body: {
             readonly id?: string;
+            readonly taskId?: string;
+            readonly workspaceId?: string;
+            readonly agentId?: string;
             readonly sectionId?: string | null;
             readonly mutationId?: string;
         },
@@ -7164,12 +7169,37 @@ export class ApiModule implements AgentModule {
                             target?.kind === "task"
                                 ? await tasks.get(txCtx, target.taskId)
                                 : undefined;
+                        if (
+                            (body.taskId !== undefined && body.taskId !== task?.id) ||
+                            (body.workspaceId !== undefined &&
+                                body.workspaceId !== task?.workspaceId) ||
+                            (body.agentId !== undefined && body.agentId !== task?.agentId)
+                        ) {
+                            throw new ApiError(
+                                409,
+                                "conflict",
+                                "The requested identities do not match this new work.",
+                            );
+                        }
                         return { task, space: existing, created: false as const };
                     }
-                    const creation = await tasks.createWithResult(
-                        txCtx,
-                        ownerUserId === undefined ? {} : { ownerUserId },
-                    );
+                    const creation = await tasks.createWithResult(txCtx, {
+                        ...(body.taskId === undefined ? {} : { id: body.taskId }),
+                        ...(body.workspaceId === undefined
+                            ? {}
+                            : { workspaceId: body.workspaceId }),
+                        ...(body.agentId === undefined ? {} : { agentId: body.agentId }),
+                        ...(ownerUserId === undefined ? {} : { ownerUserId }),
+                    });
+                    // A new row never takes over a task that already exists: the space ID is
+                    // the retry key, so an existing task ID is someone else's.
+                    if (!creation.created) {
+                        throw new ApiError(
+                            409,
+                            "conflict",
+                            "A requested identity is already in use.",
+                        );
+                    }
                     const space = await spaces.createStemCell(txCtx, owner, {
                         spaceId,
                         task: creation.task,
@@ -9365,6 +9395,9 @@ export class ApiModule implements AgentModule {
             capabilities: {
                 desktopLiveControl: this.#live !== undefined,
                 ...(this.#bridges === undefined ? {} : { workspaceBridges: true }),
+                ...(this.#spaces === undefined || this.#tasks === undefined
+                    ? {}
+                    : { stemCellIdentities: true }),
                 ...(this.#live === undefined
                     ? {}
                     : { desktopLiveCapabilities: [...this.#live.desktopCapabilities] }),
