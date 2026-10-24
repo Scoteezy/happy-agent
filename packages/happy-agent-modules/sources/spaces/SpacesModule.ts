@@ -140,6 +140,7 @@ import { type PrioritizingRules } from "./impl/reviewPrioritizingOperation.js";
 import {
     archiveOffers,
     keptAboveSeparator,
+    quietOpenSections,
     reviewProposalOperations,
     withoutArchive,
 } from "./impl/reviewProposalOperations.js";
@@ -1687,10 +1688,12 @@ export class SpacesModule implements AgentModule {
                             return "Your own row stays where it is; only the person moves it.";
                         if (rules.untouched.has(id))
                             return "Leave new work alone until the person sends its first message.";
-                        if (kept.has(id))
-                            return `The person keeps ${id} above the separator; leave it where it is and build sections around it.`;
                         return undefined;
                     },
+                    mayNotLeaveTop: (id) =>
+                        kept.has(id)
+                            ? `The person keeps ${id} above the separator; leave the row where it is, though you may add, rename, or remove the headings around it.`
+                            : undefined,
                     mayNotHide: (id) =>
                         rules.recent.has(id)
                             ? `${id} was active in the last two hours; keep it shown.`
@@ -1728,10 +1731,18 @@ export class SpacesModule implements AgentModule {
             const shown = shownSidebarRows(
                 withoutArchive(reviewed.document, new Set(archiveOffers(reviewed.document))),
             ).filter((id) => !exempt.has(id)).length;
+            const foldable = quietOpenSections(
+                reviewed.document,
+                new Set([...rules.recent, ...kept]),
+            );
             const overBudget =
-                shown > SIDEBAR_VISIBLE_BUDGET
-                    ? ` It leaves ${String(shown)} rows shown, over the budget of ${String(SIDEBAR_VISIBLE_BUDGET)}; fold quiet sections in a revision.`
-                    : "";
+                shown <= SIDEBAR_VISIBLE_BUDGET
+                    ? ""
+                    : ` It leaves ${String(shown)} rows shown, over the budget of ${String(SIDEBAR_VISIBLE_BUDGET)}; ${
+                          foldable.length === 0
+                              ? "fold quiet sections in a revision."
+                              : `revise it to fold sections with nothing recent: ${foldable.map((label) => `"${label}"`).join(", ")}.`
+                      }`;
             const actor = await artifacts.actorFor(txCtx, agentId);
             let record = open;
             if (record === undefined) {

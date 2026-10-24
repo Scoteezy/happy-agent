@@ -63,6 +63,21 @@ export function keptAboveSeparator(
     );
 }
 
+/** The labels of open sections with rows, none of them in `keep`: what a proposal could fold. */
+export function quietOpenSections(
+    document: SpaceSidebarDocument,
+    keep: ReadonlySet<string>,
+): string[] {
+    return document.items.flatMap((item, index) => {
+        if (item.type !== "section" || item.collapsed || item.id === ARCHIVE_SECTION_ID) return [];
+        const rows = document.items.slice(
+            index + 1,
+            index + spaceSidebarRunLength(document.items, index),
+        );
+        return rows.length > 0 && rows.every((row) => !keep.has(row.id)) ? [item.label] : [];
+    });
+}
+
 /** The proposal as the sidebar would take it: no Archive heading and none of `leaving`. */
 export function withoutArchive(
     document: SpaceSidebarDocument,
@@ -102,6 +117,13 @@ export function reviewProposalOperations(
         readonly mayNotHide: (id: string) => string | undefined;
         /** Why this item may not go into Stale, or `undefined` when it may. */
         readonly mayNotStale: (id: string) => string | undefined;
+        /**
+         * Why this row must stay where the person keeps it above the separator, or `undefined`.
+         * The headings around it may still be inserted, renamed, or removed: that changes its
+         * section, not its place. Moving, hiding, offering it for Archive or Stale, or leaving it
+         * below the first separator are refused.
+         */
+        readonly mayNotLeaveTop: (id: string) => string | undefined;
     },
 ): { document: SpaceSidebarDocument; operations: SpaceSidebarOperation[]; notes: string[] } {
     let working = document;
@@ -176,14 +198,28 @@ function review(
         if (refusal !== undefined) return refusal;
     }
     const offered = new Set(archiveOffers(before));
-    for (const id of archiveOffers(after)) {
-        if (offered.has(id)) continue;
+    const stale = new Set(staleRows(before));
+    const newlyOffered = archiveOffers(after).filter((id) => !offered.has(id));
+    const newlyStale = staleRows(after).filter((id) => !stale.has(id));
+    const end = after.items.findIndex((item) => item.type === "separator");
+    const top = new Set(after.items.slice(0, Math.max(end, 0)).map((item) => item.id));
+    for (const { id } of before.items) {
+        const refusal = rules.mayNotLeaveTop(id);
+        if (refusal === undefined) continue;
+        if (
+            (operation.type === "move" && target === id) ||
+            hidden.has(id) ||
+            !top.has(id) ||
+            newlyOffered.includes(id) ||
+            newlyStale.includes(id)
+        )
+            return refusal;
+    }
+    for (const id of newlyOffered) {
         const refusal = rules.mayNotArchive(id);
         if (refusal !== undefined) return refusal;
     }
-    const stale = new Set(staleRows(before));
-    for (const id of staleRows(after)) {
-        if (stale.has(id)) continue;
+    for (const id of newlyStale) {
         const refusal = rules.mayNotStale(id);
         if (refusal !== undefined) return refusal;
     }

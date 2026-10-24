@@ -4,6 +4,7 @@ import { formatSpaceSidebar, parseSpaceSidebar } from "@slopus/happy-agent-clien
 import {
     archiveOffers,
     keptAboveSeparator,
+    quietOpenSections,
     reviewProposalOperations,
     withoutArchive,
 } from "../../../sources/spaces/impl/reviewProposalOperations.js";
@@ -32,6 +33,7 @@ describe("sidebar proposals", () => {
         mayNotHide: (id: string) =>
             id === "busy" ? "busy was active in the last two hours; keep it shown." : undefined,
         mayNotStale: (id: string) => (id === "helper" ? "helper is a bot." : undefined),
+        mayNotLeaveTop: () => undefined,
     };
 
     it("offers finished work under Archive and quiet work under Stale, and keeps what may not move", () => {
@@ -113,9 +115,10 @@ describe("sidebar proposals", () => {
         );
     });
 
-    it("keeps what the person placed above the separator where it is", () => {
+    it("keeps the row the person placed above the separator, but not the headings around it", () => {
         const pinned = doc(
             '<happy-space id="happy"/>',
+            '<happy-section id="active" label="Pinned"/>',
             '<happy-space id="libraries"/>',
             '<happy-space id="drafted"/>',
             '<happy-separator id="top"/>',
@@ -129,37 +132,70 @@ describe("sidebar proposals", () => {
         const result = reviewProposalOperations(
             pinned,
             [
+                // Renaming, removing, or adding the headings around the row leaves it in place.
+                { type: "set", id: "active", label: "Libraries" },
+                { type: "remove", id: "active" },
                 {
                     type: "insert",
                     node: { type: "section", id: "tools", label: "Tools" },
-                    to: { after: "below" },
+                    to: { after: "happy" },
                 },
-                { type: "move", id: "libraries", to: { after: "tools" } },
-                { type: "move", id: "drafted", to: { after: "tools" } },
-                { type: "move", id: "below", to: { after: "tools" } },
+                { type: "move", id: "drafted", to: { after: "below" } },
+                // Moving, folding away, archiving, or dropping below the separator is refused.
+                { type: "move", id: "libraries", to: { after: "below" } },
+                { type: "set", id: "tools", collapsed: true },
+                { type: "remove", id: "top" },
+                {
+                    type: "insert",
+                    node: { type: "section", id: "archive", label: "Archive" },
+                    to: { after: "tools" },
+                },
             ],
             {
                 ...rules,
                 person: () => false,
-                mayNotMove: (id) =>
+                mayNotLeaveTop: (id) =>
                     kept.has(id) ? `The person keeps ${id} above the separator.` : undefined,
             },
         );
-        expect(result.notes).toEqual([
-            "Dropped move libraries after tools: The person keeps libraries above the separator.",
+        expect(result.operations.map((operation) => operation.type)).toEqual([
+            "set",
+            "remove",
+            "insert",
+            "move",
         ]);
+        expect(result.notes).toHaveLength(4);
+        for (const note of result.notes)
+            expect(note).toMatch(/: The person keeps libraries above the separator\.$/);
         expect(formatSpaceSidebar(result.document)).toBe(
             formatSpaceSidebar(
                 doc(
                     '<happy-space id="happy"/>',
+                    '<happy-section id="tools" label="Tools"/>',
                     '<happy-space id="libraries"/>',
                     '<happy-separator id="top"/>',
-                    '<happy-section id="tools" label="Tools"/>',
                     '<happy-space id="below"/>',
                     '<happy-space id="drafted"/>',
                 ),
             ),
         );
+    });
+
+    it("names the open sections a proposal over the budget could fold", () => {
+        expect(
+            quietOpenSections(
+                doc(
+                    '<happy-section id="a" label="Android"/>',
+                    '<happy-space id="old"/>',
+                    '<happy-section id="b" label="Billing"/>',
+                    '<happy-space id="busy"/>',
+                    '<happy-section id="c" label="Chat" collapsed="true"/>',
+                    '<happy-space id="older"/>',
+                    '<happy-section id="d" label="Docs"/>',
+                ),
+                new Set(["busy"]),
+            ),
+        ).toEqual(["Android"]);
     });
 
     it("reads a conversation as its latest turns, the last replies of each, oldest first", () => {

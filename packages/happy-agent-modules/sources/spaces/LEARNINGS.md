@@ -259,10 +259,15 @@ is. `list_sidebar` marks rows with nothing to read.
 
 A later rerun (18 runs) still moved a row the person kept above the separator in 12 of them, though
 the prompt said to keep it, put finished tasks into Stale, pasted the proposal's tag into replies,
-and left 16 to 19 rows shown. The daemon now refuses moving a top-level row above the first
-separator whose place the person set, and `list_sidebar` marks it `keepInPlace`; `propose_sidebar`
-returns the proposal's ID without its reference tag, and says when the proposal leaves the visible
-budget exceeded, without refusing it. The prompt says finished work goes under Archive and Stale is
+and left 16 to 19 rows shown. The daemon now keeps a top-level row above the first separator whose
+place the person set where it is, and `list_sidebar` marks it `keepInPlace`. Guarding it like
+Happy, as any change of its section, backfired: the catch-all "Active" heading it sat under could
+no longer be renamed or removed, and inserted headings above it were refused, so one run took 7
+revisions and 31 dropped edits. Only the row is guarded now: it may not be moved, hidden, offered
+for Archive or Stale, or left below the separator, and the headings around it may change.
+`propose_sidebar` returns the proposal's ID without its reference tag, and says when the proposal
+leaves the visible budget exceeded, without refusing it, naming the open sections with nothing
+recent or kept, since a bare "fold quiet sections" produced revisions that changed nothing. The prompt says finished work goes under Archive and Stale is
 for unfinished work, and that a reply says what changed, never what did not.
 
 ## Prioritizing shows its own row, once
