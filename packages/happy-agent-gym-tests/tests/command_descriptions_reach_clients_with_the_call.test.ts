@@ -48,7 +48,10 @@ describe("a command's description", () => {
             (await gym.client.getMessages(gym.defaultSessionId)).runs
                 .flatMap((run) => run.messages)
                 .flatMap((message) => message.content)
-                .filter((block) => block.type === "tool_call" && block.name === "exec_command");
+                .filter(
+                    (block): block is Extract<typeof block, { type: "tool_call" }> =>
+                        block.type === "tool_call" && block.name === "exec_command",
+                );
         const history = await commandCalls();
         expect(history).toHaveLength(2);
         expect(history[1]).toMatchObject({
