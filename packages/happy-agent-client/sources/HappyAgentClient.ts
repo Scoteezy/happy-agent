@@ -216,6 +216,30 @@ import {
     type UserSettingResponse,
     type UserSettingsResponse,
 } from "./protocol/userSettings.js";
+import type {
+    StickerId,
+    StickerPackId,
+    StickerPackResponse,
+    StickerPacksResponse,
+    StickerRecentsResponse,
+    StickerSearchQuery,
+    StickerSearchResponse,
+    UseStickerRequest,
+} from "./protocol/stickers.js";
+import type {
+    CreateStoryRequest,
+    PostStoryRequest,
+    SetStoryReactionRequest,
+    StoriesQuery,
+    StoriesResponse,
+    StoryFeedResponse,
+    StoryMediaQuery,
+    StoryMediaResponse,
+    StoryResponse,
+    StoryViewersQuery,
+    StoryViewersResponse,
+    UpdateStoryRequest,
+} from "./protocol/stories.js";
 import type { MobileConnectorResponse } from "./protocol/mobileConnector.js";
 import type {
     ArchiveProjectRequest,
@@ -1056,6 +1080,276 @@ export class HappyAgentClient {
             method: "PUT",
             path: userSettingPath(key),
             json: request,
+            signal: options.signal,
+        });
+    }
+
+    // Stories
+
+    /**
+     * `GET /v0/stories/feed` — the stories row: the caller's own circle first, then every author
+     * in rank order, with their stories. `404` while the caller has Stories off.
+     */
+    async getStoryFeed(options: RequestOptions = {}): Promise<StoryFeedResponse> {
+        return await this.#json({ method: "GET", path: "v0/stories/feed", signal: options.signal });
+    }
+
+    /** `GET /v0/stories` — the caller's own stories, newest first; drafts and posted by default. */
+    async listStories(
+        query: StoriesQuery = {},
+        options: RequestOptions = {},
+    ): Promise<StoriesResponse> {
+        return await this.#json({
+            method: "GET",
+            path: "v0/stories",
+            query: {
+                status: query.status === undefined ? undefined : query.status.join(","),
+                cursor: query.cursor,
+                limit: query.limit,
+            },
+            signal: options.signal,
+        });
+    }
+
+    /** `POST /v0/stories` — a draft made by hand; a repeated `id` returns the story unchanged. */
+    async createStory(
+        request: CreateStoryRequest,
+        options: RequestOptions = {},
+    ): Promise<StoryResponse> {
+        return await this.#json({
+            method: "POST",
+            path: "v0/stories",
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /** `GET /v0/stories/media` — images and videos one conversation presented, newest first. */
+    async listStoryMedia(
+        query: StoryMediaQuery,
+        options: RequestOptions = {},
+    ): Promise<StoryMediaResponse> {
+        return await this.#json({
+            method: "GET",
+            path: "v0/stories/media",
+            query: { agentId: query.agentId, cursor: query.cursor, limit: query.limit },
+            signal: options.signal,
+        });
+    }
+
+    /** `GET /v0/stories/:storyId` — one story from the caller's view. */
+    async getStory(storyId: Cuid2, options: RequestOptions = {}): Promise<StoryResponse> {
+        return await this.#json({
+            method: "GET",
+            path: storyPath(storyId),
+            signal: options.signal,
+        });
+    }
+
+    /** `PATCH /v0/stories/:storyId` — the author's edit; a draft stays a draft. */
+    async updateStory(
+        storyId: Cuid2,
+        request: UpdateStoryRequest,
+        options: VersionedRequestOptions,
+    ): Promise<StoryResponse> {
+        return await this.#json({
+            method: "PATCH",
+            path: storyPath(storyId),
+            json: request,
+            ifMatch: options.ifMatch,
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * `POST /v0/stories/:storyId/post` — posts the draft at exactly `artifactVersion`, the version
+     * the person saw; `409` when it has changed since.
+     */
+    async postStory(
+        storyId: Cuid2,
+        request: PostStoryRequest,
+        options: RequestOptions = {},
+    ): Promise<StoryResponse> {
+        return await this.#json({
+            method: "POST",
+            path: `${storyPath(storyId)}/post`,
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /** `POST /v0/stories/:storyId/delete` — the author's draft or posted story becomes a tombstone. */
+    async deleteStory(
+        storyId: Cuid2,
+        options: VersionedRequestOptions & { mutationId?: string },
+    ): Promise<StoryResponse> {
+        return await this.#json({
+            method: "POST",
+            path: `${storyPath(storyId)}/delete`,
+            json: bodyOf(options),
+            ifMatch: options.ifMatch,
+            signal: options.signal,
+        });
+    }
+
+    /** `POST /v0/stories/:storyId/seen` — the caller has seen this story and the author's earlier ones. */
+    async markStorySeen(storyId: Cuid2, options: RequestOptions = {}): Promise<StoryResponse> {
+        return await this.#json({
+            method: "POST",
+            path: `${storyPath(storyId)}/seen`,
+            json: {},
+            signal: options.signal,
+        });
+    }
+
+    /** `PUT /v0/stories/:storyId/reaction` — sets or replaces the caller's one reaction. */
+    async setStoryReaction(
+        storyId: Cuid2,
+        request: SetStoryReactionRequest,
+        options: RequestOptions = {},
+    ): Promise<StoryResponse> {
+        return await this.#json({
+            method: "PUT",
+            path: `${storyPath(storyId)}/reaction`,
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /** `DELETE /v0/stories/:storyId/reaction` — removes the caller's reaction. */
+    async removeStoryReaction(
+        storyId: Cuid2,
+        options: RequestOptions & { mutationId?: string } = {},
+    ): Promise<StoryResponse> {
+        return await this.#json({
+            method: "DELETE",
+            path: `${storyPath(storyId)}/reaction`,
+            json: bodyOf(options),
+            signal: options.signal,
+        });
+    }
+
+    /** `GET /v0/stories/:storyId/viewers` — who saw the author's own story, reactors first. */
+    async listStoryViewers(
+        storyId: Cuid2,
+        query: StoryViewersQuery = {},
+        options: RequestOptions = {},
+    ): Promise<StoryViewersResponse> {
+        return await this.#json({
+            method: "GET",
+            path: `${storyPath(storyId)}/viewers`,
+            query: { cursor: query.cursor, limit: query.limit },
+            signal: options.signal,
+        });
+    }
+
+    /** `GET /v0/stories/:storyId/frames/:frameId` — one frame's bytes, or one range of them. */
+    async getStoryFrame(
+        storyId: Cuid2,
+        frameId: Cuid2,
+        options: ToolCallMediaRequestOptions = {},
+    ): Promise<ToolCallMediaContent | null> {
+        const response = await this.#send({
+            method: "GET",
+            path: storyFramePath(storyId, frameId),
+            accept: "*/*",
+            ifNoneMatch: options.ifNoneMatch,
+            range: options.range === undefined ? undefined : rangeHeader(options.range),
+            signal: options.signal,
+            allowNotModified: true,
+        });
+        if (response.status === 304) return null;
+        return {
+            contentRange: response.status === 206 ? response.headers.get("content-range") : null,
+            contentType: response.headers.get("content-type") ?? "application/octet-stream",
+            data: await response.arrayBuffer(),
+            etag: response.headers.get("etag"),
+        };
+    }
+
+    /** The URL of one frame, for an element that loads it through a transport adding the token. */
+    storyFrameUrl(storyId: Cuid2, frameId: Cuid2): string {
+        return endpointUrl(this.#endpoint, storyFramePath(storyId, frameId));
+    }
+
+    // Stickers
+
+    /** `GET /v0/stickers/packs` — every pack in the daemon's sticker folder, in catalog order. */
+    async listStickerPacks(options: RequestOptions = {}): Promise<StickerPacksResponse> {
+        return await this.#json({
+            method: "GET",
+            path: "v0/stickers/packs",
+            signal: options.signal,
+        });
+    }
+
+    /** `GET /v0/stickers/packs/:packId` — one pack and its stickers in pack order. */
+    async getStickerPack(
+        packId: StickerPackId,
+        options: RequestOptions = {},
+    ): Promise<StickerPackResponse> {
+        return await this.#json({
+            method: "GET",
+            path: `v0/stickers/packs/${encodeURIComponent(packId)}`,
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * The URL of one sticker's file, for an element that loads it through a transport adding the
+     * token. `lottie` asks for a `tgs` sticker as uncompressed Lottie JSON.
+     */
+    stickerFileUrl(packId: StickerPackId, stickerId: StickerId, lottie = false): string {
+        return endpointUrl(
+            this.#endpoint,
+            `v0/stickers/packs/${encodeURIComponent(packId)}/stickers/${encodeURIComponent(stickerId)}/file`,
+            lottie ? { as: "lottie" } : {},
+        );
+    }
+
+    /** `GET /v0/stickers/search` — by emoji tag or pack-title word, the caller's recents first. */
+    async searchStickers(
+        query: StickerSearchQuery,
+        options: RequestOptions = {},
+    ): Promise<StickerSearchResponse> {
+        return await this.#json({
+            method: "GET",
+            path: "v0/stickers/search",
+            query: { q: query.q, emoji: query.emoji, kind: query.kind, limit: query.limit },
+            signal: options.signal,
+        });
+    }
+
+    /** `GET /v0/stickers/recents` — the caller's recently used stickers, most recent first. */
+    async getStickerRecents(options: RequestOptions = {}): Promise<StickerRecentsResponse> {
+        return await this.#json({
+            method: "GET",
+            path: "v0/stickers/recents",
+            signal: options.signal,
+        });
+    }
+
+    /** `POST /v0/stickers/recents` — moves one sticker to the front of the caller's recents. */
+    async useSticker(
+        request: UseStickerRequest,
+        options: RequestOptions = {},
+    ): Promise<StickerRecentsResponse> {
+        return await this.#json({
+            method: "POST",
+            path: "v0/stickers/recents",
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /** `DELETE /v0/stickers/recents` — clears the caller's recents. */
+    async clearStickerRecents(
+        options: RequestOptions & { mutationId?: string } = {},
+    ): Promise<StickerRecentsResponse> {
+        return await this.#json({
+            method: "DELETE",
+            path: "v0/stickers/recents",
+            json: bodyOf(options),
             signal: options.signal,
         });
     }
@@ -3575,6 +3869,14 @@ function artifactFilePath(
 }
 
 /** The `Range` header for one byte range. */
+function storyPath(storyId: Cuid2): string {
+    return `v0/stories/${encodeURIComponent(storyId)}`;
+}
+
+function storyFramePath(storyId: Cuid2, frameId: Cuid2): string {
+    return `${storyPath(storyId)}/frames/${encodeURIComponent(frameId)}`;
+}
+
 function toolCallMediaPath(agentId: Cuid2, toolCallId: Cuid2, index: number): string {
     if (!Number.isSafeInteger(index) || index < 0) {
         throw new TypeError("A media index must be a non-negative integer.");

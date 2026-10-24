@@ -23,6 +23,8 @@ export const artifactTypeSchema = Type.Union([
     Type.Literal("sidebar"),
     /** A proposed sidebar the person may edit, accept, or decline; see the Spaces proposals. */
     Type.Literal("sidebar_proposal"),
+    /** One story, written only through the story routes and `draft_story`; see Stories. */
+    Type.Literal("story"),
     Type.Literal("image"),
     Type.Literal("image_series"),
     Type.Literal("video"),

@@ -104,6 +104,13 @@ export const healthResponseSchema = Type.Object({
              * as `sidebar_proposal` artifacts, served under `/v0/spaces/sidebar/proposals`.
              */
             sidebarProposals: Type.Optional(Type.Boolean()),
+            /**
+             * True when the daemon serves `/v0/stories`, the `story` artifact type, `draft_story`,
+             * and `story.*` events. A person with Stories off still receives `404` from them.
+             */
+            stories: Type.Optional(Type.Boolean()),
+            /** True when the daemon serves `/v0/stickers` and `sticker_recents.updated`. */
+            stickers: Type.Optional(Type.Boolean()),
         }),
     ),
     /** Always `true`; a daemon that cannot answer does not answer. */

@@ -36,6 +36,14 @@ import type { HappyIntegration } from "./integrations.js";
 import type { Message, Run } from "./messages.js";
 import type { BackgroundProcess } from "./processes.js";
 import type { Profile } from "./profile.js";
+import type { StickerRecentsUpdatedPayload } from "./stickers.js";
+import type {
+    StoryDeletedPayload,
+    StoryEventPayload,
+    StoryReactedPayload,
+    StorySeenPayload,
+    StoryUpdatedPayload,
+} from "./stories.js";
 import type { Project } from "./projects.js";
 import type { Question } from "./questions.js";
 import {
@@ -726,7 +734,14 @@ export type HappyAgentEvent =
     | EventEnvelope<"cloud.updated", CloudUpdatedPayload>
     | EventEnvelope<"happy.integration.updated", HappyIntegrationUpdatedPayload>
     | EventEnvelope<"user_settings.updated", UserSettingsUpdatedPayload>
-    | EventEnvelope<"mobile_connector.updated", MobileConnectorUpdatedPayload>;
+    | EventEnvelope<"mobile_connector.updated", MobileConnectorUpdatedPayload>
+    | EventEnvelope<"story.created", StoryEventPayload>
+    | EventEnvelope<"story.updated", StoryUpdatedPayload>
+    | EventEnvelope<"story.posted", StoryEventPayload>
+    | EventEnvelope<"story.deleted", StoryDeletedPayload>
+    | EventEnvelope<"story.seen", StorySeenPayload>
+    | EventEnvelope<"story.reacted", StoryReactedPayload>
+    | EventEnvelope<"sticker_recents.updated", StickerRecentsUpdatedPayload>;
 
 /** The name of an event this client build knows. */
 export type HappyAgentEventType = HappyAgentEvent["type"];
