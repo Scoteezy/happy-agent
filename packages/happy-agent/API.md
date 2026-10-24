@@ -10290,7 +10290,13 @@ base as version 1 and the edited document as version 2. With an open proposal, t
 its latest version, `baseVersion` is that proposal version, and the call makes the next version. A
 stale `baseVersion` is a conflict, and so is an edit whose old text does not occur exactly once. An
 edit that would change an aspect of a node that the person last set in this proposal is dropped
-with a note, and the rest of the call applies. The call presents the artifact (an `artifact`
+with a note, and the rest of the call applies. A proposal may regroup and fold rows whose place the
+person last set in the sidebar, because accepting it is the person's own change. It may still not
+move, fold away, or remove Search, Create, Happy, its own row, new work before its first message, or
+work running or active in the last two hours, and its new or renamed section labels follow the
+label rules under "Authorship"; such edits are dropped with a note. In a proposal, the rows of a
+section labelled `Stale` are only task rows quiet for at least two days: a bot, a shared list, or
+work active more recently is dropped from it with a note. The call presents the artifact (an `artifact`
 presentation with `shows: "latest"`) and returns its reference tag, so the proposal appears inline
 in Prioritizing's conversation at its full height and again after every revision. `list_sidebar`
 also returns the open proposal, its document, the nodes the person last set in it, and the
@@ -10463,8 +10469,9 @@ protects the section, not each row. Prioritizing may not move a block that carri
 new work, or work active in the last two hours, and may not remove or relabel the default `bots`
 and `tasks` sections. What else its batches may change is set out under "What applies without a
 proposal"; everything beyond that is dropped with a note and belongs in a proposal. Prioritizing's new or
-renamed section labels may not name age
-or whether work is finished (such as Older, Done, Archive, or Stale) and may not repeat another
+renamed section labels may not name age,
+status, or whether work is finished (such as Older, Done, Archive, Stale, Active, Current, or In
+progress) and may not repeat another
 section's label ignoring case and spacing; the person may label sections freely. The one exception
 is the label `Stale`, exactly, which Prioritizing may give one section, `<happy-section id="stale"
 label="Stale" collapsed="true"/>`, for unfinished work that has gone quiet. It is never required,

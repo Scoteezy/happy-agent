@@ -18,21 +18,31 @@ describe("sidebar proposals", () => {
         '<happy-space id="done"/>',
         '<happy-space id="mine"/>',
         '<happy-space id="busy"/>',
+        '<happy-section id="bots" label="Bots"/>',
+        '<happy-space id="helper"/>',
+        '<happy-space id="quiet"/>',
     );
     const rules = {
         person: (id: string, aspect: string) => id === "mine" && aspect === "place",
         mayNotArchive: (id: string) =>
             id === "busy" ? "busy is active in the last two hours; it is not finished." : undefined,
+        mayNotMove: (id: string) =>
+            id === "busy"
+                ? "busy was active in the last two hours."
+                : id === "happy"
+                  ? "Prioritizing cannot move or hide Happy."
+                  : undefined,
+        mayNotStale: (id: string) => (id === "helper" ? "helper is a bot." : undefined),
     };
 
-    it("offers finished work under Archive and keeps what the person edited", () => {
+    it("offers finished work under Archive and quiet work under Stale, and keeps what may not move", () => {
         const result = reviewProposalOperations(
             sidebar,
             [
                 {
                     type: "insert",
                     node: { type: "section", id: "archive", label: "Archive" },
-                    to: { after: "busy" },
+                    to: { after: "quiet" },
                 },
                 { type: "move", id: "done", to: { after: "archive" } },
                 { type: "move", id: "busy", to: { after: "done" } },
@@ -40,11 +50,20 @@ describe("sidebar proposals", () => {
                 {
                     type: "insert",
                     node: { type: "section", id: "stale", label: "Stale", collapsed: true },
-                    to: { after: "desktop" },
+                    to: { after: "done" },
                 },
+                { type: "move", id: "quiet", to: { after: "stale" } },
+                { type: "move", id: "helper", to: { after: "stale" } },
+                // Folding Desktop would tuck busy away.
+                { type: "set", id: "desktop", collapsed: true },
                 {
                     type: "insert",
                     node: { type: "section", id: "older", label: "Older" },
+                    to: { after: "happy" },
+                },
+                {
+                    type: "insert",
+                    node: { type: "section", id: "now", label: "Active" },
                     to: { after: "happy" },
                 },
             ],
@@ -54,11 +73,19 @@ describe("sidebar proposals", () => {
             "insert",
             "move",
             "insert",
+            "move",
         ]);
         expect(result.notes).toEqual([
-            "Dropped move busy after done: busy is active in the last two hours; it is not finished.",
+            "Dropped move busy after done: busy was active in the last two hours.",
             "Dropped move mine after happy: Keep the person's edit of this proposal.",
-            'Dropped insert section older after happy: Section "Older" sorts by age or whether work is finished; name a subject, or use Stale for quiet unfinished work.',
+            "Dropped move helper after stale: helper is a bot.",
+            expect.stringMatching(/^Dropped .*desktop.*: busy was active in the last two hours\.$/),
+            expect.stringMatching(
+                /Section "Older" sorts by age, status, or whether work is finished/,
+            ),
+            expect.stringMatching(
+                /Section "Active" sorts by age, status, or whether work is finished/,
+            ),
         ]);
         expect(archiveOffers(result.document)).toEqual(["done"]);
         // The sidebar never takes the Archive heading or what accepting archives.
@@ -67,9 +94,12 @@ describe("sidebar proposals", () => {
                 doc(
                     '<happy-space id="happy"/>',
                     '<happy-section id="desktop" label="Desktop"/>',
-                    '<happy-section id="stale" label="Stale" collapsed="true"/>',
                     '<happy-space id="mine"/>',
                     '<happy-space id="busy"/>',
+                    '<happy-section id="bots" label="Bots"/>',
+                    '<happy-space id="helper"/>',
+                    '<happy-section id="stale" label="Stale" collapsed="true"/>',
+                    '<happy-space id="quiet"/>',
                 ),
             ),
         );

@@ -99,7 +99,7 @@ export function reviewPrioritizingOperation(
               : undefined;
     if (label !== undefined) {
         if (agedLabel(label))
-            return `Section "${label}" sorts by age or whether work is finished; name a subject instead.`;
+            return `Section "${label}" sorts by age, status, or whether work is finished; name a subject instead.`;
         const name = (text: string) => text.trim().replace(/\s+/g, " ").toLowerCase();
         const twin = after.items.find(
             (item) =>
@@ -138,12 +138,15 @@ export function reviewPrioritizingOperation(
 export const STALE_SECTION_LABEL = "Stale";
 
 /**
- * An "Older" or "Done" section reads as finished work; sections name subjects instead. "Stale" is
- * the one exception, which the person asked for.
+ * An "Older" or "Done" section reads as finished work, and an "Active" or "In progress" one is a
+ * status catch-all; sections name subjects instead. "Stale" is the one exception, which the person
+ * asked for.
  */
 export function agedLabel(label: string): boolean {
     return (
         label.trim() !== STALE_SECTION_LABEL &&
-        /\b(old|older|oldest|done|finished|archive|archived|stale)\b/i.test(label)
+        /\b(old|older|oldest|done|finished|archive|archived|stale|active|current|ongoing|in progress|wip)\b/i.test(
+            label,
+        )
     );
 }

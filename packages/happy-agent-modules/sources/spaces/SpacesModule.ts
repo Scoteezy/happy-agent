@@ -186,6 +186,8 @@ const MAX_BRIEF_TEXT = 2_000;
 const NEW_WORK_EXCERPT = 1_500;
 /** How many notices about one conversation wait for the next brief; older ones are dropped. */
 const CONVERSATION_BRIEFS_KEPT = 3;
+/** Unfinished work quiet this long may be proposed for Stale. */
+const SPACE_STALE_AFTER_MS = 2 * 24 * 60 * 60_000;
 /** Work active this recently is never folded or hidden by Prioritizing. */
 export const SPACE_RECENT_WORK_MS = 2 * 60 * 60_000;
 
@@ -1383,6 +1385,10 @@ export class SpacesModule implements AgentModule {
                       ? { newWork: "not placed yet" }
                       : {}),
                 ...(placedByPerson ? { placedByPerson: true } : {}),
+                // Nothing to read with read_conversations.
+                ...(space.role === "focus" || space.contents[0]?.kind === "surface"
+                    ? { noConversation: true }
+                    : {}),
             });
             const content = space.contents[0];
             if (content !== undefined && content.kind !== "surface" && !isUntouchedStemCell(space))
@@ -1641,6 +1647,13 @@ export class SpacesModule implements AgentModule {
             const rows = new Map(
                 (await querySpaces(txCtx, ownerUserId)).map((row) => [row.id, row]),
             );
+            // Stale is for unfinished tasks that went quiet; reading when each was last active.
+            const quiet = new Map<string, boolean>();
+            for (const row of rows.values()) {
+                if (row.role !== "item" || row.contents[0]?.kind !== "task") continue;
+                const at = (await this.describe(txCtx, row)).lastActivityAt;
+                quiet.set(row.id, at === undefined || Date.now() - at >= SPACE_STALE_AFTER_MS);
+            }
             const authorship = open?.authorship ?? {};
             const reviewed = reviewProposalOperations(
                 base.document,
@@ -1653,6 +1666,29 @@ export class SpacesModule implements AgentModule {
                             return `${id} is not a task's row; only tasks are offered for archiving.`;
                         if (rules.untouched.has(id) || rules.recent.has(id))
                             return `${id} is new or active in the last two hours; it is not finished.`;
+                        return undefined;
+                    },
+                    mayNotMove: (id) => {
+                        if (id === "happy-search" || id === "happy-create")
+                            return "Search and Create are the person's to move.";
+                        if (id === rules.happyId) return "Prioritizing cannot move or hide Happy.";
+                        if (id === rules.focusId)
+                            return "Your own row stays where it is; only the person moves it.";
+                        if (rules.untouched.has(id))
+                            return "Leave new work alone until the person sends its first message.";
+                        if (rules.recent.has(id))
+                            return `${id} was active in the last two hours; leave it where it is, and shown.`;
+                        return undefined;
+                    },
+                    mayNotStale: (id) => {
+                        const row = rows.get(id);
+                        if (row === undefined) return undefined;
+                        if (row.contents[0]?.kind === "bot")
+                            return `${id} is a bot, an ongoing responsibility; keep it with the bots.`;
+                        if (row.contents[0]?.kind === "surface")
+                            return `${id} is a shared list; put it with its topic or work, not in Stale.`;
+                        if (quiet.get(id) === false)
+                            return `${id} was active in the last two days; Stale is for work quiet longer.`;
                         return undefined;
                     },
                 },

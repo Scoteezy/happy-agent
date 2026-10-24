@@ -239,6 +239,21 @@ runtime that carries a system prompt and tool set, so the prompt stays in
 `formatPrioritizingInstructions`, and the example arrangement in it is advice, never a rule the
 daemon enforces.
 
+## Proposals are reviewed, not trusted to the prompt
+
+Replays of the prompt on real sidebars (Opus, 21 runs) showed proposals that folded a bot row
+active 29 minutes earlier, moved work active within the hour, put bots and shared lists into Stale,
+and kept a 17-row "Active" section untouched; and none offered the clearly finished tasks for
+archiving, because most rows counted as placed by the person through mirroring, and the prompt
+said never to touch those. The daemon now drops, with a note, a proposal edit that moves, removes,
+or folds away Search, Create, Happy, Prioritizing's row, untouched new work, or work active in the
+last two hours, and Stale entries that are bots, shared lists, or tasks active in the last two
+days. Section labels naming a status (Active, Current, In progress) are refused like age labels.
+The prompt lets a proposal regroup and fold rows the person placed, since accepting is their
+consent, keeps what they put at the top, asks it to section an unsectioned sidebar or a catch-all
+(Kirill: "if it's not sectioned, probably should offer to section it"), and to reply in one
+sentence, since replies ran 80 to 250 words. `list_sidebar` marks rows with nothing to read.
+
 ## Prioritizing shows its own row, once
 
 Notes in Happy's chat interrupted the main agent: "the focus agent normally should never bother the

@@ -23,7 +23,7 @@ it("keeps section names and identities unique and refuses sections named for age
         expect(
             (await h.edit(append('  <happy-section id="later" label="Older"/>\n'))).text,
         ).toContain(
-            'Section "Older" sorts by age or whether work is finished; name a subject instead.',
+            'Section "Older" sorts by age, status, or whether work is finished; name a subject instead.',
         );
         const duplicate = append('  <happy-separator id="movies"/>\n');
         expect((await h.edit(duplicate)).text).toContain("Duplicate ID movies");

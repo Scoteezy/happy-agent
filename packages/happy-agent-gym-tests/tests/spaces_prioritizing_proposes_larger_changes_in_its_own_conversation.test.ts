@@ -183,6 +183,19 @@ it("proposes a reorganisation the person edits and accepts, archives what it off
         await h.settle();
         const before = await view(h);
         expect(before.proposal).toBeNull();
+        // Even a proposal may not move Happy; a draft with nothing left is refused.
+        expect(
+            (
+                await h.call("propose_sidebar", {
+                    baseVersion: before.version,
+                    edits: [
+                        { oldText: line(happy.id), newText: "" },
+                        { oldText: "</nav>", newText: `${line(happy.id)}</nav>` },
+                    ],
+                })
+            ).text,
+        ).toContain("Prioritizing cannot move or hide Happy.");
+        expect((await view(h)).proposal).toBeNull();
 
         // A new section is a proposal: the live sidebar stays as it is.
         const proposed = await h.call("propose_sidebar", {

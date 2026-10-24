@@ -1,5 +1,6 @@
 import {
     applySpaceSidebarOperations,
+    locateSpaceSidebarNode,
     SpaceSidebarError,
     spaceSidebarRunLength,
     type SpaceSidebarDocument,
@@ -8,7 +9,8 @@ import {
 
 import type { SidebarAspect } from "../Space.js";
 import { describeSidebarOperation } from "./applyPrioritizingOperations.js";
-import { agedLabel } from "./reviewPrioritizingOperation.js";
+import { agedLabel, STALE_SECTION_LABEL } from "./reviewPrioritizingOperation.js";
+import { regroupedSidebarIds, shownSidebarRows, sidebarIds } from "./sidebarLayout.js";
 
 /** The section that, in a proposal only, heads the rows offered for archiving. */
 export const ARCHIVE_SECTION_ID = "archive";
@@ -16,13 +18,31 @@ export const ARCHIVE_SECTION_LABEL = "Archive";
 
 /** The IDs of every item in a proposal's Archive block, the heading excluded. */
 export function archiveOffers(document: SpaceSidebarDocument): string[] {
-    const index = document.items.findIndex(
+    return sectionBlock(
+        document,
         (item) => item.type === "section" && item.id === ARCHIVE_SECTION_ID,
     );
-    if (index < 0) return [];
-    return document.items
-        .slice(index + 1, index + spaceSidebarRunLength(document.items, index))
-        .map((item) => item.id);
+}
+
+/** The IDs of every item in the blocks of sections labelled Stale, the headings excluded. */
+function staleRows(document: SpaceSidebarDocument): string[] {
+    return sectionBlock(
+        document,
+        (item) => item.type === "section" && item.label.trim() === STALE_SECTION_LABEL,
+    );
+}
+
+function sectionBlock(
+    document: SpaceSidebarDocument,
+    heading: (item: SpaceSidebarDocument["items"][number]) => boolean,
+): string[] {
+    return document.items.flatMap((item, index) =>
+        heading(item)
+            ? document.items
+                  .slice(index + 1, index + spaceSidebarRunLength(document.items, index))
+                  .map((member) => member.id)
+            : [],
+    );
 }
 
 /** The proposal as the sidebar would take it: no Archive heading and none of `leaving`. */
@@ -42,8 +62,9 @@ export function withoutArchive(
 
 /**
  * Prioritizing's revision of a proposal, applied one operation at a time. An operation is dropped
- * with a note when it would change what the person set in this proposal, name a section by age, or
- * offer something for archiving that may not be archived; the rest still apply.
+ * with a note when it would change what the person set in this proposal, name a section by age or
+ * status, move or fold away what may not move, or offer something for archiving or Stale that may
+ * not go there; the rest still apply.
  */
 export function reviewProposalOperations(
     document: SpaceSidebarDocument,
@@ -53,6 +74,13 @@ export function reviewProposalOperations(
         readonly person: (id: string, aspect: SidebarAspect) => boolean;
         /** Why this item may not be offered for archiving, or `undefined` when it may. */
         readonly mayNotArchive: (id: string) => string | undefined;
+        /**
+         * Why this item may not change section, leave, or fold out of view, such as Happy or work
+         * active in the last two hours, or `undefined` when it may.
+         */
+        readonly mayNotMove: (id: string) => string | undefined;
+        /** Why this item may not go into Stale, or `undefined` when it may. */
+        readonly mayNotStale: (id: string) => string | undefined;
     },
 ): { document: SpaceSidebarDocument; operations: SpaceSidebarOperation[]; notes: string[] } {
     let working = document;
@@ -109,12 +137,32 @@ function review(
         if (label !== undefined && label !== ARCHIVE_SECTION_LABEL)
             return `The archive section is labelled "${ARCHIVE_SECTION_LABEL}".`;
     } else if (label !== undefined && agedLabel(label)) {
-        return `Section "${label}" sorts by age or whether work is finished; name a subject, or use Stale for quiet unfinished work.`;
+        return `Section "${label}" sorts by age, status, or whether work is finished; name a subject, or use Stale for quiet unfinished work.`;
+    }
+    // What changes section, leaves, or folds out of view; a section moved as a block carries its
+    // rows without regrouping them.
+    const moved = new Set(regroupedSidebarIds(before, after));
+    if (operation.type === "move") moved.add(target);
+    if (operation.type === "remove") {
+        const at = locateSpaceSidebarNode(before, target);
+        for (const id of at === undefined ? [target] : sidebarIds([at.node])) moved.add(id);
+    }
+    const shownAfter = new Set(shownSidebarRows(after));
+    for (const id of shownSidebarRows(before)) if (!shownAfter.has(id)) moved.add(id);
+    for (const id of moved) {
+        const refusal = rules.mayNotMove(id);
+        if (refusal !== undefined) return refusal;
     }
     const offered = new Set(archiveOffers(before));
     for (const id of archiveOffers(after)) {
         if (offered.has(id)) continue;
         const refusal = rules.mayNotArchive(id);
+        if (refusal !== undefined) return refusal;
+    }
+    const stale = new Set(staleRows(before));
+    for (const id of staleRows(after)) {
+        if (stale.has(id)) continue;
+        const refusal = rules.mayNotStale(id);
         if (refusal !== undefined) return refusal;
     }
     return undefined;
