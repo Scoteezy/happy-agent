@@ -10235,7 +10235,9 @@ conversation to about 4,000, and the whole answer to about 24,000; conversations
 left out, and the answer ends with one line naming each of them by its heading, to be read again.
 `set_space_icon` takes a
 space ID or a session's agent ID.
-Prioritizing runs on the person's default model from Settings at that model's default effort. It
+A new Prioritizing is made on the person's default model from Settings at that model's default
+effort. After that it runs on its own mode, as `GET /v0/agents/:agentId/mode` reports it: its notices
+name no model, so a model or effort the person chooses in its conversation stays. It
 gives every session an icon but leaves sessions out of the document unless the person is likely to
 want one shown, such as a session changing code in a repository or one waiting for their review.
 It may propose a widget, rarely, where a compact card says more than a row. It may attach a

@@ -53,7 +53,10 @@ export function reviewDirectOperation(
                 !rules.fresh.has(operation.id) &&
                 operation.id !== rules.focusId
             )
-                return refusal;
+                // Moving a neighbour below Prioritizing's row is how a model tries to lift its row.
+                return "after" in operation.to && operation.to.after === rules.focusId
+                    ? `${refusal} To put your row back under Happy, move your own row instead; that applies directly.`
+                    : refusal;
             break;
         case "remove":
             if (!nested(before, operation.id)) return refusal;

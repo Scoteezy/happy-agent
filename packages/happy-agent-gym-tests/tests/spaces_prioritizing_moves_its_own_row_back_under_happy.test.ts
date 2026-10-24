@@ -35,6 +35,14 @@ it("lets Prioritizing move its own row back under Happy itself, tells it once af
         }, "the new row between Happy and Prioritizing's row");
         await h.settle();
 
+        // Its own row is a conversation it can read, and it is not the person's.
+        const listed = JSON.parse((await h.call("list_sidebar", {})).text) as {
+            version: number;
+            spaces: { id: string; noConversation?: true; placedByPerson?: true }[];
+        };
+        expect(listed.spaces.find((row) => row.id === own.id)).not.toHaveProperty("noConversation");
+        expect(listed.spaces.find((row) => row.id === own.id)).not.toHaveProperty("placedByPerson");
+
         // Prioritizing moves its own row back with an ordinary edit, no proposal needed.
         const pushed = await h.read();
         const moved = await h.call("edit_sidebar", {

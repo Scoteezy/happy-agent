@@ -1408,9 +1408,7 @@ export class SpacesModule implements AgentModule {
                 ...(placedByPerson ? { placedByPerson: true } : {}),
                 ...(kept.has(space.id) ? { keepInPlace: true } : {}),
                 // Nothing to read with read_conversations.
-                ...(space.role === "focus" || space.contents[0]?.kind === "surface"
-                    ? { noConversation: true }
-                    : {}),
+                ...(space.contents[0]?.kind === "surface" ? { noConversation: true } : {}),
             });
             const content = space.contents[0];
             if (content !== undefined && content.kind !== "surface" && !isUntouchedStemCell(space))
@@ -3524,8 +3522,8 @@ export class SpacesModule implements AgentModule {
                 return;
             const prioritizingAgentId = await this.#livePrioritizing(ctx, ownerUserId);
             if (prioritizingAgentId === undefined) return;
-            const route = await this.#prioritizingRoute(ctx, ownerUserId);
-            if (route === undefined) throw new Error("No model is available for Prioritizing.");
+            // A notice names no model: Prioritizing keeps running on its own mode, the default
+            // model it was made with until the person chooses another for it.
             await this.#requireAgents().send(
                 ctx,
                 prioritizingAgentId,
@@ -3533,9 +3531,6 @@ export class SpacesModule implements AgentModule {
                 {
                     id: messageId,
                     metadata: { ...AGENT_MESSAGE_ORIGIN_METADATA },
-                    provider: route.providerId,
-                    model: route.model,
-                    effort: route.effort,
                     permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
                 },
             );
@@ -3595,7 +3590,7 @@ export class SpacesModule implements AgentModule {
         });
     }
 
-    /** The default model from Settings, which a new chat also starts with, at its own effort. */
+    /** What a new Prioritizing is made on: the default model from Settings, at its own effort. */
     async #prioritizingRoute(ctx: Context, ownerUserId: SpaceOwnerId) {
         // Settings belong to whoever the context names: the standalone person, or a team member.
         let personCtx: Context | undefined = ctx;

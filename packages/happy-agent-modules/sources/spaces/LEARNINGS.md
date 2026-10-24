@@ -304,6 +304,13 @@ active an hour ago, not counting a bot as work. The prompt now says to offer a f
 Archive and an unfinished quiet one under Stale rather than folding it into a topic section, and
 never to fold away anything active in the last two hours, "bot or task".
 
+On Kirill's install, after the update notice, Prioritizing (on GPT-5.6 Sol) tried to restore its
+row by moving the row between it and Happy below its own row; that move is not allowed without a
+proposal, so it gave up and left its row third. The prompt now says to move its own row, never the
+rows in between, and the refusal of a move placed right after its own row says to move its own row
+instead. `list_sidebar` also marked its own row `noConversation`, though it has one; only shared
+Surfaces carry that mark now.
+
 ## Prioritizing shows its own row, once
 
 Notes in Happy's chat interrupted the main agent: "the focus agent normally should never bother the
@@ -330,6 +337,11 @@ poor. It now runs on `happy-desktop.model.default`, the model a new chat starts 
 model's own default effort, read through the person's own context in team mode; without a chosen
 model still served, the installation's default model. Titles likewise no longer uses a cheap
 route; it writes names with the chat's own model (see the Titles learnings).
+
+That default is only what a new Prioritizing is made on. Every notice also named the current default
+model, so on Kirill's install, where Opus 5.5 had been chosen in Prioritizing's own conversation and
+its mode reported it, every wake ran on the Settings default (GPT-5.6 Sol) instead. Notices now name
+no model, so Prioritizing runs on the mode it reports.
 
 ## Clients report nothing about what the person sees
 

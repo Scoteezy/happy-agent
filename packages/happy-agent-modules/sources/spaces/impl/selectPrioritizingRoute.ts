@@ -19,7 +19,7 @@ const defaultModelSchema = Type.Object({
 });
 
 /**
- * Picks what Prioritizing runs on: the default model from Settings, the one Happy suggests for
+ * Picks what a new Prioritizing is made on: the default model from Settings, the one Happy suggests for
  * every new chat, at that model's own default effort. Grouping and choosing what to show need the
  * strongest model, never a cheaper one. Without a chosen model still served, the installation's
  * default model.

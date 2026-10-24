@@ -185,6 +185,17 @@ describe("Prioritizing's operations", () => {
         expect(result.operations).toEqual(allowed);
         expect(result.notes).toHaveLength(refused.length);
         for (const note of result.notes) expect(note).toContain("propose_sidebar");
+        // Lifting its row by moving a neighbour below it is refused with the move that works.
+        const underHappy = applySpaceSidebarOperations(sidebar, [allowed[0]!]).document;
+        const neighbour = applyPrioritizingOperations(
+            underHappy,
+            [{ type: "move", id: "a", to: { after: "focus" } }],
+            direct,
+            undefined,
+        );
+        expect(neighbour.operations).toEqual([]);
+        expect(neighbour.notes[0]).toContain("move your own row instead; that applies directly");
+        expect(result.notes.join("\n")).not.toContain("move your own row instead");
         // What the person asked for in their own words needs no proposal.
         expect(
             applyPrioritizingOperations(sidebar, refused, { ...direct, direct: false }, undefined)
