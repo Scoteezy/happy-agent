@@ -179,26 +179,46 @@ function applyReviewed(
 }
 
 /**
- * The first kept row the proposal leaves out of place, and the edit from which it stays so: the
- * earliest one after which every document leaves it out of place. Nothing when every kept row is
- * where the person keeps it, or was already out of place in the draft it revises.
+ * The first thing the whole proposal leaves out of place, and the edit from which it stays so: the
+ * earliest one after which every document leaves it out of place. That is a kept row away from
+ * where the person keeps it, or a first separator with nothing left below it, which then
+ * separates nothing. Nothing when all is in place, or was already out of place in the draft it
+ * revises.
  */
 function keptBreach(
     document: SpaceSidebarDocument,
     states: readonly { index: number; document: SpaceSidebarDocument }[],
     rules: ProposalRules,
 ): { index: number; reason: string } | undefined {
-    for (const { id } of document.items) {
-        if (!rules.keptAtTop(id) || keptOutOfPlace(document, document, id) !== undefined) continue;
+    const checks = [
+        ...document.items
+            .filter(({ id }) => rules.keptAtTop(id))
+            .map(
+                ({ id }) =>
+                    (draft: SpaceSidebarDocument) =>
+                        keptOutOfPlace(document, draft, id),
+            ),
+        separatesNothing,
+    ];
+    for (const check of checks) {
+        if (check(document) !== undefined) continue;
         let breach: { index: number; reason: string } | undefined;
         for (let at = states.length - 1; at >= 0; at--) {
-            const reason = keptOutOfPlace(document, states[at]!.document, id);
+            const reason = check(states[at]!.document);
             if (reason === undefined) break;
             breach = { index: states[at]!.index, reason };
         }
         if (breach !== undefined) return breach;
     }
     return undefined;
+}
+
+/** Why the first separator separates nothing, with no row left below it, if it does. */
+function separatesNothing(document: SpaceSidebarDocument): string | undefined {
+    const end = document.items.findIndex((item) => item.type === "separator");
+    if (end < 0 || document.items.slice(end + 1).some((item) => item.type === "space"))
+        return undefined;
+    return `This would leave no row below the separator ${document.items[end]!.id}, so it separates nothing; keep the rows it set apart below it.`;
 }
 
 /** Why `document` leaves a row the person keeps above the separator out of place, if it does. */

@@ -10299,7 +10299,8 @@ move it, fold it away, remove it, offer it under Archive or Stale, or leave it b
 separator, though it may add, rename, or remove the headings around it. Kept rows are checked
 against the proposal as a whole, so an edit that leaves one out of place only on the way to the
 final document stands; the edit from which it stays out of place is dropped, with a note saying
-what to do instead. It may group but never
+what to do instead. A proposal also may not leave the sidebar's first separator with no row below
+it, where it separates nothing; that is checked the same way. It may group but never
 fold away or remove work running or active in the last two hours; its new or renamed section
 labels follow the
 label rules under "Authorship"; such edits are dropped with a note. In a proposal, the rows of a

@@ -200,6 +200,37 @@ describe("sidebar proposals", () => {
         );
     });
 
+    it("keeps a row below the separator, so it still separates something", () => {
+        const result = reviewProposalOperations(
+            doc(
+                '<happy-space id="happy"/>',
+                '<happy-separator id="top"/>',
+                '<happy-space id="older"/>',
+                '<happy-space id="oldest"/>',
+            ),
+            [
+                { type: "move", id: "top", to: { after: "oldest" } },
+                { type: "move", id: "older", to: { after: "happy" } },
+                { type: "move", id: "oldest", to: { after: "happy" } },
+            ],
+            rules,
+        );
+        expect(result.notes).toEqual([
+            "Dropped move top after oldest: This would leave no row below the separator top, so it separates nothing; keep the rows it set apart below it.",
+            "Dropped move oldest after happy: This would leave no row below the separator top, so it separates nothing; keep the rows it set apart below it.",
+        ]);
+        expect(formatSpaceSidebar(result.document)).toBe(
+            formatSpaceSidebar(
+                doc(
+                    '<happy-space id="happy"/>',
+                    '<happy-space id="older"/>',
+                    '<happy-separator id="top"/>',
+                    '<happy-space id="oldest"/>',
+                ),
+            ),
+        );
+    });
+
     it("names the open sections a proposal over the budget could fold", () => {
         expect(
             quietOpenSections(

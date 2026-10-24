@@ -271,6 +271,9 @@ heading that a later edit in the same call closed off. Each case now has its own
 what to do instead, and kept rows are checked against the whole proposal: the edit from which a
 row stays out of place is dropped and the rest reviewed again. The prompt says a kept shared list
 or finished task stays too, since "shared lists go with their topic" kept pulling one away.
+With that, revisions fell to at most 5 a run, but refused separator removals led two runs to move
+the separator to the very end, so it separated nothing. The whole-proposal check now also refuses
+leaving the first separator with no row below it.
 `propose_sidebar` returns the proposal's ID without its reference tag. Over the budget it is never
 refused; the call names the open sections with nothing recent or kept to fold, and says nothing
 when there are none, since a bare "fold quiet sections" brought revisions that changed nothing. The prompt says finished work goes under Archive and Stale is
