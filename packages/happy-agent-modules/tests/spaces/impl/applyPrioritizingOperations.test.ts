@@ -38,9 +38,6 @@ function rules(
     return {
         person: (id, aspect) => authorship[id]?.[aspect] === "person",
         rows: new Set(["happy", "fresh", "mine", "busy", "quiet", "helper"]),
-        happyId: "happy",
-        untouched: new Set(["fresh"]),
-        recent: new Set(["busy"]),
         manual: new Set(),
         fresh: new Set(["fresh"]),
         focusId: undefined,
@@ -108,35 +105,21 @@ describe("Prioritizing's operations", () => {
         ]);
     });
 
-    it("keeps Happy, Search, new work, recent work, and the default sections in place", () => {
-        const refused = (operation: SpaceSidebarOperation) =>
-            applyPrioritizingOperations(base, [operation], rules(), undefined).notes[0];
-        expect(refused({ type: "move", id: "happy", to: { after: "helper" } })).toContain(
-            "cannot move or hide Happy",
-        );
-        expect(refused({ type: "move", id: "happy-search", to: { after: "helper" } })).toContain(
-            "Search and Create",
-        );
-        expect(refused({ type: "move", id: "fresh", to: { after: "helper" } })).toContain(
-            "Leave new work alone",
-        );
-        // Moving a section moves the recent work it carries.
-        expect(refused({ type: "move", id: "desktop", to: { after: "helper" } })).toContain(
-            "active in the last two hours",
-        );
-        expect(refused({ type: "set", id: "desktop", collapsed: true })).toContain(
-            "active in the last two hours",
-        );
-        expect(refused({ type: "remove", id: "bots" })).toContain("Bots and Tasks");
-        expect(refused({ type: "set", id: "desktop", label: "Older" })).toContain(
-            "name a subject instead",
-        );
-        expect(refused({ type: "set", id: "desktop", label: " bots " })).toContain(
-            'already called "Bots"',
-        );
+    it("leaves where things go to Prioritizing when the person asked for it", () => {
+        // Happy, new work, recent work, the default sections, and section names are its call.
+        const operations: SpaceSidebarOperation[] = [
+            { type: "move", id: "happy", to: { after: "helper" } },
+            { type: "move", id: "fresh", to: { after: "helper" } },
+            { type: "set", id: "desktop", collapsed: true },
+            { type: "set", id: "desktop", label: "Older" },
+            { type: "remove", id: "bots" },
+        ];
+        const result = applyPrioritizingOperations(base, operations, rules(), undefined);
+        expect(result.notes).toEqual([]);
+        expect(result.operations).toEqual(operations);
     });
 
-    it("applies at calm only new work's placement, Distractions, its own row, and nested changes", () => {
+    it("applies without a proposal only new work's placement, Distractions, its own row, and nested changes", () => {
         const sidebar = doc(
             '<happy-space id="happy"/>',
             '<happy-space id="cell"/>',
@@ -150,8 +133,6 @@ describe("Prioritizing's operations", () => {
             {},
             {
                 rows: new Set(["happy", "cell", "a", "b", "helper", "focus"]),
-                untouched: new Set(),
-                recent: new Set(),
                 fresh: new Set(["cell"]),
                 focusId: "focus",
                 direct: true,
@@ -159,6 +140,9 @@ describe("Prioritizing's operations", () => {
         );
         const allowed: SpaceSidebarOperation[] = [
             { type: "insert", node: { type: "space", id: "focus" }, to: { after: "happy" } },
+            // Its own row is its to keep right under Happy, wherever something pushed it.
+            { type: "move", id: "focus", to: { after: "cell" } },
+            { type: "move", id: "focus", to: { after: "happy" } },
             {
                 type: "insert",
                 node: {
@@ -206,16 +190,16 @@ describe("Prioritizing's operations", () => {
             applyPrioritizingOperations(sidebar, refused, { ...direct, direct: false }, undefined)
                 .operations,
         ).toEqual(refused);
-        // Its own row, once placed, stays where the person can find it.
+        // Once the person placed its row, it stays where they put it.
         const placed = applySpaceSidebarOperations(sidebar, [allowed[0]!]).document;
         expect(
             applyPrioritizingOperations(
                 placed,
                 [{ type: "move", id: "focus", to: { after: "helper" } }],
-                { ...direct, direct: false },
+                { ...direct, person: (id, aspect) => id === "focus" && aspect === "place" },
                 undefined,
             ).notes[0],
-        ).toContain("Your own row stays where it is");
+        ).toContain("Keep the person's manual placement.");
     });
 
     it("keeps a widget the person last edited", () => {

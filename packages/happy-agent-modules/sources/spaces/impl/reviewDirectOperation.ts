@@ -13,7 +13,8 @@ export const DISTRACTIONS_SECTION_ID = "distractions";
 /**
  * Why one of Prioritizing's operations may not apply without the person's consent, or
  * `undefined` when it may. A batch only places new work, adds Distractions, adds Prioritizing's
- * own row, and changes what is nested under a row; anything larger is a proposal the person accepts.
+ * own row and moves it, and changes what is nested under a row; anything larger is a proposal the
+ * person accepts.
  */
 export function reviewDirectOperation(
     before: SpaceSidebarDocument,
@@ -26,7 +27,7 @@ export function reviewDirectOperation(
         return at !== undefined && at.parentId !== "nav";
     };
     const refusal =
-        "without a proposal your edits only place new work, add Distractions, add your own row, and change what is nested under a row. Propose it with propose_sidebar instead.";
+        "without a proposal your edits only place new work, add Distractions, add or move your own row, and change what is nested under a row. Propose it with propose_sidebar instead.";
     switch (operation.type) {
         case "set": {
             const { type: _type, id: _id, expanded, ...rest } = operation;
@@ -49,7 +50,8 @@ export function reviewDirectOperation(
             if (
                 !nested(before, operation.id) &&
                 !nested(after, operation.id) &&
-                !rules.fresh.has(operation.id)
+                !rules.fresh.has(operation.id) &&
+                operation.id !== rules.focusId
             )
                 return refusal;
             break;

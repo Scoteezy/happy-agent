@@ -68,16 +68,13 @@ it("moves a section with its rows as one block and protects the person's section
         );
         expect(await notes()).toEqual([`Put ${title} in Ideas.`]);
 
-        // Moving the section carries recent work, so Prioritizing may not move it.
+        // The person drags the block: that marks only its heading as placed by hand.
         const raised = placed.html
             .replace(ideas, "")
             .replace(
                 '  <happy-separator id="divider"/>\n',
                 `  <happy-separator id="divider"/>\n${ideas}`,
             );
-        expect((await h.edit(raised)).text).toContain("last two hours");
-
-        // The person may: dragging the block marks only its heading as placed by hand.
         const dragged = await h.gym.http.ok<{ version: number; html: string }>(
             "PUT",
             "/v0/spaces/sidebar",
@@ -101,16 +98,6 @@ it("moves a section with its rows as one block and protects the person's section
             "Research above Bots",
         );
         expect((await notes()).slice(0, 2)).toEqual(["Moved Research.", "Added Research."]);
-
-        // Bots and Tasks are the person's defaults.
-        const latest = await h.read();
-        expect(
-            (await h.edit(latest.html.replace('  <happy-section id="bots" label="Bots"/>\n', "")))
-                .text,
-        ).toContain("Keep the Bots and Tasks sections");
-        expect(
-            (await h.edit(latest.html.replace('label="Tasks"', 'label="Projects"'))).text,
-        ).toContain("Keep the Bots and Tasks sections");
     } finally {
         await h.gym.dispose();
     }

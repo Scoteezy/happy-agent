@@ -70,7 +70,7 @@ it("keeps queued markup when ordinary artifact tools change only metadata", asyn
 
 const running = new Set<AgentGym>();
 
-it("lets Tidy move untouched rows after the person drags one row, and never moves Search or Create", async () => {
+it("lets Tidy move untouched rows after the person drags one row, and the person drag Search", async () => {
     const h = await sidebarGym();
     try {
         const first = await h.read();
@@ -128,7 +128,6 @@ it("lets Tidy move untouched rows after the person drags one row, and never move
         const searchLast = tidy
             .replace("  <happy-search/>\n", "")
             .replace("</nav>", "  <happy-search/>\n</nav>");
-        expect((await h.edit(searchLast)).text).toContain("Search and Create");
         // The person may drag Search and Create like any other item.
         const moved = await h.gym.http.ok<{ html: string }>("PUT", "/v0/spaces/sidebar", {
             html: searchLast,
@@ -259,11 +258,10 @@ it("validates every write, preserves CAS, replays mutations and persists sidebar
     expect((await gym.client.listArtifactVersions(initial.artifactId)).versions).toHaveLength(2);
 }, 120_000);
 
-it("guards stem cells, manual and recent placements, versions each edit once, and no longer takes viewport reports", async () => {
+it("guards manual placements, versions each edit once, and no longer takes viewport reports", async () => {
     const h = await sidebarGym();
     try {
         const initial = await h.read();
-        const happy = initial.spaces.find((row) => row.title === "Happy")!;
         await h.gym.http.ok("PUT", "/v0/spaces/sidebar", {
             html: initial.html.replace("</nav>", `${separator("desktop")}</nav>`),
             baseVersion: initial.version,
@@ -290,9 +288,6 @@ it("guards stem cells, manual and recent placements, versions each edit once, an
         expect((await h.call("edit_sidebar", moveAfterSeparator(manual.space.id))).text).toContain(
             "manual placement",
         );
-        expect((await h.call("edit_sidebar", moveAfterSeparator(happy.id))).text).toContain(
-            "Happy",
-        );
         await h.settle();
         current = await h.read();
         // A stale base applies only where its old text still occurs exactly once.
@@ -307,12 +302,9 @@ it("guards stem cells, manual and recent placements, versions each edit once, an
         await h.settle();
         expect((await h.read()).version).toBe(current.version);
 
-        // A stem cell stays a stem cell until the person says what they want.
+        // A stem cell keeps its icon until the person says what they want.
         const pending = await h.gym.http.ok<StemCell>("POST", "/v0/spaces/stem-cells", {});
         current = await h.read();
-        expect((await h.call("edit_sidebar", moveAfterSeparator(pending.space.id))).text).toContain(
-            "first message",
-        );
         expect(
             (await h.call("set_space_icon", { spaceId: pending.space.id, slug: "deploy" })).text,
         ).toContain("left alone");
@@ -329,14 +321,6 @@ it("guards stem cells, manual and recent placements, versions each edit once, an
             "the first placement",
         );
         current = await h.read();
-        expect(
-            (
-                await h.call("edit_sidebar", {
-                    baseVersion: current.version,
-                    edits: [{ oldText: line(pending.space.id), newText: "" }],
-                })
-            ).text,
-        ).toContain("last two hours");
         expect((await h.call("read_artifact", { artifactId: current.artifactId })).text).toContain(
             "happy-separator",
         );
@@ -370,11 +354,11 @@ it("guards stem cells, manual and recent placements, versions each edit once, an
             return doc.version === current.version + 2 ? doc : undefined;
         }, "one version per accepted call");
         expect(applied.html).toContain(`${separator("first")}${separator("second")}</nav>`);
-        // One batch per turn that changed something: two refused moves whose separators still
-        // landed, the first placement, and the two separators.
+        // One batch per call that changed something: the first placement and the two separators.
+        // The refused move of the person's row changed nothing.
         expect(
             (await h.gym.http.ok<{ batches: unknown[] }>("GET", "/v0/spaces/batches")).batches,
-        ).toHaveLength(5);
+        ).toHaveLength(3);
     } finally {
         await h.gym.dispose();
     }

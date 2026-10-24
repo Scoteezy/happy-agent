@@ -363,6 +363,8 @@ export const spaceOwnerStateSchema = Type.Object(
         /** When an event first asked to wake Prioritizing since its last brief. */
         sidebarWakeAt: Type.Optional(spaceTimestampSchema),
         prioritizingAgentId: Type.Optional(cuid2Schema),
+        /** The revision of Prioritizing's instructions it was last told about. */
+        prioritizingRevision: Type.Optional(Type.Integer({ minimum: 0 })),
         /** Prioritizing's proposals, newest last; at most one is open. */
         sidebarProposals: Type.Optional(Type.Array(sidebarProposalRecordSchema, { maxItems: 20 })),
         prioritizingGeneration: Type.Optional(Type.Integer({ minimum: 0 })),

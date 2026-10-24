@@ -136,12 +136,9 @@ import {
     affirmSidebarAuthorship,
     recordSidebarAuthorship,
 } from "./impl/recordSidebarAuthorship.js";
-import { focusFollowsHappy, keepFocusUnderHappy } from "./impl/keepFocusUnderHappy.js";
 import { type PrioritizingRules } from "./impl/reviewPrioritizingOperation.js";
 import {
     archiveOffers,
-    keptAboveSeparator,
-    quietOpenSections,
     reviewProposalOperations,
     withoutArchive,
 } from "./impl/reviewProposalOperations.js";
@@ -180,6 +177,13 @@ const PRIORITIZING_OPENING =
  */
 const PRIORITIZING_UPGRADED =
     "Happy Agent was updated. You now have a conversation and a row of your own, your notes go to your conversation, and larger changes are proposals the person accepts. Check the sidebar and your history: add your own row if it is missing and the person never removed it, and if the person has not seen a proposal from you yet, propose once how to file the work they already have.";
+const PRIORITIZING_UPDATED =
+    "Happy Agent was updated, and your instructions may have changed. Check the sidebar against them, starting with where your own row stands.";
+/**
+ * The revision of Prioritizing's instructions. Raise it when they change how an existing sidebar
+ * should look, so every Prioritizing is told once on the next start.
+ */
+const PRIORITIZING_REVISION = 1;
 /** The icon of Prioritizing's own row. */
 const FOCUS_ICON: SpaceIconSlug = "prioritize";
 /** How many bytes `read_conversations` returns at most, and for one conversation. */
@@ -190,8 +194,6 @@ const MAX_BRIEF_TEXT = 2_000;
 const NEW_WORK_EXCERPT = 1_500;
 /** How many notices about one conversation wait for the next brief; older ones are dropped. */
 const CONVERSATION_BRIEFS_KEPT = 3;
-/** Unfinished work quiet this long may be proposed for Stale. */
-const SPACE_STALE_AFTER_MS = 2 * 24 * 60 * 60_000;
 /** Work active this recently is never folded or hidden by Prioritizing. */
 export const SPACE_RECENT_WORK_MS = 2 * 60 * 60_000;
 
@@ -304,18 +306,26 @@ export class SpacesModule implements AgentModule {
                     await this.#disablePrioritizing(ctx, owner.ownerUserId);
                     continue;
                 }
-                // A Prioritizing from before its own row gets one, and is told once.
+                // A Prioritizing from before its own row gets one, and one from before its
+                // current instructions is told once, so it checks the sidebar right after an update.
                 await ctx.inTx(async (txCtx) => {
                     const agentId = await this.#livePrioritizing(txCtx, owner.ownerUserId);
-                    if (
-                        agentId === undefined ||
-                        (await querySpaceByRef(txCtx, owner.ownerUserId, "focus")) !== undefined
-                    )
-                        return;
-                    await this.#ensureFocusRow(txCtx, owner.ownerUserId, agentId);
-                    await this.#brief(txCtx, owner.ownerUserId, PRIORITIZING_UPGRADED);
+                    if (agentId === undefined) return;
+                    const state = await this.#ownerState(txCtx, owner.ownerUserId);
+                    const rowless =
+                        (await querySpaceByRef(txCtx, owner.ownerUserId, "focus")) === undefined;
+                    if (!rowless && state.prioritizingRevision === PRIORITIZING_REVISION) return;
+                    await writeOwnerState(txCtx, {
+                        ...state,
+                        prioritizingRevision: PRIORITIZING_REVISION,
+                    });
+                    if (rowless) await this.#ensureFocusRow(txCtx, owner.ownerUserId, agentId);
+                    await this.#brief(
+                        txCtx,
+                        owner.ownerUserId,
+                        rowless ? PRIORITIZING_UPGRADED : PRIORITIZING_UPDATED,
+                    );
                 });
-                await ctx.inTx((txCtx) => this.#pinFocusUnderHappy(txCtx, owner.ownerUserId));
             }
             await ctx.inTx((tx) => this.#reconcileSurfaces(tx));
             const lifetime = this.#lifetime;
@@ -1246,7 +1256,6 @@ export class SpacesModule implements AgentModule {
     /** What Prioritizing's operations are judged against, from the person's current state. */
     async #prioritizingRules(ctx: Context, state: SpaceOwnerState): Promise<PrioritizingRules> {
         const rows = await querySpaces(ctx, state.ownerUserId);
-        const recent = new Set<string>();
         const fresh = new Set<string>();
         for (const row of rows) {
             if (row.role === "focus") continue;
@@ -1254,7 +1263,6 @@ export class SpacesModule implements AgentModule {
             const firstPlacement =
                 row.placement === "pending" && state.sidebarPlacedIds?.includes(row.id) !== true;
             if (firstPlacement) fresh.add(row.id);
-            else if ((await this.#recentWork(ctx, row)) !== undefined) recent.add(row.id);
         }
         const authorship = state.sidebarAuthorship ?? {};
         return {
@@ -1264,9 +1272,6 @@ export class SpacesModule implements AgentModule {
             focusId: rows.find((row) => row.role === "focus")?.id,
             person: (id, aspect) => authorship[id]?.[aspect] === "person",
             rows: new Set(rows.map((row) => row.id)),
-            happyId: rows.find((row) => row.role === "happy")?.id,
-            untouched: new Set(rows.filter(isUntouchedStemCell).map((row) => row.id)),
-            recent,
             manual: new Set(rows.filter((row) => row.manualAt !== undefined).map((row) => row.id)),
         };
     }
@@ -1294,19 +1299,12 @@ export class SpacesModule implements AgentModule {
             ctx,
             state.ownerUserId,
             view.document,
-            keepFocusUnderHappy(
-                view.document,
-                sidebarDiff(view.document, proposed, { widgets: true }),
-                rules.happyId,
-                rules.focusId,
-            ),
+            sidebarDiff(view.document, proposed, { widgets: true }),
         );
         // While the sidebar still mirrors the classic one, Prioritizing may only add its own row.
         if (
             state.sidebarSeed === true &&
-            !operations.every(
-                (operation) => operation.type === "insert" && operation.node.id === rules.focusId,
-            )
+            !operations.every((operation) => sidebarTarget(operation) === rules.focusId)
         )
             throw new SidebarValidationError(
                 "The sidebar still mirrors the person's classic sidebar. Change nothing but adding your own row until your next notice.",
@@ -1344,12 +1342,6 @@ export class SpacesModule implements AgentModule {
         const state = await this.#ownerState(ctx, ownerUserId);
         const view = await this.#prioritizingView(ctx, state);
         const authorship = state.sidebarAuthorship ?? {};
-        const kept = keptAboveSeparator(
-            view.current.document,
-            (id) =>
-                authorship[id]?.place === "person" ||
-                current.spaces.some((space) => space.id === id && space.manualAt !== undefined),
-        );
         const now = Date.now();
         const age = (at: number | undefined) =>
             at === undefined ? undefined : `${formatAge(now - at)} ago`;
@@ -1405,7 +1397,6 @@ export class SpacesModule implements AgentModule {
                       ? { newWork: "not placed yet" }
                       : {}),
                 ...(placedByPerson ? { placedByPerson: true } : {}),
-                ...(kept.has(space.id) ? { keepInPlace: true } : {}),
                 // Nothing to read with read_conversations.
                 ...(space.role === "focus" || space.contents[0]?.kind === "surface"
                     ? { noConversation: true }
@@ -1623,7 +1614,7 @@ export class SpacesModule implements AgentModule {
         input: { baseVersion: number; edits: readonly { oldText: string; newText: string }[] },
         operationId: string,
     ): Promise<{ readonly text: string; readonly artifact?: ArtifactRecord }> {
-        const { artifactId: sidebarId } = await this.sidebar(ctx, ownerUserId);
+        await this.sidebar(ctx, ownerUserId);
         return await ctx.inTx(async (txCtx) => {
             await this.#requirePrioritizingEnabled(txCtx, ownerUserId);
             const artifacts = this.#requireArtifacts();
@@ -1663,66 +1654,21 @@ export class SpacesModule implements AgentModule {
             const read = formatSpaceSidebar(base.document);
             const html = applyExactEdits(read, input.edits);
             if (html === read) return { text: "Nothing changed; no proposal version was made." };
-            const rules = await this.#prioritizingRules(txCtx, state);
             const rows = new Map(
                 (await querySpaces(txCtx, ownerUserId)).map((row) => [row.id, row]),
             );
-            // Stale is for unfinished tasks that went quiet; reading when each was last active.
-            const quiet = new Map<string, boolean>();
-            for (const row of rows.values()) {
-                if (row.role !== "item" || row.contents[0]?.kind !== "task") continue;
-                const at = (await this.describe(txCtx, row)).lastActivityAt;
-                quiet.set(row.id, at === undefined || Date.now() - at >= SPACE_STALE_AFTER_MS);
-            }
             const authorship = open?.authorship ?? {};
-            // What the person keeps above the separator in the live sidebar stays where it is.
-            const kept = keptAboveSeparator(
-                (await this.#sidebarDocument(txCtx, sidebarId)).document,
-                (id) => rules.person(id, "place") || rules.manual.has(id),
-            );
             const reviewed = reviewProposalOperations(
                 base.document,
-                keepFocusUnderHappy(
-                    base.document,
-                    sidebarDiff(base.document, readSidebarDocument(html), { widgets: true }),
-                    rules.happyId,
-                    rules.focusId,
-                ),
+                sidebarDiff(base.document, readSidebarDocument(html), { widgets: true }),
                 {
                     person: (id, aspect) => authorship[id]?.[aspect] === "person",
+                    // Accepting archives a task; nothing else is archived that way.
                     mayNotArchive: (id) => {
                         const row = rows.get(id);
-                        if (row?.role !== "item" || row.contents[0]?.kind !== "task")
-                            return `${id} is not a task's row; only tasks are offered for archiving.`;
-                        if (rules.untouched.has(id) || rules.recent.has(id))
-                            return `${id} is new or active in the last two hours; it is not finished.`;
-                        return undefined;
-                    },
-                    mayNotMove: (id) => {
-                        if (id === "happy-search" || id === "happy-create")
-                            return "Search and Create are the person's to move.";
-                        if (id === rules.happyId) return "Prioritizing cannot move or hide Happy.";
-                        if (id === rules.focusId)
-                            return "Your own row stays where it is; only the person moves it.";
-                        if (rules.untouched.has(id))
-                            return "Leave new work alone until the person sends its first message.";
-                        return undefined;
-                    },
-                    keptAtTop: (id) => kept.has(id),
-                    mayNotHide: (id) =>
-                        rules.recent.has(id)
-                            ? `${id} was active in the last two hours; keep it shown.`
-                            : undefined,
-                    mayNotStale: (id) => {
-                        const row = rows.get(id);
-                        if (row === undefined) return undefined;
-                        if (row.contents[0]?.kind === "bot")
-                            return `${id} is a bot, an ongoing responsibility; keep it with the bots.`;
-                        if (row.contents[0]?.kind === "surface")
-                            return `${id} is a shared list; put it with its topic or work, not in Stale.`;
-                        if (quiet.get(id) === false)
-                            return `${id} was active in the last two days; Stale is for work quiet longer.`;
-                        return undefined;
+                        return row?.role !== "item" || row.contents[0]?.kind !== "task"
+                            ? `${id} is not a task's row; only tasks are offered for archiving.`
+                            : undefined;
                     },
                 },
             );
@@ -1738,23 +1684,6 @@ export class SpacesModule implements AgentModule {
                 reviewed.document,
                 placedSidebarIds(reviewed.operations),
             );
-            // Over the budget is allowed in a proposal; Prioritizing hears it when there is a
-            // section it could fold, since a bare reminder only brings revisions that change nothing.
-            const exempt = new Set([
-                ...[rules.happyId, rules.focusId].filter((id) => id !== undefined),
-                ...rules.untouched,
-            ]);
-            const shown = shownSidebarRows(
-                withoutArchive(reviewed.document, new Set(archiveOffers(reviewed.document))),
-            ).filter((id) => !exempt.has(id)).length;
-            const foldable = quietOpenSections(
-                reviewed.document,
-                new Set([...rules.recent, ...kept]),
-            );
-            const overBudget =
-                shown <= SIDEBAR_VISIBLE_BUDGET || foldable.length === 0
-                    ? ""
-                    : ` It leaves ${String(shown)} rows shown, over the budget of ${String(SIDEBAR_VISIBLE_BUDGET)}; revise it to fold sections with nothing recent: ${foldable.map((label) => `"${label}"`).join(", ")}.`;
             const actor = await artifacts.actorFor(txCtx, agentId);
             let record = open;
             if (record === undefined) {
@@ -1809,7 +1738,7 @@ export class SpacesModule implements AgentModule {
                 },
             ]);
             return {
-                text: `Proposal ${record.artifactId} is at version ${String(artifact.latestVersion)}. The person sees it as a card in your conversation and may edit, accept, or decline it; do not repeat it or its tag in your reply.${overBudget}${notes}`,
+                text: `Proposal ${record.artifactId} is at version ${String(artifact.latestVersion)}. The person sees it as a card in your conversation and may edit, accept, or decline it; do not repeat it or its tag in your reply.${notes}`,
                 artifact,
             };
         });
@@ -2380,16 +2309,15 @@ export class SpacesModule implements AgentModule {
                   ];
         const cleared = applySpaceSidebarOperations(current.document, operations).document;
         if (change.add !== undefined && locateSpaceSidebarNode(cleared, change.add) === undefined) {
-            const spaces = await querySpaces(ctx, ownerUserId);
-            const happyId = spaces.find((space) => space.role === "happy")?.id;
-            const focusId = spaces.find((space) => space.role === "focus")?.id;
+            const happyId = (await querySpaces(ctx, ownerUserId)).find(
+                (space) => space.role === "happy",
+            )?.id;
             operations.push({
                 type: "insert",
                 node: { type: "space", id: change.add },
                 to: newSpacePosition(cleared, {
                     ...(change.sectionId === undefined ? {} : { headingId: change.sectionId }),
                     ...(happyId === undefined ? {} : { happyId }),
-                    ...(focusId === undefined ? {} : { focusId }),
                 }),
             });
         }
@@ -3122,16 +3050,12 @@ export class SpacesModule implements AgentModule {
         const state = await this.#ownerState(ctx, ownerUserId);
         if (!at.node.expanded && state.sidebarAuthorship?.[host.id]?.fold !== "person")
             operations.push({ type: "set", id: host.id, expanded: true });
-        // The person asked their conversation for this, so recent work and the move limit do not
-        // hold it back; what the person placed still does.
+        // The person asked their conversation for this, so it needs no proposal; what the person
+        // placed still holds it back.
         const reviewed = applyPrioritizingOperations(
             current.document,
             operations,
-            {
-                ...(await this.#prioritizingRules(ctx, state)),
-                recent: new Set(),
-                direct: false,
-            },
+            { ...(await this.#prioritizingRules(ctx, state)), direct: false },
             undefined,
         );
         if (reviewed.operations[0]?.type === "set" || reviewed.operations.length === 0)
@@ -3729,6 +3653,7 @@ export class SpacesModule implements AgentModule {
         await writeOwnerState(ctx, {
             ...(await this.#ownerState(ctx, ownerUserId)),
             prioritizingAgentId,
+            prioritizingRevision: PRIORITIZING_REVISION,
         });
         await this.#ensureFocusRow(ctx, ownerUserId, prioritizingAgentId);
     }
@@ -3765,45 +3690,6 @@ export class SpacesModule implements AgentModule {
             await this.#commitEvents(ctx, ownerUserId, undefined, [
                 { type: "space_created", space },
             ]);
-    }
-
-    /**
-     * Puts Prioritizing's row back right under Happy when something came between them, such as new
-     * work an earlier daemon inserted right after Happy. A row the person placed stays where they
-     * put it, and so does one Happy's own place keeps out of view.
-     */
-    async #pinFocusUnderHappy(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
-        const state = await this.#ownerState(ctx, ownerUserId);
-        if (state.sidebarArtifactId === undefined) return;
-        const spaces = await querySpaces(ctx, ownerUserId);
-        const happyId = spaces.find((space) => space.role === "happy")?.id;
-        const focus = spaces.find((space) => space.role === "focus");
-        const focusId = focus?.id;
-        if (happyId === undefined || focusId === undefined) return;
-        if (focus?.manualAt !== undefined || state.sidebarAuthorship?.[focusId]?.place === "person")
-            return;
-        const current = await this.#sidebarDocument(ctx, state.sidebarArtifactId);
-        const document = current.document;
-        if (
-            !document.items.some((item) => item.id === focusId) ||
-            !document.items.some((item) => item.id === happyId) ||
-            sidebarPlacement(document, happyId).visibility !== "shown" ||
-            focusFollowsHappy(document, happyId, focusId)
-        )
-            return;
-        const applied = applySpaceSidebarOperations(document, [
-            { type: "move", id: focusId, to: { after: happyId } },
-        ]);
-        if (applied.operations.length === 0) return;
-        await this.#commitSidebarVersion(ctx, ownerUserId, {
-            artifactId: state.sidebarArtifactId,
-            previousVersion: current.version,
-            before: document,
-            after: applied.document,
-            operations: applied.operations,
-            author: "daemon",
-            operationId: createId(),
-        });
     }
 
     async #removeFocusRow(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {

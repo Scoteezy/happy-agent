@@ -9780,17 +9780,16 @@ briefing, tool mutations, or batch application while disabled. Existing conversa
 names are left unchanged. Task, bot, and ordinary chat naming remain independent of this
 setting and continue while it is disabled.
 
-Prioritizing never folds or hides running work or work active in the last two hours. This is
-checked against the batch's final outcome, including section removal: protected shown rows leave
-a removed section as shown, unsectioned rows directly after Happy, keeping their relative order.
-The person's own visibility changes still apply.
+Where work goes and what stays in view are Prioritizing's judgement, made from its instructions.
+The daemon enforces only what keeps the document whole and what the person did themselves (see
+"Authorship").
 
 **Order.** A client renders the shown rows with no section in `orderKey` order, then each section
 in `orderKey` order with its shown rows in `orderKey` order, then the folded rows — the Older part
 of the list — most recently updated first. Hidden rows are not shown. Order keys are opaque
 strings compared within one section; moving a row changes only that row's key. Happy is an
-ordinary row whose target is Happy's bot; it starts first, the daemon places new work after it,
-and Prioritizing never moves or hides it, but the person may drag it like any other row.
+ordinary row whose target is Happy's bot; it starts first and the daemon places new work after it.
+The person may drag it like any other row.
 
 **Task trees.** A task row is the root of the sidebar's existing task tree, built from data the
 client already holds rather than from the space: the task's subtasks are its agent's `subtasks`
@@ -10246,27 +10245,24 @@ start of a daemon that serves proposals, for every person whose Prioritizing pre
 space has `target.kind: "agent"`, the icon `{ "type": "library", "slug": "prioritize" }`, the title
 of Prioritizing's conversation, and `placement: "settled"`. Like any space, it shows only where the
 document names it, and the daemon never inserts it into the document itself. The row is how the
-person learns that a proposal exists, so Prioritizing shows it without being asked: on every run it
-checks whether its row is in the document, reading the document again when it is unsure its view
-is current, and inserts it with an ordinary edit, usually right below Happy, only when it is
-missing. A row already there is left as it is: never inserted twice and never moved. That edit is
-allowed even while `seed` is set, and it applies when Prioritizing's turn ends like its other
-edits. The insertion is authored `prioritizing`, so the person may move or remove the row like any
-other, and once they have removed it, Prioritizing never puts it back.
+person learns that a proposal exists, so Prioritizing keeps it in view without being asked. Its
+instructions keep the row right below Happy unless the person put it elsewhere: on every run it
+checks its row, reading the document again when it is unsure its view is current, inserts it with
+an ordinary edit when it is missing, and moves it back when something came between. Inserting and
+moving its own row apply without a proposal, even while `seed` is set, and apply when
+Prioritizing's turn ends like its other edits. They are authored `prioritizing`, so the person may
+move or remove the row like any other; once the person has placed it, Prioritizing's moves of it
+are dropped, and once they have removed it, Prioritizing never puts it back. Where the row stands
+is Prioritizing's decision: the daemon never inserts, moves, or repairs it in the document.
 
-While Prioritizing's row stands at the top level directly after Happy's, the two are one anchor:
-anything the daemon or Prioritizing would put directly after Happy goes directly after
-Prioritizing's row instead, in the sidebar and in proposals alike. When the daemon starts and finds
-a row it can move back, it does: Prioritizing's row is at the top level but not directly after
-Happy's, Happy's row is at the top level and shown, and the person never placed Prioritizing's row
-themselves. It then moves the row directly after Happy as a daemon change; once the row stands
-there, a later start changes nothing.
-
-Prioritizing is told what to check, once: a new Prioritizing in its opening task; an upgraded one in
-a notice that the daemon was updated. From its own conversation it then decides what is still
-needed: whether to insert its row, and whether the person has already seen, accepted, or declined a
-proposal. The row is not work: it never counts toward `visibleRows`, Prioritizing does not move it
-once placed, and it is never briefed as new work. When Prioritizing is archived, its row leaves the
+Prioritizing is told what to check, once: a new Prioritizing in its opening task; an upgraded one,
+whose row the daemon has just made, in a notice that the daemon was updated. On the first start of
+a daemon whose Prioritizing instructions are newer than the ones a Prioritizing last ran under, it
+is told once that Happy Agent was updated and its instructions may have changed, and to check the
+sidebar against them, starting with where its row stands. From its own conversation it then
+decides what is still needed: whether to insert or move its row, and whether the person has already
+seen, accepted, or declined a proposal. The row is not work: it never counts toward `visibleRows`,
+and it is never briefed as new work. When Prioritizing is archived, its row leaves the
 sidebar; the next Prioritizing gets a row of its own.
 
 A message the person writes in Prioritizing's conversation is a request in their own words: the
@@ -10281,7 +10277,7 @@ A batch applies only these operations of Prioritizing's:
   never been placed, after any heading or row at the top level;
 - inserting `<happy-section id="distractions" label="Distractions" collapsed="true"/>`, the folded
   section for work outside the person's current focus, when the document has none;
-- inserting its own row;
+- inserting or moving its own row;
 - changes nested under a row: inserting, moving, or removing a session or an attachment there, and
   `set` of `expanded` on a row or session.
 
@@ -10311,37 +10307,22 @@ base as version 1 and the edited document as version 2. With an open proposal, t
 its latest version, `baseVersion` is that proposal version, and the call makes the next version. A
 stale `baseVersion` is a conflict, and so is an edit whose old text does not occur exactly once. An
 edit that would change an aspect of a node that the person last set in this proposal is dropped
-with a note, and the rest of the call applies. A proposal may regroup and fold rows whose place the
-person last set in the sidebar, because accepting it is the person's own change. It may still not
-move, fold away, or remove Search, Create, Happy, its own row, or new work before its first
-message. A top-level row above the sidebar's first separator whose place the person last set is
-what the person keeps at the top, and `list_sidebar` marks it `keepInPlace`: a proposal may not
-move it, fold it away, remove it, offer it under Archive or Stale, or leave it below the first
-separator, though it may add, rename, or remove the headings around it. Kept rows are checked
-against the proposal as a whole, so an edit that leaves one out of place only on the way to the
-final document stands; the edit from which it stays out of place is dropped, with a note saying
-what to do instead. A proposal also may not leave the sidebar's first separator with no row below
-it, where it separates nothing; that is checked the same way. It may group but never
-fold away or remove work running or active in the last two hours; its new or renamed section
-labels follow the
-label rules under "Authorship"; such edits are dropped with a note. In a proposal, the rows of a
-section labelled `Stale` are only task rows quiet for at least two days: a bot, a shared list, or
-work active more recently is dropped from it with a note. The call presents the artifact (an `artifact`
+with a note, and the rest of the call applies. Everything else a proposal changes is Prioritizing's
+decision, made from its instructions: it may regroup, fold, rename, or remove any row or section,
+including those whose place the person last set in the sidebar, because accepting it is the
+person's own change. The call presents the artifact (an `artifact`
 presentation with `shows: "latest"`), so the proposal appears inline in Prioritizing's
 conversation at its full height and again after every revision. The call returns the proposal's
 artifact ID and version, not its reference tag, so that Prioritizing does not repeat the card in its
-reply. A proposal may leave more rows shown than the visible budget; when open sections hold no
-recent or kept row, the call says so and names them, so that Prioritizing can fold them in a
-revision. `list_sidebar`
-also returns the open proposal, its document, the nodes the person last set in it, and the
+reply. `list_sidebar` also returns the open proposal, its document, the nodes the person last set in it, and the
 decisions on the person's last proposals.
 
 **Archive offers.** A proposal may also offer to archive work that looks finished. In a proposal
 document, and only there, `<happy-section id="archive" label="Archive"/>` heads the rows offered
 for archiving: the rows of its block, up to the next section or separator. Only top-level task rows
-may stand in that block; any other row there is refused like any other document rule. Prioritizing
-may not offer Happy, its own row, new work before its first message, or work running or active in
-the last two hours, and such an offer is dropped with a note. The person keeps a row by dragging it
+may stand in that block; any other row there is refused like any other document rule. Which tasks
+to offer is Prioritizing's judgement, and nothing is archived unless the person accepts. The person
+keeps a row by dragging it
 out of the block in the proposal, or offers one by dragging it in. Accepting archives each task in
 the block as `POST /v0/tasks/:taskId/archive` archives it, as the person and with the person's
 archive authority; a task the person may not archive, or one that is already archived, is
@@ -10487,30 +10468,21 @@ for a model without credentials, its notices are delivered again with the next w
 failure itself never causes.
 
 New spaces are inserted immediately after Happy's top-level `happy-space` element, below everything
-nested in it, or immediately after Prioritizing's row when that row stands directly after Happy's,
-or immediately after the section or separator named at creation. When Happy's row is
+nested in it, or immediately after the section or separator named at creation. When Happy's row is
 absent, nested, or inside a collapsed section, they are inserted immediately after
 `<happy-create/>` instead. Archived or left spaces, and archived sessions, are removed together
 with everything nested under them. Lifecycle changes publish `space.sidebar.changed` and ordinary
 artifact events.
 
-Prioritizing never moves or hides Happy,
-never moves Search or Create, never undoes the person's moves or folds, never touches new work
-before its first message, and leaves work active in the last two hours where it is and shown (new
-pending work may receive its first placement); an item that comes to sit under a different
-section or separator counts as moved. Moves are attributed at block level: when a section's block
-changes position, its heading counts as moved and its rows as carried, so a person's section drag
-protects the section, not each row. Prioritizing may not move a block that carries Happy, untouched
-new work, or work active in the last two hours, and may not remove or relabel the default `bots`
-and `tasks` sections. What else its batches may change is set out under "What applies without a
-proposal"; everything beyond that is dropped with a note and belongs in a proposal. Prioritizing's new or
-renamed section labels may not name age,
-status, or whether work is finished (such as Older, Done, Archive, Stale, Active, Current, or In
-progress) and may not repeat another
-section's label ignoring case and spacing; the person may label sections freely. The one exception
-is the label `Stale`, exactly, which Prioritizing may give one section, `<happy-section id="stale"
-label="Stale" collapsed="true"/>`, for unfinished work that has gone quiet. It is never required,
-and Prioritizing proposes it like any other reorganisation.
+Prioritizing never undoes the person's moves, folds, names, fold ribbons, or widgets, and never
+hides a session the person revealed; an item that comes to sit under a different section or
+separator counts as moved. Moves are attributed at block level: when a section's block changes
+position, its heading counts as moved and its rows as carried, so a person's section drag protects
+the section, not each row. What else its batches may change is set out under "What applies without
+a proposal"; everything beyond that is dropped with a note and belongs in a proposal. Everything
+else — where Happy, new work, and recent work stand, which sections exist, and what they are
+called — is Prioritizing's judgement under its instructions, not a daemon rule. The person may
+label sections freely.
 
 Each applied manager batch adds exactly one factual diff-derived note to Prioritizing's
 conversation and publishes the ordinary live message event so open conversations update
@@ -10531,9 +10503,9 @@ For the sidebar document, `sectionId` may also name a `<happy-section id>` or
 `<happy-separator id>` (1–128 characters). The new `<happy-space>` is inserted immediately after
 that section or separator; without it, where new spaces go (see "Sidebar artifact"): right below
 Happy. Existing section IDs retain their existing behavior. Unknown IDs return `404` before
-creating work. Creation and document insertion commit together. New work is not shown to
-Prioritizing, and Prioritizing may not change its icon, position, or disclosure, until its
-conversation's first user message.
+creating work. Creation and document insertion commit together. New work is not told to
+Prioritizing, and Prioritizing may not change its icon, until its conversation's first user
+message.
 
 Starts new work: a fresh conversation with no project or bot — an unnamed task with its own
 folder, as `POST /v0/tasks` creates — and a row for it with the stem-cell icon.

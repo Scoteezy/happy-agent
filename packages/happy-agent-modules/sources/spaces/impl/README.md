@@ -18,12 +18,12 @@
   `reviewDirectOperation`, with a note; also draws queued edits into the document Prioritizing
   reads.
 - `reviewDirectOperation` — whether an operation is small enough to apply without a proposal: new
-  work's first placement, the Distractions section, Prioritizing's own row, or nested changes.
+  work's first placement, the Distractions section, adding or moving Prioritizing's own row, or
+  nested changes.
 - `reviewProposalOperations` — Prioritizing's revision of a proposal, without changes to what the
-  person set in it, age labels other than `Stale`, or archive offers that may not be archived; and
-  the proposal's Archive block.
+  person set in it or archive offers that may not be archived; and the proposal's Archive block.
 - `reviewPrioritizingOperation` — why one of Prioritizing's operations may not apply: it would
-  override the person's authorship or move Happy, new work, or recent work.
+  override the person's authorship.
 - `recordSidebarAuthorship` — who last set each node's place, fold, label, fold ribbon, and
   widget content after a batch; `affirmSidebarAuthorship` records the person's `set`s that changed
   nothing.

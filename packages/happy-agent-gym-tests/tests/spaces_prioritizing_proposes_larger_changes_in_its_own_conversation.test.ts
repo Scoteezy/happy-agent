@@ -100,19 +100,6 @@ it("shows its own row once, wakes once per burst of the person's changes, and ne
 
         await h.unseed();
         await h.settle();
-        const unseeded = await h.read();
-        expect(
-            (
-                await h.call("edit_sidebar", {
-                    baseVersion: unseeded.version,
-                    edits: [
-                        { oldText: line(own.id), newText: "" },
-                        { oldText: "</nav>", newText: `${line(own.id)}</nav>` },
-                    ],
-                })
-            ).text,
-        ).toContain("Your own row stays where it is");
-        await h.settle();
         // An explicit set that changes nothing still makes the fold the person's.
         const open = await h.read();
         const kept = await h.gym.client.applySpaceSidebarOperations({
@@ -183,20 +170,6 @@ it("proposes a reorganisation the person edits and accepts, archives what it off
         await h.settle();
         const before = await view(h);
         expect(before.proposal).toBeNull();
-        // Even a proposal may not move Happy; a draft with nothing left is refused.
-        expect(
-            (
-                await h.call("propose_sidebar", {
-                    baseVersion: before.version,
-                    edits: [
-                        { oldText: line(happy.id), newText: "" },
-                        { oldText: "</nav>", newText: `${line(happy.id)}</nav>` },
-                    ],
-                })
-            ).text,
-        ).toContain("Prioritizing cannot move or hide Happy.");
-        expect((await view(h)).proposal).toBeNull();
-
         // A new section is a proposal: the live sidebar stays as it is.
         const proposed = await h.call("propose_sidebar", {
             baseVersion: before.version,
@@ -275,32 +248,6 @@ it("proposes a reorganisation the person edits and accepts, archives what it off
         await h.settle();
         // What the person accepted is theirs: Prioritizing may not move it back.
         expect((await h.edit(before.html)).text).toContain("manual placement");
-
-        // What the person keeps above the separator stays there, even in a proposal.
-        const pinned = await h.read();
-        await h.gym.client.applySpaceSidebarOperations({
-            mutationId: "pin-release-notes",
-            baseVersion: pinned.version,
-            operations: [{ type: "move", id: ship, to: { after: happy.id } }],
-        });
-        await h.settle();
-        const listed = JSON.parse((await h.call("list_sidebar", {})).text) as {
-            version: number;
-            spaces: { id: string; keepInPlace?: true }[];
-        };
-        expect(listed.spaces.find((row) => row.id === ship)?.keepInPlace).toBe(true);
-        expect(
-            (
-                await h.call("propose_sidebar", {
-                    baseVersion: listed.version,
-                    edits: [
-                        { oldText: line(ship), newText: "" },
-                        { oldText: "</nav>", newText: `${line(ship)}</nav>` },
-                    ],
-                })
-            ).text,
-        ).toContain(`The person keeps ${ship} above the separator`);
-        await h.settle();
 
         // A declined proposal changes nothing.
         const current = await view(h);

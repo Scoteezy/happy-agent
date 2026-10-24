@@ -34,14 +34,12 @@ Prioritizing reads `list_sidebar` (the document, row facts, every session under 
 shown count against the visible budget of ten, and its open proposal), reads several threads by
 turn with `read_conversations`, writes `edit_sidebar` or `update_artifact`, proposes larger changes
 with `propose_sidebar`, reads the grammar with `get_sidebar_styles`, and sets row and session icons
-with `set_space_icon`. It may not move Happy, Search, or Create, override
-anything the person last set, or move work active in the last two hours, and it may not touch a
-stem cell before its first message; a section it moves carries its rows under the same rules.
-Without the person's words, its batches apply only new work's first placement, the folded
-Distractions section, its own row, and what is nested under a row; anything else is proposed. An
-operation that breaks a rule is dropped with a note and the rest still applies. Its section
-labels name subjects, never age or doneness (`Stale` alone excepted), and are unique, and it keeps
-the Bots and Tasks sections. Its prompt makes topic sections the layout, with one folded Distractions section for
+with `set_space_icon`. Where things go is its decision, made from its prompt; the daemon only
+keeps it from overriding anything the person last set, and a section it moves carries its rows
+under the same rule. Without the person's words, its batches apply only new work's first
+placement, the folded Distractions section, adding or moving its own row, and what is nested under
+a row; anything else is proposed. An operation that breaks a rule is dropped with a note and the
+rest still applies. Its prompt keeps its own row right under Happy, makes topic sections the layout, with one folded Distractions section for
 work outside the person's focus, and prefers inserting new work over moving anything. Sessions
 stay hidden unless one needs the person, such as for a review, and a shown session counts toward
 the budget.

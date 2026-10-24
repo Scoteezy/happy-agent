@@ -1,5 +1,27 @@
 # Spaces — learnings
 
+## Prioritizing decides from its prompt; the daemon keeps integrity
+
+Evaluation replays kept finding proposals that did something unwanted (folded recent work, put
+bots into Stale, moved a row the person kept at the top, moved the separator to the end), and each
+was answered with a daemon rule that dropped such edits. The rules piled up, fought each other, and
+cost Prioritizing revision after revision of refused edits; the row anchor and its startup repair
+moved its own row for it. Kirill: "its ITS decision - just a prompt - no hardcoded rules - THATS
+ONE OF THE CORE PRINCIPLES across the board", unless it is a direct user action. Where work goes,
+which sections exist and what they are called, what is folded, what is offered for Stale or
+Archive, and where Prioritizing's own row stands are now only in `formatPrioritizingInstructions`.
+When a run gets one wrong, fix the prompt, not the review.
+
+The daemon still enforces only integrity, each for one reason:
+
+- the document is valid and every ID is unique and known, or clients cannot draw it;
+- a session stands only under its own parent, because a subtask never changes parent;
+- what the person last set (place, fold, name, fold ribbon, widget, a revealed session) is never
+  overridden, in the sidebar or in their edits of a proposal, because that is their direct action;
+- larger changes need the person's consent (`reviewDirectOperation`), and nothing is archived
+  unless they accept a proposal, and then only task rows under the `Archive` heading, whose label
+  is fixed because accepting acts on it.
+
 ## The document is the sidebar, and everything in it is an item
 
 The first experimental document was HTML with sections that walled rows off, plain markup, a
@@ -16,17 +38,15 @@ always.
 Sections and separators are different things. Folding the titled sections into untitled separators
 lost what Kirill liked about them, so both exist: a `happy-section` has an ID and a required label,
 heads the rows after it up to the next section or separator, and folds them with `collapsed`; a
-`happy-separator` is a plain rule with an ID only, cannot fold, and ends a section's run. A label
-names a subject: the daemon refuses Prioritizing a new or renamed section whose label names age or
-doneness ("Older", "Done", "Archive", "Stale"), or whose label matches another section's ignoring
-case and spacing, while the person may name sections freely. First-grammar documents are rewritten
+`happy-separator` is a plain rule with an ID only, cannot fold, and ends a section's run. The prompt
+says a label names a subject, never age or status, and is unique; the person may name sections
+freely. First-grammar documents are rewritten
 once on read, keeping order: sections become sections with their labels and folds, the old "Older"
 bucket becomes a plain separator, and plain markup is dropped.
 
 Validation runs through ordinary artifact tools too. A nested node must be a session of the
-conversation it sits under. The person may move anything. Prioritizing may not move Search,
-Create, or Happy, undo the person's moves or folds, or move or tuck away work active in the last
-two hours (new pending work may receive its first placement). An item that now sits under another
+conversation it sits under. The person may move anything. Prioritizing may not undo the
+person's moves or folds. An item that now sits under another
 section or separator has moved even if its order among the other items did not; otherwise
 inserting one above a row the person placed would regroup it unnoticed.
 
@@ -36,8 +56,8 @@ rows, so dragging a big section past a small one marked the small section's rows
 A `move` of a section now carries its block, and the client's `diffSpaceSidebar` turns a whole
 document into the fewest moves, moving a block whole when it travelled whole. Only the heading
 becomes the mover's, its rows are carried, and the batch note names the section ("Moved
-Research."). Carried rows still count as moving for Prioritizing's guards, so it cannot move a
-section that holds Happy, untouched new work, or work active in the last two hours.
+Research."). Carried rows still count as moving, so Prioritizing cannot carry off a row the
+person placed by moving the section around it.
 
 ## Writes are operations by node ID
 
@@ -127,8 +147,7 @@ member order, a `divider` separator, a `bots` section labelled Bots with the oth
 a `tasks` section labelled Tasks with joined tasks in membership order, each row with its active
 subtasks nested and shown. Kirill moved Happy out of Bots so new work lands right below it. Bots
 and Tasks are default sections, present even when empty and kept stable: Prioritizing is told to
-keep Bots especially stable (long-term responsibilities), and the daemon refuses it removing or
-renaming either; only the person reorganizes them. The fixed IDs let the desktop apply the
+keep them, and Bots especially stable (long-term responsibilities). The fixed IDs let the desktop apply the
 person's classic folds, which live only on the desktop, with one write. The owner state carries `sidebarSeed` until that write or Prioritizing's
 next notice, and Prioritizing's writes are refused while it is set; its opening turn only gives
 icons.
@@ -137,8 +156,9 @@ icons.
 
 Kirill saw new work turn into something before saying what it was. The row was briefed to
 Prioritizing on insertion, and its opening and later briefs let it give an icon and place the row.
-Now insertion of untouched new work briefs nothing, and an icon, move, or fold of a stem cell whose
-first message has not arrived is refused (`briefedAt` marks that message).
+Now insertion of untouched new work briefs nothing, an icon for a stem cell whose first message
+has not arrived is refused (`briefedAt` marks that message), and the prompt says it waits for that
+message.
 
 ## Sessions are hidden by default, and every one gets an icon
 
@@ -170,8 +190,8 @@ puts quiet work into Distractions one row per batch, then removes what the rules
 ## Rows mirrored from the classic sidebar start placed
 
 The first document mirrors rows the person already knows, but they kept the `pending` placement
-of new rows. A pending row counts as a first placement, which the two-hour rule exempts, so the
-daemon would have let Prioritizing move work active minutes ago, and `list_sidebar` called every
+of new rows. A pending row's move counts as a first placement, which applies without a proposal,
+so Prioritizing could have reshuffled the whole mirrored sidebar, and `list_sidebar` called every
 row "not placed yet". Creating the document now records every mirrored row, except untouched new
 work, as placed.
 
@@ -239,64 +259,42 @@ runtime that carries a system prompt and tool set, so the prompt stays in
 `formatPrioritizingInstructions`, and the example arrangement in it is advice, never a rule the
 daemon enforces.
 
-## Proposals are reviewed, not trusted to the prompt
+## What evaluation replays taught the prompt
 
-Replays of the prompt on real sidebars (Opus, 21 runs) showed proposals that folded a bot row
-active 29 minutes earlier, moved work active within the hour, put bots and shared lists into Stale,
-and kept a 17-row "Active" section untouched; and none offered the clearly finished tasks for
-archiving, because most rows counted as placed by the person through mirroring, and the prompt
-said never to touch those. The daemon now drops, with a note, a proposal edit that moves, removes,
-or folds away Search, Create, Happy, Prioritizing's row, or untouched new work, or that folds away
-or removes work active in the last two hours, and Stale entries that are bots, shared lists, or tasks active in the last two
-days. Section labels naming a status (Active, Current, In progress) are refused like age labels.
-The prompt lets a proposal regroup and fold rows the person placed, since accepting is their
-consent, keeps what they put at the top, asks it to section an unsectioned sidebar or a catch-all
-(Kirill: "if it's not sectioned, probably should offer to section it"), and to reply in one
-sentence, since replies ran 80 to 250 words. Refusing to move recent work in proposals at all
-made the first real-inference proposal on a new sidebar empty, since every task was minutes old;
-grouping recent work is allowed in a proposal because accepting it is consent, and hiding it never
-is. `list_sidebar` marks rows with nothing to read.
-
-A later rerun (18 runs) still moved a row the person kept above the separator in 12 of them, though
-the prompt said to keep it, put finished tasks into Stale, pasted the proposal's tag into replies,
-and left 16 to 19 rows shown. The daemon now keeps a top-level row above the first separator whose
-place the person set where it is, and `list_sidebar` marks it `keepInPlace`. Guarding it like
-Happy, as any change of its section, backfired: the catch-all "Active" heading it sat under could
-no longer be renamed or removed, and inserted headings above it were refused, so one run took 7
-revisions and 31 dropped edits. Only the row is guarded now: it may not be moved, hidden, offered
-for Archive or Stale, or left below the separator, and the headings around it may change.
-That still cost up to 8 revisions a run: every case got one refusal that ended by inviting heading
-edits, so the refused fold was retried verbatim, and checking each edit alone refused a folded
-heading that a later edit in the same call closed off. Each case now has its own refusal saying
-what to do instead, and kept rows are checked against the whole proposal: the edit from which a
-row stays out of place is dropped and the rest reviewed again. The prompt says a kept shared list
-or finished task stays too, since "shared lists go with their topic" kept pulling one away.
-With that, revisions fell to at most 5 a run, but refused separator removals led two runs to move
-the separator to the very end, so it separated nothing. The whole-proposal check now also refuses
-leaving the first separator with no row below it.
-`propose_sidebar` returns the proposal's ID without its reference tag. Over the budget it is never
-refused; the call names the open sections with nothing recent or kept to fold, and says nothing
-when there are none, since a bare "fold quiet sections" brought revisions that changed nothing. The prompt says finished work goes under Archive and Stale is
-for unfinished work, and that a reply says what changed, never what did not.
+Replays on real sidebars (Opus, 21 and then 18 runs) showed proposals that folded work active
+minutes earlier, put bots, shared lists, and finished tasks into Stale, kept a 17-row "Active"
+catch-all, moved rows the person kept above the separator, moved the separator to the end, left 16
+to 19 rows shown, and pasted the proposal's tag into replies; none offered clearly finished tasks
+for archiving, because the prompt said never to touch rows the person placed, which mirroring made
+nearly all of them. Each of these was first enforced by the daemon, and the rules fought: guarding
+a kept row's section blocked renaming the catch-all over it, and one run took 7 revisions and 31
+dropped edits. They are all prompt guidance now (see the first learning). The prompt lets a
+proposal regroup and fold rows the person placed, since accepting is their consent; keeps what
+they put above a separator and rows below every separator; asks it to section an unsectioned
+sidebar or a catch-all (Kirill: "if it's not sectioned, probably should offer to section it") and
+fold quiet sections until within budget; sends finished work to Archive and only unfinished tasks
+to Stale; and asks for a one-sentence reply saying what changed, since replies ran 80 to 250 words.
+`propose_sidebar` returns the proposal's ID without its reference tag, and `list_sidebar` marks
+rows with nothing to read.
 
 ## Prioritizing shows its own row, once
 
 Notes in Happy's chat interrupted the main agent: "the focus agent normally should never bother the
 main Happy agent". Prioritizing has a row of its own (role `focus`, target kind `agent`), which is
 how the person learns a proposal exists. The daemon makes the space but never puts it in the
-document; Prioritizing inserts it, even during the seed, on its first run and whenever it finds it
-missing, unless the person removed it, and may never move it. Inserting it twice is a duplicate ID.
-A Prioritizing from before its row gets the space on the first start of a newer daemon, and one
-upgrade notice; what to do from there it decides from its own conversation. Archiving Prioritizing
-removes its row.
+document; Prioritizing inserts it, even during the seed, whenever it finds it missing, unless the
+person removed it. Inserting it twice is a duplicate ID. A Prioritizing from before its row gets
+the space on the first start of a newer daemon, and one upgrade notice; what to do from there it
+decides from its own conversation. Archiving Prioritizing removes its row.
 
-## Happy and Prioritizing's row are one anchor
-
-On Kirill's install, new work kept going in right after Happy, so Prioritizing's row slid down to
-third and further: "why the focus agent does not show up under my happy agent". While the row
-stands directly under Happy, whatever the daemon or Prioritizing puts after Happy goes after the
-row instead (`keepFocusUnderHappy`, `newSpacePosition`). On start, the daemon moves the row back
-directly under Happy when something came between them, unless the person placed it themselves.
+On Kirill's install new work kept going in right after Happy, so the row slid down to third and
+further: "why the focus agent does not show up under my happy agent". A daemon anchor and a startup
+repair that moved the row back were tried and removed, since where the row stands is
+Prioritizing's call (Kirill: "it should move ITSELF"). The prompt keeps the row right under Happy
+unless the person put it elsewhere, moving its own row applies without a proposal and is never
+capped, and a row the person placed is theirs. Raising `PRIORITIZING_REVISION` when the
+instructions change tells each running Prioritizing once, on the next start, to check the sidebar
+against them, starting with its row.
 
 ## Prioritizing runs on the default model from Settings
 
@@ -452,13 +450,11 @@ are otherwise never deleted, but a stem cell the person left without writing any
 work: removing it (`PATCH` with `removed: true`) deletes the row and archives its task, and is
 refused (409) as soon as the conversation holds any message.
 
-## Section names are unique per person
+## Section names are unique by the prompt
 
-On clean data a cheap model created a "Movies" section for each of two new rows in one turn,
-and the batch put them in two sections with the same name. The daemon now owns the rule rather
-than the prompt: creating a section whose name (ignoring case and surrounding spaces) matches an
-existing or queued section returns that section's ID instead, carrying over any count it was
-given, and renaming a section onto another's name is refused.
+On clean data a cheap model created a "Movies" section for each of two new rows in one turn. The
+daemon once refused a section label that repeated another's; it now only refuses duplicate IDs,
+and the prompt says labels are unique.
 
 ## Archived work leaves the sidebar
 
@@ -501,7 +497,7 @@ reads, and the organiser-model setting. Space events carry whole objects, so the
 ## Happy is an ordinary row
 
 A `role` field and Happy-specific IDs made clients special-case Happy. The API now shows Happy as
-an ordinary row whose target is Happy's bot. Prioritizing never moves or hides it, but the person
+an ordinary row whose target is Happy's bot. The prompt keeps Prioritizing off it, and the person
 may drag it. Sessions under a row are part of the document, not drawn by clients from `subtasks`;
 worktrees are still drawn by clients under the session that works in them.
 
@@ -524,16 +520,9 @@ the first read — and before that briefs and tidy do nothing. As an ordinary su
 Happy's chat, so it is created `unreported`, and batch notes go to its own conversation: Happy's
 chat hears nothing from it.
 
-## Recent work is never tucked away
+## Recent work stays in view by the prompt
 
 Six tidy requests in a row led a cheap model to hide every row but Happy, including a task that
-was running. The prompt already said working rows stay shown; the daemon now enforces it. A fold
-or hide of a row whose work is running, or was active in the last two hours, is answered with
-"…so it stays shown. Nothing was queued.", and a queued one is dropped at apply time if the work
-came back to life meanwhile. A stem cell nobody has written in is not touched at all.
-
-The apply-time guard checks the composed batch, including section removal. Removing a section
-evacuates its protected shown rows to the unsectioned shown list, while quiet rows may fold;
-intermediate changes cannot bypass the guard. Existing manual visibility is preserved.
-Evacuated shown rows receive fresh destination keys after Happy, preserving section and row
-order; carrying an old section's key could otherwise place protected work above Happy.
+was running. The daemon then refused to fold or hide work active in the last two hours; that rule
+is gone, and the prompt says never to fold away recent work. Folding is a proposal the person
+accepts, so a bad fold reaches the sidebar only with their consent.

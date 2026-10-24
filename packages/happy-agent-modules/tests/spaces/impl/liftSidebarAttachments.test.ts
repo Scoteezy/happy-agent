@@ -152,9 +152,6 @@ describe("sidebar attachments", () => {
         const rules: PrioritizingRules = {
             person: (id, aspect) => authorship[id]?.[aspect] === "person",
             rows,
-            happyId: undefined,
-            untouched: new Set(),
-            recent: new Set(),
             manual: new Set(),
             fresh: new Set(),
             focusId: undefined,

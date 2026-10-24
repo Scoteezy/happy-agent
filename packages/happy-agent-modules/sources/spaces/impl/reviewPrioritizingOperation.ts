@@ -1,17 +1,11 @@
 import {
     locateSpaceSidebarNode,
-    spaceSidebarRunLength,
     type SpaceSidebarDocument,
     type SpaceSidebarOperation,
 } from "@slopus/happy-agent-client";
 
 import type { SidebarAspect } from "../Space.js";
-import {
-    regroupedSidebarIds,
-    shownSidebarRows,
-    sidebarIds,
-    type SidebarNode,
-} from "./sidebarLayout.js";
+import { regroupedSidebarIds, shownSidebarRows, sidebarIds } from "./sidebarLayout.js";
 
 /** What Prioritizing's operations are judged against. */
 export interface PrioritizingRules {
@@ -19,16 +13,11 @@ export interface PrioritizingRules {
     readonly person: (id: string, aspect: SidebarAspect) => boolean;
     /** The person's rows: their space IDs. */
     readonly rows: ReadonlySet<string>;
-    readonly happyId: string | undefined;
-    /** New work nobody has written in yet. */
-    readonly untouched: ReadonlySet<string>;
-    /** Rows with work active in the last two hours, other than new work's first placement. */
-    readonly recent: ReadonlySet<string>;
     /** Rows the person placed through the row route. */
     readonly manual: ReadonlySet<string>;
     /** New rows waiting for their first placement: placing one is an insertion, not a move. */
     readonly fresh: ReadonlySet<string>;
-    /** Prioritizing's own row, which it may insert once and never moves afterwards. */
+    /** Prioritizing's own row, which it inserts and keeps right under Happy itself. */
     readonly focusId: string | undefined;
     /**
      * Whether only the small changes a batch makes without consent apply; `false` when the
@@ -37,13 +26,12 @@ export interface PrioritizingRules {
     readonly direct: boolean;
 }
 
-/** The seed's default sections, which only the person may remove or rename. */
-export const DEFAULT_SIDEBAR_SECTION_IDS: readonly string[] = ["bots", "tasks"];
-
 /**
- * Why Prioritizing may not make this change, or `undefined` when it may. `before` and `after` are
- * the document around the one applied operation. A move counts what it carries along: a section's
- * block travels with its heading, and an item that comes to sit under another heading moved.
+ * Why Prioritizing may not make this change, or `undefined` when it may. Where things go is
+ * Prioritizing's decision, made from its prompt; the daemon only keeps what the person did
+ * themselves: their placements, folds, names, fold ribbons, widgets, and the sessions they
+ * revealed. `before` and `after` are the document around the one applied operation; a move
+ * counts what it carries along, and an item that comes to sit under another heading moved.
  */
 export function reviewPrioritizingOperation(
     before: SpaceSidebarDocument,
@@ -53,26 +41,14 @@ export function reviewPrioritizingOperation(
 ): string | undefined {
     const target = operation.type === "insert" ? operation.node.id : operation.id;
     const moved = new Set<string>(regroupedSidebarIds(before, after));
-    const carried = new Set<string>();
     if (operation.type !== "set") moved.add(target);
     if (operation.type === "remove") {
         const at = locateSpaceSidebarNode(before, target);
         if (at !== undefined) sidebarIds([at.node]).forEach((id) => moved.add(id));
     }
-    if (operation.type === "move") {
-        const at = locateSpaceSidebarNode(before, target)!;
-        const from = at.siblings.indexOf(at.node);
-        for (const node of at.siblings.slice(from, from + spaceSidebarRunLength(at.siblings, from)))
-            sidebarIds([node]).forEach((id) => carried.add(id));
-    }
-    for (const id of moved) {
-        if (id === "happy-search" || id === "happy-create")
-            return "Search and Create are the person's to move.";
+    for (const id of moved)
         if (rules.person(id, "place") || rules.manual.has(id))
             return "Keep the person's manual placement.";
-        if (id === rules.focusId && operation.type !== "insert")
-            return "Your own row stays where it is; only the person moves it.";
-    }
     if (operation.type === "set") {
         if (
             (operation.collapsed !== undefined || operation.expanded !== undefined) &&
@@ -86,44 +62,9 @@ export function reviewPrioritizingOperation(
         if (operation.html !== undefined && rules.person(target, "html"))
             return "Keep the person's widget as they left it.";
     }
-    if (
-        DEFAULT_SIDEBAR_SECTION_IDS.includes(target) &&
-        (operation.type === "remove" || (operation.type === "set" && operation.label !== undefined))
-    )
-        return "Keep the Bots and Tasks sections and their names; only the person reorganizes them.";
-    const label =
-        operation.type === "set"
-            ? operation.label
-            : operation.type === "insert" && operation.node.type === "section"
-              ? operation.node.label
-              : undefined;
-    if (label !== undefined) {
-        if (agedLabel(label))
-            return `Section "${label}" sorts by age, status, or whether work is finished; name a subject instead.`;
-        const name = (text: string) => text.trim().replace(/\s+/g, " ").toLowerCase();
-        const twin = after.items.find(
-            (item) =>
-                item.type === "section" && item.id !== target && name(item.label) === name(label),
-        ) as Extract<SidebarNode, { type: "section" }> | undefined;
-        if (twin !== undefined)
-            return `Section ${twin.id} is already called "${twin.label.trim()}". Move rows there instead.`;
-    }
-    const shownBefore = new Set(shownSidebarRows(before));
+    // A session the person revealed stays in view.
     const shownAfter = new Set(shownSidebarRows(after));
-    for (const row of rules.rows) {
-        const travelled = moved.has(row) || carried.has(row);
-        const tucked = shownBefore.has(row) && !shownAfter.has(row);
-        const folded = operation.type === "set" && target === row;
-        if (!travelled && !tucked && !folded) continue;
-        if (rules.untouched.has(row))
-            return "Leave new work alone until the person sends its first message.";
-        if (row === rules.happyId && (travelled || tucked))
-            return "Prioritizing cannot move or hide Happy.";
-        if ((travelled || tucked) && rules.recent.has(row))
-            return "Leave work active in the last two hours where it is, and shown.";
-    }
-    // A session the person revealed stays in view; rows the person placed may still fold.
-    for (const id of shownBefore)
+    for (const id of shownSidebarRows(before))
         if (
             !rules.rows.has(id) &&
             !shownAfter.has(id) &&
@@ -132,21 +73,4 @@ export function reviewPrioritizingOperation(
         )
             return "Keep the sessions the person revealed in view.";
     return undefined;
-}
-
-/** The one age label Prioritizing may use: the default place for unfinished work that went quiet. */
-export const STALE_SECTION_LABEL = "Stale";
-
-/**
- * An "Older" or "Done" section reads as finished work, and an "Active" or "In progress" one is a
- * status catch-all; sections name subjects instead. "Stale" is the one exception, which the person
- * asked for.
- */
-export function agedLabel(label: string): boolean {
-    return (
-        label.trim() !== STALE_SECTION_LABEL &&
-        /\b(old|older|oldest|done|finished|archive|archived|stale|active|current|ongoing|in progress|wip)\b/i.test(
-            label,
-        )
-    );
 }

@@ -129,7 +129,7 @@ export function prioritizingTools(
             defer: false,
             capabilities: ["Edit the person's sidebar artifact."],
             description:
-                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Only placing new work, adding Distractions, adding your own row, and changes nested under a row apply without the person asking; anything else, and anything touching the person's moves, folds, widgets, new work before its first message, or recent work, is dropped with a note, and the rest still queues.",
+                "Apply sequential exact-text edits to the sidebar document. Each oldText must occur exactly once. All edits make one immutable version when the calm batch applies. Read again on a stale baseVersion. Only placing new work, adding Distractions, adding or moving your own row, and changes nested under a row apply without the person asking; anything else, and anything touching the person's moves, folds, names, or widgets, is dropped with a note, and the rest still queues.",
             parameters: editsSchema,
             returnType: resultSchema,
             durable: true,

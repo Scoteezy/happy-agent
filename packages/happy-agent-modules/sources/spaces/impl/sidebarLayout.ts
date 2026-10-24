@@ -7,8 +7,6 @@ import {
     type SpaceSidebarSpaceNode,
 } from "@slopus/happy-agent-client";
 
-import { focusFollowsHappy } from "./keepFocusUnderHappy.js";
-
 export class SidebarConflictError extends Error {
     constructor(
         readonly currentVersion: number,
@@ -68,18 +66,13 @@ export function isSidebarHeading(node: SidebarNode): boolean {
 
 /**
  * Where a new row goes: right after the section or separator it was created under. Otherwise
- * right below Happy, after everything nested under it, where new work is expected, and below
- * Prioritizing's row when it stands right under Happy, so nothing comes between the two; when
- * Happy is gone, nested, or folded inside a collapsed section, right after Create instead, so new
- * work is never hidden.
+ * right below Happy, after everything nested under it, where new work is expected; when Happy is
+ * gone, nested, or folded inside a collapsed section, right after Create instead, so new work is
+ * never hidden.
  */
 export function newSpacePosition(
     document: SpaceSidebarDocument,
-    place: {
-        readonly headingId?: string;
-        readonly happyId?: string;
-        readonly focusId?: string;
-    } = {},
+    place: { readonly headingId?: string; readonly happyId?: string } = {},
 ): SpaceSidebarPosition {
     if (
         place.headingId !== undefined &&
@@ -91,10 +84,7 @@ export function newSpacePosition(
         document.items.some((item) => item.type === "space" && item.id === place.happyId) &&
         sidebarPlacement(document, place.happyId).visibility === "shown"
     )
-        return place.focusId !== undefined &&
-            focusFollowsHappy(document, place.happyId, place.focusId)
-            ? { after: place.focusId }
-            : { after: place.happyId };
+        return { after: place.happyId };
     return { after: "happy-create" };
 }
 

@@ -60,6 +60,14 @@ A module may carry a `LEARNINGS.md` beside it. When working on a specific module
 
 Build the best combined coding-agent experience from Codex and Claude Code, with a strong focus on simplicity, thoughtful defaults, and a polished user experience. Prioritize important, widely useful workflows over obscure features or exhaustive parity.
 
+## The model decides
+
+When an LLM is responsible for a judgement, it decides through its prompt. Don't hardcode what the
+model decides: no code that forces, blocks, or repairs its choices for particular scenarios. If
+it gets something wrong, fix the prompt. Code enforces only what a direct user action asked for,
+such as the person moving something in the sidebar, and real integrity rules, such as valid
+documents, unique IDs, and permissions.
+
 ## Deliberate non-goals
 
 Do not implement a dedicated Plan mode, Vim or other modal editing modes, Jupyter notebook parsing or editing, durable command allow/deny history, dedicated IDE integrations, a separate Rig login flow, or niche compatibility features whose primary value is exhaustive upstream parity. Rig uses the credentials managed by the system Codex and Claude Code installations, so users should sign in through those assistants instead. Planning should remain part of the normal agent workflow. Auto permissions should review the current action and user authorization without learning a persistent command-execution policy. Skills should follow Codex behavior and scope, not Claude Code's expanded skill runtime. Only reconsider these boundaries when the user explicitly changes the product direction.
