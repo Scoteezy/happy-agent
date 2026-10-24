@@ -290,6 +290,14 @@ A Prioritizing from before its row gets the space on the first start of a newer 
 upgrade notice; what to do from there it decides from its own conversation. Archiving Prioritizing
 removes its row.
 
+## Happy and Prioritizing's row are one anchor
+
+On Kirill's install, new work kept going in right after Happy, so Prioritizing's row slid down to
+third and further: "why the focus agent does not show up under my happy agent". While the row
+stands directly under Happy, whatever the daemon or Prioritizing puts after Happy goes after the
+row instead (`keepFocusUnderHappy`, `newSpacePosition`). On start, the daemon moves the row back
+directly under Happy when something came between them, unless the person placed it themselves.
+
 ## Prioritizing runs on the default model from Settings
 
 Prioritizing ran on the cheapest model at the lowest effort, and its grouping and choices were

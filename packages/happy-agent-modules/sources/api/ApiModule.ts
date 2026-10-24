@@ -3591,6 +3591,14 @@ export class ApiModule implements AgentModule {
         if (event.type === "provider.event" || event.type === "tool.completed") {
             await this.#convertProviderMessageEvent(ctx, event, payload, configurations);
         }
+        // An agent whose journaled events all aged out has no version a client could hold, so
+        // its restoration, which changes nothing a client reads, has nothing to chain onto; a
+        // client sees its version when it next reads the agent.
+        if (
+            event.type === "agent.restored" &&
+            (await this.#events.previousCursor(ctx, agentId, event.id)) === undefined
+        )
+            return;
         const status = statusForAgentEvent(event.type, payload);
         await this.#appendAgentUpdate(ctx, event, {
             ...(status === undefined ? {} : { status }),

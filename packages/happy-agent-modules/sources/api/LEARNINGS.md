@@ -451,3 +451,11 @@ Retry and switch accepted `mutationId` but started their run with a hidden notic
 none, and History kept a message's `mutationId` only on person-attributed messages, so their runs
 echoed nothing. The notice now records the request's `mutationId`, and History keeps it on any
 accepted message.
+
+## Restoring an agent with no journaled history is not an error
+
+On a long-lived install the journal trims an idle agent's events, and the first `agent.restored`
+after a restart then has no earlier version, so answering it with `agent.updated` threw "An agent
+update has no prior resource version" and logged an error for every such agent. The restoration
+changes nothing a client reads and there is no version a client could hold, so the API now skips
+that update; a client reads the agent's current version when it next fetches it.

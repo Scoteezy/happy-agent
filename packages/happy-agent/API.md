@@ -10254,6 +10254,14 @@ allowed even while `seed` is set, and it applies when Prioritizing's turn ends l
 edits. The insertion is authored `prioritizing`, so the person may move or remove the row like any
 other, and once they have removed it, Prioritizing never puts it back.
 
+While Prioritizing's row stands at the top level directly after Happy's, the two are one anchor:
+anything the daemon or Prioritizing would put directly after Happy goes directly after
+Prioritizing's row instead, in the sidebar and in proposals alike. When the daemon starts and finds
+a row it can move back, it does: Prioritizing's row is at the top level but not directly after
+Happy's, Happy's row is at the top level and shown, and the person never placed Prioritizing's row
+themselves. It then moves the row directly after Happy as a daemon change; once the row stands
+there, a later start changes nothing.
+
 Prioritizing is told what to check, once: a new Prioritizing in its opening task; an upgraded one in
 a notice that the daemon was updated. From its own conversation it then decides what is still
 needed: whether to insert its row, and whether the person has already seen, accepted, or declined a
@@ -10479,7 +10487,8 @@ for a model without credentials, its notices are delivered again with the next w
 failure itself never causes.
 
 New spaces are inserted immediately after Happy's top-level `happy-space` element, below everything
-nested in it, or immediately after the section or separator named at creation. When Happy's row is
+nested in it, or immediately after Prioritizing's row when that row stands directly after Happy's,
+or immediately after the section or separator named at creation. When Happy's row is
 absent, nested, or inside a collapsed section, they are inserted immediately after
 `<happy-create/>` instead. Archived or left spaces, and archived sessions, are removed together
 with everything nested under them. Lifecycle changes publish `space.sidebar.changed` and ordinary

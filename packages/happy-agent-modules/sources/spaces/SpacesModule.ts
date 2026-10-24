@@ -136,6 +136,7 @@ import {
     affirmSidebarAuthorship,
     recordSidebarAuthorship,
 } from "./impl/recordSidebarAuthorship.js";
+import { focusFollowsHappy, keepFocusUnderHappy } from "./impl/keepFocusUnderHappy.js";
 import { type PrioritizingRules } from "./impl/reviewPrioritizingOperation.js";
 import {
     archiveOffers,
@@ -314,6 +315,7 @@ export class SpacesModule implements AgentModule {
                     await this.#ensureFocusRow(txCtx, owner.ownerUserId, agentId);
                     await this.#brief(txCtx, owner.ownerUserId, PRIORITIZING_UPGRADED);
                 });
+                await ctx.inTx((txCtx) => this.#pinFocusUnderHappy(txCtx, owner.ownerUserId));
             }
             await ctx.inTx((tx) => this.#reconcileSurfaces(tx));
             const lifetime = this.#lifetime;
@@ -1292,7 +1294,12 @@ export class SpacesModule implements AgentModule {
             ctx,
             state.ownerUserId,
             view.document,
-            sidebarDiff(view.document, proposed, { widgets: true }),
+            keepFocusUnderHappy(
+                view.document,
+                sidebarDiff(view.document, proposed, { widgets: true }),
+                rules.happyId,
+                rules.focusId,
+            ),
         );
         // While the sidebar still mirrors the classic one, Prioritizing may only add its own row.
         if (
@@ -1675,7 +1682,12 @@ export class SpacesModule implements AgentModule {
             );
             const reviewed = reviewProposalOperations(
                 base.document,
-                sidebarDiff(base.document, readSidebarDocument(html), { widgets: true }),
+                keepFocusUnderHappy(
+                    base.document,
+                    sidebarDiff(base.document, readSidebarDocument(html), { widgets: true }),
+                    rules.happyId,
+                    rules.focusId,
+                ),
                 {
                     person: (id, aspect) => authorship[id]?.[aspect] === "person",
                     mayNotArchive: (id) => {
@@ -2368,15 +2380,16 @@ export class SpacesModule implements AgentModule {
                   ];
         const cleared = applySpaceSidebarOperations(current.document, operations).document;
         if (change.add !== undefined && locateSpaceSidebarNode(cleared, change.add) === undefined) {
-            const happyId = (await querySpaces(ctx, ownerUserId)).find(
-                (space) => space.role === "happy",
-            )?.id;
+            const spaces = await querySpaces(ctx, ownerUserId);
+            const happyId = spaces.find((space) => space.role === "happy")?.id;
+            const focusId = spaces.find((space) => space.role === "focus")?.id;
             operations.push({
                 type: "insert",
                 node: { type: "space", id: change.add },
                 to: newSpacePosition(cleared, {
                     ...(change.sectionId === undefined ? {} : { headingId: change.sectionId }),
                     ...(happyId === undefined ? {} : { happyId }),
+                    ...(focusId === undefined ? {} : { focusId }),
                 }),
             });
         }
@@ -3752,6 +3765,45 @@ export class SpacesModule implements AgentModule {
             await this.#commitEvents(ctx, ownerUserId, undefined, [
                 { type: "space_created", space },
             ]);
+    }
+
+    /**
+     * Puts Prioritizing's row back right under Happy when something came between them, such as new
+     * work an earlier daemon inserted right after Happy. A row the person placed stays where they
+     * put it, and so does one Happy's own place keeps out of view.
+     */
+    async #pinFocusUnderHappy(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
+        const state = await this.#ownerState(ctx, ownerUserId);
+        if (state.sidebarArtifactId === undefined) return;
+        const spaces = await querySpaces(ctx, ownerUserId);
+        const happyId = spaces.find((space) => space.role === "happy")?.id;
+        const focus = spaces.find((space) => space.role === "focus");
+        const focusId = focus?.id;
+        if (happyId === undefined || focusId === undefined) return;
+        if (focus?.manualAt !== undefined || state.sidebarAuthorship?.[focusId]?.place === "person")
+            return;
+        const current = await this.#sidebarDocument(ctx, state.sidebarArtifactId);
+        const document = current.document;
+        if (
+            !document.items.some((item) => item.id === focusId) ||
+            !document.items.some((item) => item.id === happyId) ||
+            sidebarPlacement(document, happyId).visibility !== "shown" ||
+            focusFollowsHappy(document, happyId, focusId)
+        )
+            return;
+        const applied = applySpaceSidebarOperations(document, [
+            { type: "move", id: focusId, to: { after: happyId } },
+        ]);
+        if (applied.operations.length === 0) return;
+        await this.#commitSidebarVersion(ctx, ownerUserId, {
+            artifactId: state.sidebarArtifactId,
+            previousVersion: current.version,
+            before: document,
+            after: applied.document,
+            operations: applied.operations,
+            author: "daemon",
+            operationId: createId(),
+        });
     }
 
     async #removeFocusRow(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
