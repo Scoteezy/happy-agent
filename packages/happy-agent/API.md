@@ -348,6 +348,13 @@ naming one of the person's spaces, and offers `attach_to_my_row`, reports
 with `400 invalid_request`; clients then offer no attaching. A client that predates attachments
 may meet a nested space ID that is not a session; it should draw it as the row that space ID names,
 or leave it out.
+Sidebar proposals are additive on the same terms. A daemon that serves the proposal routes under
+`/v0/spaces/sidebar/proposals`, the `sidebar_proposal` artifact type, Prioritizing's own row with
+`target.kind: "agent"`, and the `space.sidebar.proposal.changed` event reports
+`capabilities.sidebarProposals: true` from health. Older daemons omit it and answer the routes with
+`404`. A client that predates proposals skips the `"agent"` row, as it skips every row of a kind it
+does not know, and shows a `sidebar_proposal` artifact as it shows every artifact type it does not
+know.
 
 Surfaces are additive and do not increment the protocol version. Clients detect them through
 `GET /v0/surfaces`: `404` or `501` means Surface support is unavailable. The desktop bootstrap
@@ -1122,6 +1129,8 @@ Fields:
   `sidebarOperations: true` advertises `POST /v0/spaces/sidebar/operations`, sidebar widgets, and
   `space.sidebar.changed`, described under Spaces. `sidebarAttachments: true` advertises spaces
   attached under rows and the `attach_to_my_row` tool, described under Spaces.
+  `sidebarProposals: true` advertises sidebar proposals and Prioritizing's own row, described
+  under Spaces.
 - `ready` — `false` while starting, `true` once the agent system is loaded.
 - `status` — `"starting"` or `"ready"`; the human-readable form of `ready`.
 - `version` — one identity object. `protocol` is the wire protocol number, the client's
@@ -9743,14 +9752,17 @@ other values disable it. This setting is per authenticated member in team mode a
 the installation's one person in standalone mode. Enabling it does not itself create work or
 Prioritizing. While enabled, Prioritizing is created on the first sidebar-document read or new work
 (`POST /v0/spaces/stem-cells`), the same way Happy creates any subtask, and appears in Happy's
-`subtasks` like any other; until then there is none, and nothing organises the sidebar. After a new conversation's first
+`subtasks` like any other; until then there is none, and nothing organises the sidebar. It has a
+conversation of its own, shown as its own row (see "Prioritizing's row"), where the person may
+write to it; it never writes into Happy's conversation. After a new conversation's first
 message it gives the row an icon and decides where it belongs, and it tidies the list when asked.
 Its placement, visibility, and section changes are not applied one by one: they wait and apply
 together as one **batch** at a calm moment — when the client reports `calm`, or after five minutes
 without a report or a message from the person — and never while the client reports
-`interacting`. Each batch adds one short line to Happy's conversation, such as "Moved Preview
+`interacting`. Each batch adds one short line to Prioritizing's conversation, such as "Moved Preview
 viewer release to Releases.", that names every row it folded out of view, and is recorded with
-its diff. Icons apply at once, because they move
+its diff. Only small changes apply this way; a larger reorganisation is a proposal the person
+accepts or declines (see "Proposals"). Icons apply at once, because they move
 nothing. A person's own changes through `PATCH` apply immediately and are never queued. Other
 agents may ask Prioritizing to move a row through their `request_space_placement` tool; only
 Prioritizing changes organisation. Disabling Stem Cells stops that person's Prioritizing,
@@ -9811,7 +9823,10 @@ of its bot's subtasks the same way; Prioritizing is one of Happy's. Their change
   a daemon-relative path read with the same bearer token.
 - `target` — what selecting the row opens. `kind` is `"task"` for nearly every row: new work and
   everything the person does is a task. `"bot"` names a bot's conversation — Happy's row and any
-  other bot the person has — and `"surface"` a joined Surface. `id` is that task, bot, or Surface. `agentId` is the conversation to show and `workspaceId` its
+  other bot the person has — and `"surface"` a joined Surface. `"agent"` names a conversation that
+  is neither a task's nor a bot's: Prioritizing's own row, whose `id` and `agentId` are
+  Prioritizing's agent and whose `workspaceId` is Happy's workspace. `id` is that task, bot,
+  Surface, or agent. `agentId` is the conversation to show and `workspaceId` its
   workspace; both are `null` for a Surface. A client skips a row whose `kind` it does not know.
 - `sectionId` — the section it is in, or `null`.
 - `orderKey` — its opaque position within its section.
@@ -9870,9 +9885,10 @@ A section with no rows stays until Prioritizing removes it.
 }
 ```
 
-- `note` — the one line added to Happy's conversation, written from the changes themselves.
-- `noteMessageId` — that line's message `id` in Happy's conversation (`target.agentId` of Happy's
-  row), or `null` when Happy is unavailable.
+- `note` — the one line added to Prioritizing's conversation, written from the changes themselves.
+- `noteMessageId` — that line's message `id` in Prioritizing's conversation (`target.agentId` of
+  Prioritizing's row), or `null` when that conversation is unavailable. Daemons before
+  `capabilities.sidebarProposals` added the line to Happy's conversation instead.
 - `changes` — every row the batch moved, with its `title` at the time. `from` and `to` give its
   section, its zero-based `index` among the rows it was listed with (its section's shown rows,
   the unsectioned shown rows, the folded rows, or the hidden rows), and its `visibility`. A batch
@@ -10190,18 +10206,183 @@ the meantime no longer discards them. `get_sidebar_styles` returns the elements,
 and children, and the rules above. `list_sidebar` returns the document, facts about each row, every
 session under the person's rows with its parent, whether or not it is shown, and
 `visibleRows: {shown, budget}`. `shown` counts the top-level rows and widgets outside collapsed
-sections plus the sessions drawn under expanded rows, excluding Happy and new work before its first
-message; `budget` is 10, a target Prioritizing aims to stay within rather than a limit the daemon
-enforces. `read_row_conversation {id, limit?}` takes a space ID or a session's agent ID and returns
-the person's messages, messages from other agents (such as a subtask's task or report), and the
-agent's text replies, newest first, without tool calls or reasoning, bounded to 40 messages
-(default 12) and about 16,000 characters. `set_space_icon` takes a space ID or a session's agent ID.
+sections plus the sessions drawn under expanded rows, excluding Happy, new work before its first
+message, and Prioritizing's own row; `budget` is 10, a target Prioritizing aims to stay within
+rather than a limit the daemon enforces. `read_conversations {ids, turns?, replies?}` reads up to 12 conversations at once:
+each ID is a space ID or a session's agent ID. For each it returns the row's title and when it was
+last active, then its latest `turns` turns (default 4, at most 20), oldest first. A turn is one
+message from the person or from another agent (such as a subtask's task or report) and the agent's
+last `replies` text replies that answered it (default 1, at most 3); tool calls, their output,
+reasoning, and hidden messages are left out. Each message is shortened to 1,200 characters, each
+conversation to about 4,000, and the whole answer to about 24,000. `set_space_icon` takes a
+space ID or a session's agent ID.
 Prioritizing runs on the person's default model from Settings at that model's default effort. It
 gives every session an icon but leaves sessions out of the document unless the person is likely to
 want one shown, such as a session changing code in a repository or one waiting for their review.
-It may add and update widgets, rarely, where a compact card says more than a row. It may attach a
+It may propose a widget, rarely, where a compact card says more than a row. It may attach a
 Surface under the work it belongs to when the person's messages clearly tie them together, by
 nesting that Surface's row.
+
+#### Prioritizing's row
+
+Prioritizing's conversation has a row of its own, so the person can open it, read its notes and
+proposals, and answer it. The daemon makes that space when it makes Prioritizing, and, on the first
+start of a daemon that serves proposals, for every person whose Prioritizing predates its row. The
+space has `target.kind: "agent"`, the icon `{ "type": "library", "slug": "prioritize" }`, the title
+of Prioritizing's conversation, and `placement: "settled"`. Like any space, it shows only where the
+document names it, and the daemon never inserts it into the document itself. Prioritizing checks
+whether its row is in the document and, when it is missing, inserts it with an ordinary edit,
+usually right below Happy. That edit is allowed even while `seed` is set, and it applies at calm
+like Prioritizing's other edits. The insertion is authored `prioritizing`, so the person may move
+or remove the row like any other, and once they have, Prioritizing never puts it back.
+
+Prioritizing is told what to check, once: a new Prioritizing in its opening task; an upgraded one in
+a notice that the daemon was updated. From its own conversation it then decides what is still
+needed: whether to insert its row, and whether the person has already seen, accepted, or declined a
+proposal. The row is not work: it never counts toward `visibleRows`, Prioritizing does not move it
+once placed, and it is never briefed as new work. When Prioritizing is archived, its row leaves the
+sidebar; the next Prioritizing gets a row of its own.
+
+A message the person writes in Prioritizing's conversation is a request in their own words: the
+changes Prioritizing queues while answering it apply as soon as that turn finishes, unless the
+client reports `interacting`, and without the limits below.
+
+#### What applies at calm
+
+A calm batch applies only these operations of Prioritizing's:
+
+- the first placement of new work: a `move` of a row that is still `placement: "pending"` and has
+  never been placed, after any heading or row at the top level;
+- inserting `<happy-section id="distractions" label="Distractions" collapsed="true"/>`, the folded
+  section for work outside the person's current focus, when the document has none;
+- inserting its own row;
+- changes nested under a row: inserting, moving, or removing a session or an attachment there, and
+  `set` of `expanded` on a row or session.
+
+Every other operation is dropped from the calm batch with a note that names it and says to propose
+it: moving or removing any other top-level item; inserting any other section, separator, row, or
+widget; `set` of `collapsed`, `label`, `foldRibbon`, or `html`; and any operation after which a row
+that was already placed sits under a different heading. The rest of the batch still applies. When
+the person asked for the change in their own words — through another agent's
+`request_space_placement` with `personAsked`, or in Prioritizing's own conversation — this list does
+not apply, and only the rules above and under "Authorship" do.
+
+#### Proposals
+
+A larger change is a proposal: a `sidebar_proposal` artifact that holds the person's sidebar with
+the change made, shown to the person in Prioritizing's conversation, where they can edit it, accept
+it, or decline it. Accepting applies it to the sidebar as the person's own change. A proposal has
+the sidebar's grammar, document rules, and limits, and its versions are immutable like any
+artifact's. Version 1 is a copy of the sidebar as Prioritizing read it, its queued edits drawn in:
+the proposal's base. Every later version is the proposed sidebar. Its `display` is
+`"inline_expanded"`, and its source is Prioritizing's conversation. A person has at most one open
+proposal.
+
+Prioritizing writes proposals with `propose_sidebar {baseVersion, edits:[{oldText, newText}]}`,
+exact-text replacements as in `edit_sidebar`. With no open proposal, the edits apply to the sidebar
+as `list_sidebar` shows it, `baseVersion` is that version, and the call creates a proposal with its
+base as version 1 and the edited document as version 2. With an open proposal, the edits apply to
+its latest version, `baseVersion` is that proposal version, and the call makes the next version. A
+stale `baseVersion` is a conflict, and so is an edit whose old text does not occur exactly once. An
+edit that would change an aspect of a node that the person last set in this proposal is dropped
+with a note, and the rest of the call applies. The call presents the artifact (an `artifact`
+presentation with `shows: "latest"`) and returns its reference tag, so the proposal appears inline
+in Prioritizing's conversation at its full height and again after every revision. `list_sidebar`
+also returns the open proposal, its document, the nodes the person last set in it, and the
+decisions on the person's last proposals.
+
+**Archive offers.** A proposal may also offer to archive work that looks finished. In a proposal
+document, and only there, `<happy-section id="archive" label="Archive"/>` heads the rows offered
+for archiving: the rows of its block, up to the next section or separator. Only top-level task rows
+may stand in that block; any other row there is refused like any other document rule. Prioritizing
+may not offer Happy, its own row, new work before its first message, or work running or active in
+the last two hours, and such an offer is dropped with a note. The person keeps a row by dragging it
+out of the block in the proposal, or offers one by dragging it in. Accepting archives each task in
+the block as `POST /v0/tasks/:taskId/archive` archives it, as the person and with the person's
+archive authority; a task the person may not archive, or one that is already archived, is
+skipped and stays in the sidebar. The block's heading is never applied to the sidebar, and archived
+rows leave it as archived work always does.
+
+A client shows a `sidebar_proposal` inline as a sidebar drawn from its document with the same
+components as the sidebar, never as raw HTML. While it is open, the client follows its latest
+version, lets the person edit it in place, and offers Accept and Decline. Once it is decided, the
+client shows its final version and its status. Ordinary artifact updates of a proposal are refused
+with `400 invalid_request`; only `propose_sidebar` and the routes below change one.
+
+The proposal object:
+
+```json
+{
+    "artifactId": "p4k8m2q9w1e5r7y3u6i0o2p4",
+    "version": 3,
+    "baseVersion": 12,
+    "status": "open",
+    "createdAt": 1755300000000,
+    "decidedAt": null,
+    "acceptedVersion": null
+}
+```
+
+- `artifactId`, `version` — the proposal's artifact and its latest version.
+- `baseVersion` — the sidebar version the proposal was drafted from.
+- `status` — `"open"`, `"accepted"`, or `"declined"`.
+- `decidedAt` — when the person accepted or declined it, or `null` while it is open.
+- `acceptedVersion` — the sidebar version that accepting it made, or `null`.
+
+`GET /v0/spaces/sidebar` also returns `proposal`, the person's open proposal object, when one
+exists. Daemons without proposals omit it, and so does a daemon when no proposal is open.
+
+##### `GET /v0/spaces/sidebar/proposals/:artifactId`
+
+Returns `200 {proposal, html}`, where `html` is the proposal's latest version with widgets
+included. A proposal that does not exist or belongs to another person is `404`.
+
+##### `POST /v0/spaces/sidebar/proposals/:artifactId/operations`
+
+The person's edit of an open proposal. It takes the request of `POST /v0/spaces/sidebar/operations`,
+with `baseVersion` naming a proposal version, and answers in the same shape, with the proposal's
+artifact ID and version. Rebase, conflicts, document rules, and retries by `mutationId` are those of
+the sidebar route. The new version is authored by the person, and the daemon records which nodes'
+aspects the person set in this proposal; Prioritizing's later revisions keep them. A proposal that
+is no longer open is `409 conflict`. Prioritizing hears of the person's edits in its next calm
+brief.
+
+##### `POST /v0/spaces/sidebar/proposals/:artifactId/accept`
+
+Request: `{ "mutationId": "..." }`, required. Accepting applies the difference between the
+proposal's version 1 and its latest version to the current sidebar, as the person's batch: the
+operations come from `diffSpaceSidebar` with widgets included, and they rebase from version 1 as
+`POST /v0/spaces/sidebar/operations` rebases from its `baseVersion`. An operation that no longer
+applies — its node is gone, its ID now exists, or its result breaks a document rule — is skipped,
+and the rest apply. The version is authored by the person, records them as the author of
+everything it set, publishes `space.sidebar.changed` with author `"person"` and the `mutationId`,
+and ends `seed`. When nothing changed in the meantime, the sidebar becomes exactly the proposal's
+latest version.
+
+Response — `200 { "proposal": { ... }, "sidebar": { "artifactId", "version", "html", "operations" }, "archived": [ ... ] }`,
+where `sidebar` takes the shape of the `POST /v0/spaces/sidebar/operations` response and
+`archived` lists the space IDs whose tasks accepting archived. The proposal
+becomes `"accepted"`. A retry with the same `mutationId` returns the first answer and applies
+nothing again. A proposal that was already decided under another mutation is `409 conflict`.
+Prioritizing is told at once.
+
+##### `POST /v0/spaces/sidebar/proposals/:artifactId/decline`
+
+Request: `{}` or `{ "mutationId": "..." }`. The proposal becomes `"declined"`, and the sidebar is
+not changed. Response — `200 { "proposal": { ... } }`. Declining a declined proposal answers the
+same again; an accepted one is `409 conflict`. Prioritizing is told at once, and it does not
+propose the same change again unless the person asks.
+
+##### Proposal events
+
+Every new proposal version and every change of a proposal's status is announced after commit with
+`space.sidebar.proposal.changed`: `{proposal, previousVersion, author, operations, mutationId?}`.
+For a new version, applying `operations` to `previousVersion` with `applySpaceSidebarOperations`
+gives `proposal.version`, and `author` is `"person"` or `"prioritizing"`. A new proposal's first
+event has `previousVersion` 1. For a status change, `operations` is empty, `previousVersion` equals
+`proposal.version`, and `author` is `"person"`. The ordinary `artifact.created` and
+`artifact.updated` events are still emitted. Like other `space.*` events, these reach only the
+proposal's person.
 
 #### Attaching from a conversation
 
@@ -10253,16 +10434,18 @@ section or separator counts as moved. Moves are attributed at block level: when 
 changes position, its heading counts as moved and its rows as carried, so a person's section drag
 protects the section, not each row. Prioritizing may not move a block that carries Happy, untouched
 new work, or work active in the last two hours, and may not remove or relabel the default `bots`
-and `tasks` sections. One batch of Prioritizing's may move at most two rows that were already
-placed, counting rows carried with a moved section and rows that come to sit under another
-heading; placing new pending work does not count, and there is no limit when the person asked for
-the change in their own words. Further moves are dropped with a note. Prioritizing's new or
+and `tasks` sections. What else its calm batches may change is set out under "What applies at
+calm"; everything beyond that is dropped with a note and belongs in a proposal. Prioritizing's new or
 renamed section labels may not name age
 or whether work is finished (such as Older, Done, Archive, or Stale) and may not repeat another
-section's label ignoring case and spacing; the person may label sections freely.
+section's label ignoring case and spacing; the person may label sections freely. The one exception
+is the label `Stale`, exactly, which Prioritizing may give one section, `<happy-section id="stale"
+label="Stale" collapsed="true"/>`, the default place for unfinished work that has gone quiet. It
+proposes that section like any other reorganisation.
 
-Each applied manager batch adds exactly one factual diff-derived note to Happy's conversation and
-publishes the ordinary live message event so open conversations update immediately. Notes name
+Each applied manager batch adds exactly one factual diff-derived note to Prioritizing's
+conversation and publishes the ordinary live message event so open conversations update
+immediately. Happy's conversation receives nothing from Prioritizing. Notes name
 sections by label, such as "Put Windows installer signing in Releases.", "Added Releases.", or
 "Moved Releases." for a moved section; a move under a separator names only the row.
 
@@ -10533,15 +10716,16 @@ Existing `page` presentations remain readable as history.
 
 **Types.** The type decides the entry and which files a version may hold:
 
-| `type`         | Entry               | Files                                       | Size limits                    |
-| -------------- | ------------------- | ------------------------------------------- | ------------------------------ |
-| `markdown`     | `index.md`, UTF-8   | the entry plus any other files; 1–256 files | entry 4 MiB; 256 MiB together  |
-| `html`         | `index.html`, UTF-8 | the entry plus any other files; 1–256 files | entry 16 MiB; 256 MiB together |
-| `image`        | its one file        | exactly one image                           | 32 MiB                         |
-| `image_series` | the first file      | 1–64 images, shown in `path` order          | 32 MiB each, 256 MiB together  |
-| `sidebar`      | `index.html`, UTF-8 | exactly one file                            | 128 KiB                        |
-| `video`        | its one file        | exactly one video                           | 256 MiB                        |
-| `document`     | its one file        | exactly one document                        | 64 MiB                         |
+| `type`             | Entry               | Files                                       | Size limits                    |
+| ------------------ | ------------------- | ------------------------------------------- | ------------------------------ |
+| `markdown`         | `index.md`, UTF-8   | the entry plus any other files; 1–256 files | entry 4 MiB; 256 MiB together  |
+| `html`             | `index.html`, UTF-8 | the entry plus any other files; 1–256 files | entry 16 MiB; 256 MiB together |
+| `image`            | its one file        | exactly one image                           | 32 MiB                         |
+| `image_series`     | the first file      | 1–64 images, shown in `path` order          | 32 MiB each, 256 MiB together  |
+| `sidebar`          | `index.html`, UTF-8 | exactly one file                            | 128 KiB                        |
+| `sidebar_proposal` | `index.html`, UTF-8 | exactly one file                            | 128 KiB                        |
+| `video`            | its one file        | exactly one video                           | 256 MiB                        |
+| `document`         | its one file        | exactly one document                        | 64 MiB                         |
 
 - Images: `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/avif`, and `image/svg+xml`.
 - Videos: `video/mp4`, `video/webm`, `video/quicktime`, and `video/ogg`.

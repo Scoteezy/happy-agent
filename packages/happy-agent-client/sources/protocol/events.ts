@@ -50,6 +50,7 @@ import {
     spaceSectionSchema,
     spaceSidebarAuthorSchema,
     spaceSidebarOperationSchema,
+    spaceSidebarProposalSchema,
 } from "./spaces.js";
 import { taskMembershipSchema, taskSchema } from "./tasks.js";
 import {
@@ -264,6 +265,22 @@ export const spaceSidebarChangedPayloadSchema = Type.Object({
     version: Type.Integer({ minimum: 1 }),
 });
 export type SpaceSidebarChangedPayload = Static<typeof spaceSidebarChangedPayloadSchema>;
+
+/**
+ * A sidebar proposal has a new version or a new status. For a version, applying `operations` to
+ * `previousVersion` gives `proposal.version`; for a status change `operations` is empty and
+ * `previousVersion` equals `proposal.version`.
+ */
+export const spaceSidebarProposalChangedPayloadSchema = Type.Object({
+    author: Type.Union([Type.Literal("person"), Type.Literal("prioritizing")]),
+    mutationId: Type.Optional(mutationIdSchema),
+    operations: Type.Array(spaceSidebarOperationSchema),
+    previousVersion: Type.Integer({ minimum: 1 }),
+    proposal: spaceSidebarProposalSchema,
+});
+export type SpaceSidebarProposalChangedPayload = Static<
+    typeof spaceSidebarProposalChangedPayloadSchema
+>;
 
 /**
  * Members stay present on chat-only and edit-only changes. Chat association, `name`, and `image`
@@ -658,6 +675,7 @@ export type HappyAgentEvent =
     | EventEnvelope<"space.section.removed", SpaceSectionRemovedPayload>
     | EventEnvelope<"space.batch.applied", SpaceBatchAppliedPayload>
     | EventEnvelope<"space.sidebar.changed", SpaceSidebarChangedPayload>
+    | EventEnvelope<"space.sidebar.proposal.changed", SpaceSidebarProposalChangedPayload>
     | EventEnvelope<"surface.updated", SurfaceUpdatedPayload>
     | EventEnvelope<"surface.created", SurfaceCreatedPayload>
     | EventEnvelope<"todo.created", TodoCreatedPayload>

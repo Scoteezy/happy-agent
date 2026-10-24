@@ -80,8 +80,12 @@ import type {
     UnarchiveTaskRequest,
 } from "./protocol/tasks.js";
 import type {
+    AcceptSpaceSidebarProposalRequest,
+    AcceptSpaceSidebarProposalResponse,
     CreateStemCellRequest,
     CreateStemCellResponse,
+    DeclineSpaceSidebarProposalRequest,
+    DeclineSpaceSidebarProposalResponse,
     SpaceAttentionRequest,
     SpaceAttentionResponse,
     SpaceBatchListResponse,
@@ -90,6 +94,7 @@ import type {
     SpaceSectionResponse,
     SpaceSidebarOperationsRequest,
     SpaceSidebarOperationsResponse,
+    SpaceSidebarProposalResponse,
     SpaceSidebarResponse,
     UpdateSpaceSidebarRequest,
     UpdateSpaceRequest,
@@ -1653,6 +1658,69 @@ export class HappyAgentClient {
         return await this.#json({
             method: "POST",
             path: "v0/spaces/sidebar/operations",
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * `GET /v0/spaces/sidebar/proposals/:artifactId` — a proposal and its latest document. Send it
+     * only when health reports `capabilities.sidebarProposals`.
+     */
+    async getSpaceSidebarProposal(
+        artifactId: string,
+        options: RequestOptions = {},
+    ): Promise<SpaceSidebarProposalResponse> {
+        return await this.#json({
+            method: "GET",
+            path: `v0/spaces/sidebar/proposals/${encodeURIComponent(artifactId)}`,
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * `POST /v0/spaces/sidebar/proposals/:artifactId/operations` — the person's edit of an open
+     * proposal, made against a proposal version and rebased like a sidebar batch.
+     */
+    async applySpaceSidebarProposalOperations(
+        artifactId: string,
+        request: SpaceSidebarOperationsRequest,
+        options: RequestOptions = {},
+    ): Promise<SpaceSidebarOperationsResponse> {
+        return await this.#json({
+            method: "POST",
+            path: `v0/spaces/sidebar/proposals/${encodeURIComponent(artifactId)}/operations`,
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /**
+     * `POST /v0/spaces/sidebar/proposals/:artifactId/accept` — apply the proposal to the sidebar
+     * as the person's batch. Retry with the same mutation ID.
+     */
+    async acceptSpaceSidebarProposal(
+        artifactId: string,
+        request: AcceptSpaceSidebarProposalRequest,
+        options: RequestOptions = {},
+    ): Promise<AcceptSpaceSidebarProposalResponse> {
+        return await this.#json({
+            method: "POST",
+            path: `v0/spaces/sidebar/proposals/${encodeURIComponent(artifactId)}/accept`,
+            json: request,
+            signal: options.signal,
+        });
+    }
+
+    /** `POST /v0/spaces/sidebar/proposals/:artifactId/decline` — leave the sidebar as it is. */
+    async declineSpaceSidebarProposal(
+        artifactId: string,
+        request: DeclineSpaceSidebarProposalRequest = {},
+        options: RequestOptions = {},
+    ): Promise<DeclineSpaceSidebarProposalResponse> {
+        return await this.#json({
+            method: "POST",
+            path: `v0/spaces/sidebar/proposals/${encodeURIComponent(artifactId)}/decline`,
             json: request,
             signal: options.signal,
         });

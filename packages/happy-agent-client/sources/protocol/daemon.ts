@@ -99,6 +99,11 @@ export const healthResponseSchema = Type.Object({
              * attachment, and conversations may attach to their row with `attach_to_my_row`.
              */
             sidebarAttachments: Type.Optional(Type.Boolean()),
+            /**
+             * True when Prioritizing has its own `"agent"` row and proposes larger sidebar changes
+             * as `sidebar_proposal` artifacts, served under `/v0/spaces/sidebar/proposals`.
+             */
+            sidebarProposals: Type.Optional(Type.Boolean()),
         }),
     ),
     /** Always `true`; a daemon that cannot answer does not answer. */

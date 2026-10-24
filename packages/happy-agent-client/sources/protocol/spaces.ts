@@ -22,15 +22,20 @@ export const spaceIconSchema = Type.Union([
 export type SpaceIcon = Static<typeof spaceIconSchema>;
 
 /**
- * What selecting a row opens: nearly always a task; a bot for Happy and other bots; a Surface.
- * Clients skip a row whose `kind` they do not know.
+ * What selecting a row opens: nearly always a task; a bot for Happy and other bots; a Surface; or
+ * an agent, Prioritizing's own conversation. Clients skip a row whose `kind` they do not know.
  */
 export const spaceTargetSchema = Type.Object({
     /** The conversation to show; `null` for a Surface. */
     agentId: Nullable(cuid2Schema),
-    /** The task, bot, or Surface. */
+    /** The task, bot, Surface, or agent. */
     id: cuid2Schema,
-    kind: Type.Union([Type.Literal("task"), Type.Literal("bot"), Type.Literal("surface")]),
+    kind: Type.Union([
+        Type.Literal("task"),
+        Type.Literal("bot"),
+        Type.Literal("surface"),
+        Type.Literal("agent"),
+    ]),
     /** The conversation's workspace; `null` for a Surface. */
     workspaceId: Nullable(cuid2Schema),
 });
@@ -113,9 +118,9 @@ export const spaceBatchSchema = Type.Object({
     appliedAt: timestampSchema,
     changes: Type.Array(spaceBatchChangeSchema),
     id: cuid2Schema,
-    /** The one line added to Happy's conversation. */
+    /** The one line added to Prioritizing's conversation (Happy's, on daemons before proposals). */
     note: Type.String(),
-    /** That line's message ID in Happy's conversation, or `null` when Happy was unavailable. */
+    /** That line's message ID in that conversation, or `null` when it was unavailable. */
     noteMessageId: Nullable(cuid2Schema),
 });
 export type SpaceBatch = Static<typeof spaceBatchSchema>;
@@ -158,6 +163,26 @@ export const createStemCellResponseSchema = Type.Object({
 });
 export type CreateStemCellResponse = Static<typeof createStemCellResponseSchema>;
 
+/**
+ * A larger sidebar change Prioritizing proposes as a `sidebar_proposal` artifact. Its version 1 is
+ * the sidebar it was drafted from; later versions are the proposed sidebar, which the person may
+ * edit, then accept or decline.
+ */
+export const spaceSidebarProposalSchema = Type.Object({
+    artifactId: cuid2Schema,
+    /** The proposal artifact's latest version. */
+    version: Type.Integer({ minimum: 1 }),
+    /** The sidebar version the proposal was drafted from. */
+    baseVersion: Type.Integer({ minimum: 1 }),
+    status: Type.Union([Type.Literal("open"), Type.Literal("accepted"), Type.Literal("declined")]),
+    createdAt: timestampSchema,
+    /** When the person accepted or declined it; `null` while open. */
+    decidedAt: Nullable(timestampSchema),
+    /** The sidebar version accepting it made, or `null`. */
+    acceptedVersion: Nullable(Type.Integer({ minimum: 1 })),
+});
+export type SpaceSidebarProposal = Static<typeof spaceSidebarProposalSchema>;
+
 /** The person's authoritative HTML sidebar and live space identities. */
 export const spaceSidebarResponseSchema = Type.Object({
     artifactId: cuid2Schema,
@@ -179,6 +204,11 @@ export const spaceSidebarResponseSchema = Type.Object({
      * write or Prioritizing's next notice. Older daemons omit it; treat a missing flag as false.
      */
     seed: Type.Optional(Type.Literal(true)),
+    /**
+     * The person's open proposal, when one exists. Daemons without
+     * `capabilities.sidebarProposals` omit it.
+     */
+    proposal: Type.Optional(spaceSidebarProposalSchema),
 });
 export type SpaceSidebarResponse = Static<typeof spaceSidebarResponseSchema>;
 
@@ -382,6 +412,51 @@ export const spaceSidebarAuthorSchema = Type.Union([
     Type.Literal("daemon"),
 ]);
 export type SpaceSidebarAuthor = Static<typeof spaceSidebarAuthorSchema>;
+
+/** `GET /v0/spaces/sidebar/proposals/:artifactId` — the proposal and its latest document. */
+export const spaceSidebarProposalResponseSchema = Type.Object({
+    proposal: spaceSidebarProposalSchema,
+    /** The proposal's latest version, widgets included. */
+    html: Type.String(),
+});
+export type SpaceSidebarProposalResponse = Static<typeof spaceSidebarProposalResponseSchema>;
+
+/**
+ * `POST /v0/spaces/sidebar/proposals/:artifactId/accept` — apply the proposal to the sidebar as
+ * the person's batch. The mutation ID is the retry key.
+ */
+export const acceptSpaceSidebarProposalRequestSchema = Type.Object({
+    mutationId: Type.String({ minLength: 1, maxLength: 1024 }),
+});
+export type AcceptSpaceSidebarProposalRequest = Static<
+    typeof acceptSpaceSidebarProposalRequestSchema
+>;
+
+export const acceptSpaceSidebarProposalResponseSchema = Type.Object({
+    proposal: spaceSidebarProposalSchema,
+    /** The sidebar after the batch, with the operations that applied. */
+    sidebar: spaceSidebarOperationsResponseSchema,
+    /** The space IDs whose tasks accepting archived, from the proposal's Archive block. */
+    archived: Type.Array(cuid2Schema),
+});
+export type AcceptSpaceSidebarProposalResponse = Static<
+    typeof acceptSpaceSidebarProposalResponseSchema
+>;
+
+/** `POST /v0/spaces/sidebar/proposals/:artifactId/decline` — the sidebar stays as it is. */
+export const declineSpaceSidebarProposalRequestSchema = Type.Object({
+    mutationId: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+});
+export type DeclineSpaceSidebarProposalRequest = Static<
+    typeof declineSpaceSidebarProposalRequestSchema
+>;
+
+export const declineSpaceSidebarProposalResponseSchema = Type.Object({
+    proposal: spaceSidebarProposalSchema,
+});
+export type DeclineSpaceSidebarProposalResponse = Static<
+    typeof declineSpaceSidebarProposalResponseSchema
+>;
 
 /**
  * `PATCH /v0/spaces/:spaceId` — the person's own change to a row, applied at once. At least one

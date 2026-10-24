@@ -9,10 +9,17 @@ import {
     spaceRemovedPayloadSchema,
     spaceSectionPayloadSchema,
     spaceSectionRemovedPayloadSchema,
+    spaceSidebarProposalChangedPayloadSchema,
     type HappyAgentEvent,
 } from "../sources/protocol/events.js";
+import { artifactPresentationSchema } from "../sources/protocol/messages.js";
 import {
+    acceptSpaceSidebarProposalRequestSchema,
+    acceptSpaceSidebarProposalResponseSchema,
     createStemCellRequestSchema,
+    declineSpaceSidebarProposalRequestSchema,
+    spaceSidebarProposalResponseSchema,
+    spaceSidebarResponseSchema,
     spaceAttentionRequestSchema,
     spaceAttentionResponseSchema,
     spaceBatchSchema,
@@ -25,6 +32,7 @@ import {
     type Space,
     type SpaceBatch,
     type SpaceSection,
+    type SpaceSidebarProposal,
 } from "../sources/protocol/spaces.js";
 
 const at = 1_755_400_000_000;
@@ -69,6 +77,16 @@ const batch: SpaceBatch = {
     id: "batch1",
     note: "Moved Preview viewer release to Older.",
     noteMessageId: "message1",
+};
+
+const proposal: SpaceSidebarProposal = {
+    acceptedVersion: null,
+    artifactId: "proposal1",
+    baseVersion: 12,
+    createdAt: at,
+    decidedAt: null,
+    status: "open",
+    version: 3,
 };
 
 describe("spaces protocol", () => {
@@ -168,6 +186,118 @@ describe("spaces protocol", () => {
         expect(Value.Check(spaceSectionPayloadSchema, events[3]?.payload)).toBe(true);
         expect(Value.Check(spaceSectionRemovedPayloadSchema, events[4]?.payload)).toBe(true);
         expect(Value.Check(spaceBatchAppliedPayloadSchema, events[5]?.payload)).toBe(true);
+    });
+
+    it("validates Prioritizing's row and sidebar proposals", () => {
+        const focus = {
+            ...space,
+            target: { agentId: "agent9", id: "agent9", kind: "agent", workspaceId: "workspace1" },
+        };
+        expect(Value.Check(spaceSchema, focus)).toBe(true);
+        expect(
+            Value.Check(spaceSidebarResponseSchema, {
+                artifactId: "sidebar1",
+                version: 12,
+                html: "<nav/>",
+                spaces: [focus],
+                proposal,
+            }),
+        ).toBe(true);
+        expect(Value.Check(spaceSidebarProposalResponseSchema, { proposal, html: "<nav/>" })).toBe(
+            true,
+        );
+        expect(
+            Value.Check(spaceSidebarProposalResponseSchema, {
+                proposal: { ...proposal, status: "withdrawn" },
+                html: "<nav/>",
+            }),
+        ).toBe(false);
+        expect(Value.Check(acceptSpaceSidebarProposalRequestSchema, {})).toBe(false);
+        expect(Value.Check(acceptSpaceSidebarProposalRequestSchema, { mutationId: "a1" })).toBe(
+            true,
+        );
+        expect(Value.Check(declineSpaceSidebarProposalRequestSchema, {})).toBe(true);
+        expect(
+            Value.Check(acceptSpaceSidebarProposalResponseSchema, {
+                proposal: {
+                    ...proposal,
+                    status: "accepted",
+                    decidedAt: at,
+                    acceptedVersion: 13,
+                },
+                sidebar: { artifactId: "sidebar1", version: 13, html: "<nav/>", operations: [] },
+                archived: ["space1"],
+            }),
+        ).toBe(true);
+        expect(
+            Value.Check(spaceSidebarProposalChangedPayloadSchema, {
+                author: "person",
+                operations: [{ type: "set", id: "releases", collapsed: true }],
+                previousVersion: 2,
+                proposal,
+            }),
+        ).toBe(true);
+        expect(
+            Value.Check(artifactPresentationSchema, {
+                type: "artifact",
+                artifactId: "proposal1",
+                version: 3,
+                artifactType: "sidebar_proposal",
+                title: "Sidebar proposal",
+                shows: "latest",
+            }),
+        ).toBe(true);
+        expect(
+            Value.Check(healthResponseSchema, {
+                healthy: true,
+                ready: true,
+                status: "ready",
+                version: { protocol: 32, daemon: "1.0.0" },
+                capabilities: { sidebarProposals: true },
+            }),
+        ).toBe(true);
+    });
+
+    it("calls the proposal routes", async () => {
+        const requests: { method: string; url: string; body: string | null }[] = [];
+        const fetch: typeof globalThis.fetch = async (input, init) => {
+            requests.push({
+                body: typeof init?.body === "string" ? init.body : null,
+                method: init?.method ?? "GET",
+                url: input.toString(),
+            });
+            return new Response(JSON.stringify({ proposal, html: "<nav/>" }), {
+                headers: { "content-type": "application/json" },
+                status: 200,
+            });
+        };
+        const client = new HappyAgentClient({ endpoint: "http://agent.local", token: "t", fetch });
+        await expect(client.getSpaceSidebarProposal("proposal1")).resolves.toEqual({
+            proposal,
+            html: "<nav/>",
+        });
+        await client.applySpaceSidebarProposalOperations("proposal1", {
+            mutationId: "e1",
+            baseVersion: 3,
+            operations: [{ type: "set", id: "releases", collapsed: true }],
+        });
+        await client.acceptSpaceSidebarProposal("proposal1", { mutationId: "a1" });
+        await client.declineSpaceSidebarProposal("proposal1");
+        const base = "http://agent.local/v0/spaces/sidebar/proposals/proposal1";
+        expect(requests).toEqual([
+            { body: null, method: "GET", url: base },
+            {
+                body: JSON.stringify({
+                    mutationId: "e1",
+                    baseVersion: 3,
+                    operations: [{ type: "set", id: "releases", collapsed: true }],
+                }),
+                method: "POST",
+                url: `${base}/operations`,
+            },
+            { body: JSON.stringify({ mutationId: "a1" }), method: "POST", url: `${base}/accept` },
+            { body: JSON.stringify({}), method: "POST", url: `${base}/decline` },
+        ]);
     });
 
     it("calls the space routes", async () => {
