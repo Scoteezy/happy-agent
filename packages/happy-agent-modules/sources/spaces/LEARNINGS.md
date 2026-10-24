@@ -269,13 +269,20 @@ for archiving, because the prompt said never to touch rows the person placed, wh
 nearly all of them. Each of these was first enforced by the daemon, and the rules fought: guarding
 a kept row's section blocked renaming the catch-all over it, and one run took 7 revisions and 31
 dropped edits. They are all prompt guidance now (see the first learning). The prompt lets a
-proposal regroup and fold rows the person placed, since accepting is their consent; keeps what
-they put above a separator and rows below every separator; asks it to section an unsectioned
-sidebar or a catch-all (Kirill: "if it's not sectioned, probably should offer to section it") and
-fold quiet sections until within budget; sends finished work to Archive and only unfinished tasks
-to Stale; and asks for a one-sentence reply saying what changed, since replies ran 80 to 250 words.
-`propose_sidebar` returns the proposal's ID without its reference tag, and `list_sidebar` marks
-rows with nothing to read.
+proposal regroup and fold rows the person placed, since accepting is their consent; asks it to
+section an unsectioned sidebar or a catch-all (Kirill: "if it's not sectioned, probably should
+offer to section it") and fold quiet sections until within budget; sends finished work to Archive
+and only unfinished tasks to Stale; and asks for a one-sentence reply saying what changed, since
+replies ran 80 to 250 words. `propose_sidebar` returns the proposal's ID without its reference
+tag, and `list_sidebar` marks rows with nothing to read.
+
+With the prompt alone (18 runs), proposals took one version each with no dropped edits, in about
+half the time and tokens. Three lines needed sharpening. "Keeps rows below every separator" froze
+the rows under the person's separator, which were the Archive and Stale candidates, so offers
+nearly vanished; the prompt now keeps at least one row below each separator and lets the others go
+under Archive or Stale. "Where it is and shown" kept a kept row in place but let it be folded with
+a quiet neighbour; the prompt now says never in a folded section. "A busy bot may sit above Bots"
+let it fold Bots over a busy bot; the prompt now says to move such a bot above Bots first.
 
 ## Prioritizing shows its own row, once
 
