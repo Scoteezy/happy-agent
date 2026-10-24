@@ -92,6 +92,8 @@ import { UserSettingsModule } from "../userSettings/index.js";
 import { TaskAutoJoinModule } from "../taskAutoJoin/index.js";
 import { SurfaceAutoJoinModule } from "../surfaceAutoJoin/index.js";
 import { SpacesModule } from "../spaces/index.js";
+import { StickersModule } from "../stickers/index.js";
+import { StoriesModule } from "../stories/index.js";
 import { SurfacesModule } from "../surfaces/index.js";
 import { WorkflowsModule } from "../workflows/index.js";
 import { WorkspacesModule } from "../workspaces/index.js";
@@ -147,6 +149,8 @@ export interface PreparedHappyAgentRuntime {
 
 /** Every capability in the runtime, addressable by its owning module. */
 export interface HappyAgentRuntimeModules {
+    readonly stickers: StickersModule;
+    readonly stories: StoriesModule;
     readonly live: LiveModule;
     readonly abort: AbortModule;
     readonly api: ApiModule;
@@ -717,6 +721,15 @@ export async function startHappyAgentRuntime(
             artifacts,
         );
         registerShutdown("spaces", async () => await spaces.close());
+        const stories = new StoriesModule(
+            team,
+            profile,
+            userSettings,
+            artifacts,
+            chatMedia,
+            history,
+        );
+        const stickers = new StickersModule(config, team, stories);
         const apiModule = new ApiModule(
             abort,
             config,
@@ -758,6 +771,8 @@ export async function startHappyAgentRuntime(
             surfaces,
             mobileConnector,
             spaces,
+            stories,
+            stickers,
         );
         api = apiModule;
 
@@ -825,6 +840,8 @@ export async function startHappyAgentRuntime(
             userSettings,
             surfaces,
             spaces,
+            stickers,
+            stories,
             workflows,
             workspaces,
         };
@@ -893,6 +910,8 @@ export async function startHappyAgentRuntime(
             chatMedia,
             gemini,
             imageGeneration,
+            stories,
+            stickers,
             compute.skillsModule,
             compute.computeModule,
             happy,

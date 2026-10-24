@@ -94,7 +94,9 @@ export class ApiEventJournal {
             (event.type !== "happy.integration.updated" &&
                 event.type !== "agent.draft.updated" &&
                 event.type !== "user_settings.updated" &&
-                event.type !== "mobile_connector.updated") ||
+                event.type !== "mobile_connector.updated" &&
+                event.type !== "sticker_recents.updated" &&
+                !event.type.startsWith("story.")) ||
             userId === undefined
         );
     }

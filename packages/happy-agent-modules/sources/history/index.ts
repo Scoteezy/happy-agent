@@ -13,3 +13,4 @@ export * from "./impl/messageMatchesHistoryFilters.js";
 export * from "./impl/selectHistoryPage.js";
 export * from "./impl/summarizeHistory.js";
 export * from "./tools/read_agent_history.js";
+export type { HistoryPresentedResult } from "./persistence/queryToolPresentations.js";

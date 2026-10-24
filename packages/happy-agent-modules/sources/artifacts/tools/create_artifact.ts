@@ -8,7 +8,7 @@ import { quoteVisibleExact } from "../../impl/quoteVisibleExact.js";
 import {
     ArtifactInputError,
     artifactTitleSchema,
-    artifactTypeSchema,
+    artifactToolTypeSchema,
     type ArtifactType,
 } from "../Artifact.js";
 import type { ArtifactsModule } from "../ArtifactsModule.js";
@@ -37,7 +37,7 @@ import {
 
 const createArtifactToolInputSchema = Type.Object(
     {
-        type: artifactTypeSchema,
+        type: artifactToolTypeSchema,
         title: artifactTitleSchema,
         display: Type.Optional(artifactToolDisplaySchema),
         background: Type.Optional(artifactToolBackgroundSchema),

@@ -341,6 +341,7 @@ const historyArtifactPresentationSchema = Type.Object(
             Type.Literal("image_series"),
             Type.Literal("video"),
             Type.Literal("document"),
+            Type.Literal("story"),
         ]),
         title: Type.String({ minLength: 1, maxLength: 256 }),
         /** Which version the chat shows; absent on records from before it, meaning `"version"`. */

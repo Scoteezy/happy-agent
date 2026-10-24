@@ -157,6 +157,8 @@ export async function queryArtifactPage(
             sql`(created_at < ${createdAt} OR (created_at = ${createdAt} AND id < ${cursor.id}))`,
         );
     }
+    // A story is read through Stories, which knows who may read it; the catalog never lists one.
+    conditions.push(sql`type != 'story'`);
     if (query.includeDeleted !== true) conditions.push(sql`status = 'active'`);
     if (query.type !== undefined) conditions.push(sql`type = ${query.type}`);
     if (query.sourceKind !== undefined) conditions.push(sql`source_kind = ${query.sourceKind}`);

@@ -248,3 +248,13 @@ variables onto the page's `--happy-*` colours, so a page restyles both rendering
 desktop's two diff colours are `--happy-diff-added` and `--happy-diff-removed`, kept apart from the
 text colours `--happy-added` and `--happy-removed`, which must stay readable as text. Long lines
 wrap by default, because an inline page never scrolls inside, and `nowrap` scrolls them instead.
+
+## Story artifacts are written only through Stories
+
+Stories version their content as `story` artifacts, but a story has rules an ordinary artifact
+write would bypass: drafts only its author reads, Post naming the version the person saw, and an
+audience. So `create`, `update`, and `delete` refuse a story artifact, the catalog leaves story
+artifacts out, the artifact tools answer not found, and the API journal carries no `artifact.*` event for one.
+Stories writes them with `createStory`, `commitStory`, and `deleteStory`. The `story` type is
+also kept out of the tool schemas (`artifactToolTypeSchema`), so people without Stories see the
+artifact tools exactly as before.
