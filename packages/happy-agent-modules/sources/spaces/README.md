@@ -112,6 +112,21 @@ its whole tool array and system prompt come from this module, so it can do nothi
 reach it through the `spaces.briefPrioritizing` durable function, committed with whatever caused
 them. Tidy is one such brief and nothing more.
 
+## Voice
+
+Live owns the person's Voice; Spaces gives it a row and read-only tools. `ensureVoiceRow` makes one
+settled row (role `voice`) for Voice's conversation inside Live's transaction, and with Stem Cells
+inserts it into the document once, as the daemon, below Happy, or below Prioritizing's row when
+that directly follows Happy. A newer Voice's row replaces the old one; archiving Voice removes it,
+and a row the person removed is never put back. The row is never work: Prioritizing is not briefed
+about it and it does not count toward the visible rows. `voiceSidebarTools` is Voice's fixed array:
+`list_sidebar`, `read_conversations` with the `machine` scope, `get_sidebar_styles`,
+`request_space_placement` and `request_sidebar_tidy`; Voice never writes the sidebar. The
+`machine` scope also reads any live conversation on a standalone installation; with a team it stays
+the person's own. `sidebarOutline` gives Live the sidebar as names in document order (sections,
+separators, rows, and sessions under expanded rows with folded counts), or the classic list without
+Stem Cells.
+
 ## Wakes and batches
 
 Notices collect in the owner state. Events — the person's committed changes, new work and

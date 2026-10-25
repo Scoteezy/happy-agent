@@ -1,13 +1,33 @@
 # Desktop Live
 
-`LiveModule(ConfigModule, DurableFunctionsModule, BotsModule)` owns window-scoped voice sessions
-and the machine's voice settings. The browser
+`LiveModule(ConfigModule, DurableFunctionsModule, BotsModule, SubtasksModule, SpacesModule)` owns
+window-scoped voice sessions, the machine's voice settings, and each person's Voice. The browser
 owns WebRTC media; this module owns one credential-selected provider call, its sideband, durable
-status, a typed desktop control socket, and bounded side inference. It never creates a coding agent.
+status, and a typed desktop control socket. GPT-Live is the voice; Voice is the text agent it hands
+requests to.
 
 [GPT-Live context-management research](research/gpt-live-context-management.md) records source links, verification limits and sidebar hypotheses.
 
-The text controller runs the `[voice]` settings: `controller_provider`, `controller_model`,
+## Voice
+
+Voice is one long-running, unreported subtask of Happy per person, created through
+`SubtasksModule.create` with the person's first call and reused by every later call until they
+archive it; the next call then creates a new one. Its opening task only confirms it is set up, on
+the voice settings' controller as new agents are offered it; each request runs on its call's frozen
+route. `happy_live_voice_agents` maps the
+person to Voice and holds the hash of the sidebar outline Voice was last given. Spaces gives Voice
+its own settled row (`role: "voice"`, below Happy or below Prioritizing's row when that follows
+Happy) through `SpacesModule.ensureVoiceRow`, inside the reservation's transaction.
+
+Live's hooks make Voice one job: `VOICE_AGENT_INSTRUCTIONS` replace its instructions, and its tools
+are fixed arrays merged in order: Spaces' read-only sidebar tools (`list_sidebar`,
+`read_conversations` with the machine scope, `get_sidebar_styles`, `request_space_placement`,
+`request_sidebar_tidy`), the five desktop actions in `impl/liveDesktopTools.ts`, then `taskCreate`
+and `sessionModelChange` only when the serving call negotiated them. Desktop tools are never
+durable and need no review: the desktop verifies each action, and an interrupted one is never run
+again. A person typing to Voice gets a text answer; without an active call its desktop tools refuse.
+
+Voice runs on the controller route from the `[voice]` settings: `controller_provider`, `controller_model`,
 `controller_effort` and `controller_fast_mode`, defaulting to GPT-6.1 Sol at low effort on the
 configured default account, with fast mode off. `ConfigModule` stores runtime changes in generated
 `runtime.toml`, which overrides the machine file, and resolves the route; this module reports them
@@ -44,43 +64,33 @@ record is at most 32 KiB. Observation keeps the current log and one previous gen
 with a bounded write queue; Unix log files are readable only by their owner. Logs respect
 the existing observation settings, including disabling logs or selecting a higher log level.
 
-The fixed controller tool arrays and literal model prompts live in `impl/runLiveController.ts` and
-`impl/livePrompts.ts`. A call merges the base array with `LIVE_TASK_CREATE_TOOLS` and
-`LIVE_MODEL_CHANGE_TOOLS` only when the desktop negotiated `taskCreate` and `sessionModelChange`
-(both require `appState`). `sessionSend` and `composerDraftAppend` name their conversation; when it
-is not focused, the daemon first requests `desktopOpen` for it and stages only after that open
-succeeds. One controller response may batch up to four actions; they run in order, each on the
-latest accepted revision, and stop at the first that does not succeed. When every action
-succeeded and all were terminal (open, staging, draft append, model change, task creation), voice
-receives a fixed outcome from `impl/liveOutcome.ts` without a second inference. Desktop context, provider fragments, selected public session snapshots and
-native delegation text enter a JSON data envelope, never a trusted instruction or authorization.
-`sessionSend` ends after exact text staging; only a separate human Send submits it.
+Each delegation becomes one message to Voice: a JSON envelope (`provenance`, `delegation`,
+`transcripts`, and `sidebar` only when the outline changed since Voice last saw it) with only the
+speech fragments Voice has not been given, bounded to 64 KiB by dropping the oldest fragments. It
+carries agent-origin metadata, so speech is never the person's authorization, and the call's frozen
+provider, model, effort and service tier. One first-in, first-out queue per person runs one request
+at a time across all of their calls, and Voice's turn settles before the next request reaches it.
+`sessionSend` and `composerDraftAppend` name their conversation; when it is not focused, the daemon
+first requests `desktopOpen` for it and stages only after that open succeeds. Actions run one at a
+time in the order Voice called them, each on the latest accepted revision, and a batch stops at the
+first that does not succeed. When every action succeeded and all were terminal (open, staging, draft
+append, model change, task creation), voice receives a fixed outcome from `impl/liveOutcome.ts` at
+Voice's next inference, and nothing later from that turn is spoken. Otherwise voice hears Voice's
+final text, or a fixed explanation. `sessionSend` ends after exact text staging; only a separate
+human Send submits it. Voice acts only on this daemon's conversations: another server's connection
+is refused, and an agent target (`{ kind: "agent" }`) needs the `agentTargets` capability, which
+needs `appState` and the desktop's `localConnectionId`.
 
-Each call owns one logical controller conversation and lazily opens one provider session. Follow-ups
-queue in arrival order. Completed history contains only attributed request text and the exact
-spoken outcome; tools, results, reasoning, and provider metadata remain transient within one
-request. Subsequent requests replace the provider context with that text history, preserving the
-connection while giving up continuation from the previous response. An unsettled aborted stream
-is retired after bounded cleanup; only a new request may open a replacement with the same history
-and frozen route. Failed requests and uncertain actions are never replayed.
-
-Voice receives `# Desktop AppState` Markdown (`impl/liveAppState.ts`): the focused path, each
-server in the desktop's order with its top-level bots and tasks and its projects, workspaces and
-direct conversations as `Name — Status — last activity <time>` in the desktop's time zone, and the
-focused conversation's latest public message clipped at 800 bytes. With the `appState` capability the
-desktop sends AppState as its own unrevisioned frame; otherwise the same format is derived from the
-accepted context. Startup is bounded to 8 KiB with an explicit omission marker. Later changes are
-`# Desktop AppState update` diffs, coalesced for 250 milliseconds with one push in flight and split
-into labelled appends of at most 500 bytes rather than truncated. A complete snapshot is pushed again
-after ten minutes without one. Pushes and status notices wait while a request lacks its delivered
-outcome. With `voiceFocus`, the daemon highlights a uniquely named target before the controller runs
-and before each targeted action, and clears it when the request ends. Missing or deeper content
-is read through the controller. Native background snapshot frames omit the optional channel.
-Snapshots and selected-session updates are facts, not requests or orders to speak. Voice may choose
-a brief, relevant notice for a verified focused or explicitly watched conversation's completion,
-error, or need for input. Routine navigation needs no acknowledgment. Existing status transitions
-identify completion only after running or waiting; newly selecting an idle conversation does not.
-Repeated notices and unnecessary interruptions are discouraged; silence is not a transport guarantee.
+GPT-Live is told the sidebar as an outline of names (`impl/renderVoiceOutline.ts` over
+`SpacesModule.sidebarOutline`): sections, separators, rows and the sessions under expanded rows,
+with folded counts and no status, activity, messages or IDs. Startup is bounded to 8 KiB with a
+count of omitted entries. A Spaces event re-reads it; only changed text is pushed, coalesced for 250
+milliseconds with one push in flight, split into appends of at most 500 bytes, and held while a
+request lacks its delivered outcome. AppState is never pushed: it only resolves names and targets
+and validates models. Desktop context revisions are accepted for actions, and `sessionUpdate` frames
+are validated and ignored; there are no background notices. With `voiceFocus`, the daemon highlights
+a uniquely named target before Voice runs and before each targeted action, and clears it when the
+request ends.
 
 ## Lifecycle
 
@@ -97,15 +107,14 @@ are retained seven days, at most 1,000 per principal. Only owner-filtered status
 
 Control frames are at most 256 KiB. At most 256 action identities remain for the call's lifetime,
 and the call permits one outstanding desktop action with a 60-second deadline starting at dispatch.
-Requests take fresh compact context when their queued turn starts and retain their original
-speech attribution. Each request has a hard 120-second deadline, including provider stream
-iteration, followed by at most three seconds of cleanup. Provider response frames retain atomic
-append ordering, with a 30-second limit for each socket write; stalled delivery ends the broken
-transport without replay. Uncertain actions are not replayed.
-Queued requests expire after 120 seconds without starting an action. Controller history and the
-active exchange are bounded to 512 KiB; a request that cannot fit fails clearly while voice stays
-open, without silently trimming history. Context revisions are immutable; selected public snapshots
-remain separate and bounded. Protocol or action-ledger overflow ends voice visibly.
+A request may run 120 seconds in Voice and eight inferences; the ninth is refused with a fixed
+explanation. A stopped turn is given ten seconds to settle before the next request reaches Voice.
+Provider response frames retain atomic append ordering, with a 30-second limit for each socket
+write; stalled delivery ends the broken transport without replay. Uncertain actions are not
+replayed. Queued requests expire after 120 seconds without starting an action. Context revisions
+are immutable. Protocol or action-ledger overflow ends voice visibly. A daemon restart fails the
+call and stops a Voice turn it would otherwise resume. Voice's conversation, including the speech
+it was handed, is kept like any agent's; voice diagnostics still exclude it.
 Native and public append framing, transcript timing, and close semantics remain
 separate in `impl/liveProviderTransport.ts`.
 
@@ -119,10 +128,11 @@ short status summaries are best-effort, and overlapping delegations never produc
 
 ## Verification
 
-The Live module, controller, configuration and provider transport tests are targeted unit coverage.
-`tests/runtime/liveDesktopTransport.test.ts` uses the complete runtime and real HTTP/WebSockets with
-scripted provider inference. It can export its sanitized actual controller request through the
-test-only `HAPPY_LIVE_CAPTURE_FILE` environment variable. Bun transport smoke coverage lives in
+`tests/liveModule.test.ts` drives Live's real hooks with a scripted Voice turn; outline, AppState
+helper, configuration and provider transport tests are targeted unit coverage.
+`tests/runtime/liveDesktopTransport.test.ts` uses the complete runtime, the real Voice agent and
+real HTTP/WebSockets with scripted provider inference. It can export Voice's sanitized requests
+through the test-only `HAPPY_LIVE_CAPTURE_FILE` environment variable. Bun transport smoke coverage lives in
 the Agent package; targeted API gym scenarios live in `packages/happy-agent-gym-tests/tests/happy_api_live.test.ts`.
 These fixtures do not prove microphone/media negotiation or account entitlement against OpenAI.
 

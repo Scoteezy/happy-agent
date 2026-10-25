@@ -18,8 +18,8 @@ const eagerDirectories = [
     "compute/tools/glm",
     "userInput",
 ];
-/** Prioritizing's whole tool array, which it receives without tool search. */
-const eagerFiles = ["spaces/tools/prioritizingTools.ts"];
+/** Prioritizing's and Voice's whole tool arrays, which they receive without tool search. */
+const eagerFiles = ["spaces/tools/prioritizingTools.ts", "live/impl/liveDesktopTools.ts"];
 
 interface ToolDefinition {
     readonly file: string;

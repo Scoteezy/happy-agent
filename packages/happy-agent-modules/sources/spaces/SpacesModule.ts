@@ -79,6 +79,11 @@ import {
     type SpaceSnapshot,
 } from "./Space.js";
 import { spaceEventSchema, type SpaceEvent, type SpaceEventListener } from "./SpaceEvent.js";
+import type {
+    SpaceSidebarOutline,
+    SpaceSidebarOutlineGroup,
+    SpaceSidebarOutlineRow,
+} from "./SpaceSidebarOutline.js";
 import { spaceMigrations } from "./SpaceMigrations.js";
 import {
     applySpaceChanges,
@@ -130,7 +135,7 @@ import {
 } from "./persistence/SpacesPersistence.js";
 import { attachToMyRowTool } from "./tools/attach_to_my_row.js";
 import { requestSpacePlacementTool } from "./tools/request_space_placement.js";
-import { prioritizingTools } from "./tools/prioritizingTools.js";
+import { prioritizingTools, voiceSidebarTools } from "./tools/prioritizingTools.js";
 import {
     applyPrioritizingOperations,
     placedSidebarIds,
@@ -188,6 +193,8 @@ const PRIORITIZING_UPDATED =
     "Happy Agent was updated, and your instructions may have changed. Check the sidebar against them, starting with where your own row stands.";
 /** The icon of Prioritizing's own row. */
 const FOCUS_ICON: SpaceIconSlug = "prioritize";
+/** The icon of Voice's own row. */
+const VOICE_ICON: SpaceIconSlug = "ai-agent";
 /** How many bytes `read_conversations` returns at most, and for one conversation. */
 const CONVERSATIONS_TEXT_LIMIT = 24_000;
 const CONVERSATION_TEXT_LIMIT = 4_000;
@@ -455,6 +462,8 @@ export class SpacesModule implements AgentModule {
             if (typeof change.update["archivedAt"] !== "number") return;
             const focus = await queryOwnerByPrioritizingAgent(ctx, change.agentId);
             if (focus !== undefined) await this.#removeFocusRow(ctx, focus.ownerUserId);
+            for (const row of await querySpacesByAgent(ctx, change.agentId))
+                if (row.role === "voice") await this.#removeVoiceRow(ctx, row.ownerUserId, row.id);
             for (const owner of await this.#sessionOwners(ctx, change.agentId))
                 await this.#sidebarLifecycle(ctx, owner, { remove: change.agentId });
         },
@@ -1363,10 +1372,19 @@ export class SpacesModule implements AgentModule {
             lastActive: string | undefined;
             icon: string | undefined;
         }[] = [];
+        // Voice is Happy's subtask but never work under Happy's row.
+        const voices = new Set(
+            current.spaces.flatMap((space) =>
+                space.role === "voice" && space.contents[0]?.kind === "agent"
+                    ? [space.contents[0].agentId]
+                    : [],
+            ),
+        );
         const visit = async (parentId: string, depth: number): Promise<void> => {
             if (depth > 3) return;
             for (const id of await this.#requireAgents().childOf(ctx, parentId)) {
-                if (sessions.length >= 200 || id === state.prioritizingAgentId) continue;
+                if (sessions.length >= 200 || id === state.prioritizingAgentId || voices.has(id))
+                    continue;
                 const metadata = (await this.#requireAgents().config(ctx, id))?.metadata;
                 if (typeof metadata?.["archivedAt"] === "number") continue;
                 sessions.push({
@@ -1393,8 +1411,13 @@ export class SpacesModule implements AgentModule {
                         ? "happy"
                         : space.role === "focus"
                           ? "your own row"
-                          : (description.target?.kind ?? "empty"),
+                          : space.role === "voice"
+                            ? "Voice's row"
+                            : (description.target?.kind ?? "empty"),
                 title: description.named ? description.title : undefined,
+                ...(space.contents[0] === undefined || space.contents[0].kind === "surface"
+                    ? {}
+                    : { agentId: space.contents[0].agentId }),
                 icon: space.icon?.type === "library" ? space.icon.slug : space.icon?.type,
                 working: description.working,
                 lastActive: age(description.lastActivityAt),
@@ -1421,6 +1444,7 @@ export class SpacesModule implements AgentModule {
                     (space) =>
                         space.role === "happy" ||
                         space.role === "focus" ||
+                        space.role === "voice" ||
                         isUntouchedStemCell(space),
                 )
                 .map((space) => space.id),
@@ -1472,7 +1496,9 @@ export class SpacesModule implements AgentModule {
      * Several conversations at once, each a row's (by space ID) or a session's under one of the
      * person's rows (by agent ID): its latest turns, each the person's or another agent's message
      * with the agent's last replies to it. Tool calls, their output, reasoning, and hidden
-     * messages are left out, and the answer is bounded so reading many rows stays cheap.
+     * messages are left out, and the answer is bounded so reading many rows stays cheap. The
+     * `machine` scope, Voice's, also reads any other conversation on a standalone machine; with a
+     * team, "this machine" holds other members' conversations, so it stays the person's own.
      */
     async readConversations(
         ctx: Context,
@@ -1481,6 +1507,7 @@ export class SpacesModule implements AgentModule {
             readonly ids: readonly string[];
             readonly turns: number;
             readonly replies: number;
+            readonly scope?: "rows" | "machine";
         },
     ): Promise<string> {
         const reads = [];
@@ -1489,11 +1516,199 @@ export class SpacesModule implements AgentModule {
         return formatConversationReads(reads, CONVERSATIONS_TEXT_LIMIT);
     }
 
+    /** Voice's fixed sidebar tools: read-only, with rearrangement asked of Prioritizing. */
+    voiceSidebarTools(ownerUserId: SpaceOwnerId, agentId: string): AnyAgentTool[] {
+        return voiceSidebarTools(this, ownerUserId, agentId);
+    }
+
+    /**
+     * The person's sidebar as names, in its order: the document's rows under their sections and
+     * the sessions it shows under a row, or the classic list for a person without Stem Cells.
+     */
+    async sidebarOutline(ctx: Context, ownerUserId: SpaceOwnerId): Promise<SpaceSidebarOutline> {
+        if (this.#artifacts === undefined || !(await this.#stemCellsEnabled(ctx, ownerUserId))) {
+            return await ctx.inTx(async (txCtx) => {
+                await this.#ensureOwner(txCtx, ownerUserId);
+                const classic = await this.#classicSidebar(txCtx, ownerUserId);
+                const rows = [];
+                for (const id of [
+                    ...(classic.happy === undefined ? [] : [classic.happy]),
+                    ...classic.bots,
+                    ...classic.tasks,
+                    ...classic.surfaces,
+                ])
+                    rows.push(await this.#outlineRow(txCtx, ownerUserId, id, false, []));
+                return { groups: [{ label: undefined, folded: false, rows }] };
+            });
+        }
+        const current = await this.sidebar(ctx, ownerUserId);
+        const { document } = await this.#sidebarDocument(ctx, current.artifactId);
+        const groups: SpaceSidebarOutlineGroup[] = [];
+        let group = {
+            label: undefined as string | undefined,
+            folded: false,
+            rows: [] as SpaceSidebarOutlineRow[],
+        };
+        const close = () => {
+            if (group.label !== undefined || group.rows.length > 0) groups.push(group);
+        };
+        for (const item of document.items) {
+            if (item.type === "section" || item.type === "separator") {
+                close();
+                group =
+                    item.type === "section"
+                        ? { label: item.label, folded: item.collapsed, rows: [] }
+                        : { label: undefined, folded: false, rows: [] };
+            } else if (item.type === "space") {
+                group.rows.push(
+                    await this.#outlineRow(ctx, ownerUserId, item.id, item.expanded, item.children),
+                );
+            }
+        }
+        close();
+        return { groups };
+    }
+
+    async #outlineRow(
+        ctx: Context,
+        ownerUserId: SpaceOwnerId,
+        id: string,
+        expanded: boolean,
+        children: readonly SpaceSidebarSpaceNode[],
+    ): Promise<SpaceSidebarOutlineRow> {
+        const row = await querySpace(ctx, id);
+        let name: string;
+        let agentId: string | undefined;
+        if (row !== undefined && row.ownerUserId === ownerUserId) {
+            const description = await this.describe(ctx, row);
+            name = description.named ? description.title : "New chat";
+            const content = row.contents[0];
+            agentId =
+                content === undefined || content.kind === "surface" ? undefined : content.agentId;
+        } else {
+            const title = (await this.#requireAgents().config(ctx, id))?.metadata?.["title"];
+            name = typeof title === "string" ? title : "Untitled conversation";
+            agentId = id;
+        }
+        const shown = [];
+        if (expanded)
+            for (const child of children)
+                shown.push(
+                    await this.#outlineRow(
+                        ctx,
+                        ownerUserId,
+                        child.id,
+                        child.expanded,
+                        child.children,
+                    ),
+                );
+        return {
+            name,
+            agentId,
+            children: shown,
+            foldedChildren: expanded ? 0 : children.length,
+        };
+    }
+
+    /**
+     * Voice's own row, made with Voice and never work. With Stem Cells it is inserted into the
+     * document once, by the daemon, below Happy, or below Prioritizing's row when that follows
+     * Happy; once the person removed it, it is never put back. A row of an earlier Voice gives
+     * way to the new one.
+     */
+    async ensureVoiceRow(ctx: Context, ownerUserId: SpaceOwnerId, agentId: string): Promise<void> {
+        await ctx.inTx(async (txCtx) => {
+            await this.#ensureOwner(txCtx, ownerUserId);
+            const voices = (await querySpaces(txCtx, ownerUserId)).filter(
+                (row) => row.role === "voice",
+            );
+            if (
+                voices.some(
+                    (row) =>
+                        row.contents[0]?.kind === "agent" && row.contents[0].agentId === agentId,
+                )
+            )
+                return;
+            for (const row of voices) await this.#removeVoiceRow(txCtx, ownerUserId, row.id);
+            const now = Date.now();
+            const space: SpaceRecord = {
+                id: createId(),
+                ownerUserId,
+                role: "voice",
+                icon: { type: "library", slug: VOICE_ICON },
+                contents: [{ kind: "agent", agentId }],
+                orderKey: "3",
+                placement: "settled",
+                visibility: "shown",
+                version: 1,
+                createdAt: now,
+                updatedAt: now,
+            };
+            if (!(await insertSpaceIfAbsent(txCtx, space))) return;
+            await this.#commitEvents(txCtx, ownerUserId, undefined, [
+                { type: "space_created", space },
+            ]);
+            if (
+                this.#artifacts === undefined ||
+                !(await this.#stemCellsEnabled(txCtx, ownerUserId))
+            )
+                return;
+            const artifactId = await this.#ensureSidebar(txCtx, ownerUserId);
+            await this.#migrateSidebar(txCtx, ownerUserId, artifactId);
+            const current = await this.#sidebarDocument(txCtx, artifactId);
+            const rows = await querySpaces(txCtx, ownerUserId);
+            const happyId = rows.find((row) => row.role === "happy")?.id;
+            const focusId = rows.find((row) => row.role === "focus")?.id;
+            const happyAt = current.document.items.findIndex(
+                (item) => item.type === "space" && item.id === happyId,
+            );
+            const next = happyAt < 0 ? undefined : current.document.items[happyAt + 1];
+            const applied = applySpaceSidebarOperations(current.document, [
+                {
+                    type: "insert",
+                    node: { type: "space", id: space.id },
+                    to:
+                        next?.type === "space" && next.id === focusId
+                            ? { after: focusId }
+                            : newSpacePosition(
+                                  current.document,
+                                  happyId === undefined ? {} : { happyId },
+                              ),
+                },
+            ]);
+            if (applied.operations.length === 0) return;
+            await this.#commitSidebarVersion(txCtx, ownerUserId, {
+                artifactId,
+                previousVersion: current.version,
+                before: current.document,
+                after: applied.document,
+                operations: applied.operations,
+                author: "daemon",
+                operationId: createId(),
+            });
+        });
+    }
+
+    async #removeVoiceRow(ctx: Context, ownerUserId: SpaceOwnerId, spaceId: string): Promise<void> {
+        await deleteSpace(ctx, spaceId);
+        await this.#commitEvents(ctx, ownerUserId, undefined, [{ type: "space_removed", spaceId }]);
+    }
+
+    /** Whether an agent is a live conversation on this machine rather than archived or unknown. */
+    async #localConversation(ctx: Context, agentId: string): Promise<boolean> {
+        const config = await this.#requireAgents().config(ctx, agentId);
+        return config !== undefined && typeof config.metadata?.["archivedAt"] !== "number";
+    }
+
     async #readConversation(
         ctx: Context,
         ownerUserId: SpaceOwnerId,
         id: string,
-        input: { readonly turns: number; readonly replies: number },
+        input: {
+            readonly turns: number;
+            readonly replies: number;
+            readonly scope?: "rows" | "machine";
+        },
     ): Promise<string> {
         const now = Date.now();
         let agentId = id;
@@ -1514,8 +1729,18 @@ export class SpacesModule implements AgentModule {
         ) {
             const title = (await this.#requireAgents().config(ctx, id))?.metadata?.["title"];
             heading = `Session ${id}${typeof title === "string" ? ` ("${title}")` : ""}${this.#events.activeRunId(id) === undefined ? "" : ", running now"}:`;
+        } else if (
+            row === undefined &&
+            input.scope === "machine" &&
+            !this.#team.enabled &&
+            (await this.#localConversation(ctx, id))
+        ) {
+            const title = (await this.#requireAgents().config(ctx, id))?.metadata?.["title"];
+            heading = `Conversation ${id}${typeof title === "string" ? ` ("${title}")` : ""}${this.#events.activeRunId(id) === undefined ? "" : ", running now"}:`;
         } else {
-            return `${id} is not one of the person's rows or sessions.`;
+            return input.scope === "machine"
+                ? `${id} is not a conversation the person can see on this machine.`
+                : `${id} is not one of the person's rows or sessions.`;
         }
         const page = await this.#history.read(ctx, agentId, {
             from: "end",
@@ -2693,10 +2918,12 @@ export class SpacesModule implements AgentModule {
      * "Tidy now" is one automatic message in Prioritizing's conversation and nothing more. Before
      * the person's first new work there is no Prioritizing, and it does nothing.
      */
-    async requestTidy(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
-        await ctx.inTx(async (txCtx) => {
+    async requestTidy(ctx: Context, ownerUserId: SpaceOwnerId): Promise<boolean> {
+        return await ctx.inTx(async (txCtx) => {
             await this.#ensureOwner(txCtx, ownerUserId);
+            if ((await this.#livePrioritizing(txCtx, ownerUserId)) === undefined) return false;
             await this.#brief(txCtx, ownerUserId, "Tidy the sidebar now.");
+            return true;
         });
     }
 
@@ -3341,7 +3568,7 @@ export class SpacesModule implements AgentModule {
             )
                 continue;
             const row = (await querySpaces(ctx, ownerUserId)).find((space) => space.id === key);
-            if (row?.role === "happy" || row?.role === "focus") continue;
+            if (row?.role === "happy" || row?.role === "focus" || row?.role === "voice") continue;
             let title: string | undefined;
             if (row !== undefined) {
                 const description = await this.describe(ctx, row);
@@ -4191,8 +4418,12 @@ export class SpacesModule implements AgentModule {
         if (drafts.length === 0) return;
         if (this.#artifacts !== undefined) {
             for (const draft of drafts) {
-                // Prioritizing inserts its own row; the daemon never does.
-                if (draft.type === "space_created" && draft.space.role !== "focus")
+                // Prioritizing inserts its own row; Voice's row is inserted once, with Voice.
+                if (
+                    draft.type === "space_created" &&
+                    draft.space.role !== "focus" &&
+                    draft.space.role !== "voice"
+                )
                     await this.#sidebarLifecycle(
                         ctx,
                         ownerUserId,

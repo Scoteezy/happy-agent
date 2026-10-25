@@ -1,8 +1,8 @@
 import type {
+    LiveActionSession,
+    LiveActionTarget,
     LiveDesktopAction,
     LiveDesktopContext,
-    LiveDesktopTarget,
-    LiveSessionRef,
 } from "@slopus/happy-agent-client";
 import { liveAppStateEntities, liveTargetKey, type LiveAppStateView } from "./liveAppState.js";
 
@@ -23,11 +23,15 @@ export function liveFixedOutcome(
     executed: readonly LiveDesktopAction[],
     view: LiveAppStateView,
     context: LiveDesktopContext,
+    /** Names of this daemon's conversations, for actions that named an agent. */
+    agentNames: ReadonlyMap<string, string> = new Map(),
 ): string | undefined {
     if (executed.length === 0 || executed.some((action) => !TERMINAL.has(action.type)))
         return undefined;
     const entities = liveAppStateEntities(view);
-    const name = (target: LiveDesktopTarget | LiveSessionRef) => {
+    const name = (target: LiveActionTarget | LiveActionSession) => {
+        if ("kind" in target && target.kind === "agent")
+            return agentNames.get(target.agentId) ?? "the conversation";
         const key = liveTargetKey(target);
         return (
             entities.find((entity) => entity.key === key)?.name ??

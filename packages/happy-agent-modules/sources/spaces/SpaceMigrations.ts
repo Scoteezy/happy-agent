@@ -261,4 +261,10 @@ export const spaceMigrations = [
         "009-sidebar-proposals",
         async (_ctx: Context, _database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {},
     ],
+    [
+        // Voice's own row (role "voice", an "agent" target) is unreadable to earlier builds, so
+        // this marks the change. Nothing is rewritten: the row appears with the next voice call.
+        "010-voice-row",
+        async (_ctx: Context, _database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {},
+    ],
 ] as const;

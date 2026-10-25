@@ -2,13 +2,38 @@
 
 ## Voice belongs to one desktop window
 
-Binding voice to a coding agent exposed the wrong tools and hid desktop navigation. Live now uses
-the initiating window's bounded visible context and fixed controller tool arrays: six base actions,
-plus `taskCreate` and `sessionModelChange` only when the desktop negotiated them. Workspace,
-conversation and bot creation were removed from the surface (they remain in the wire union for
-compatibility) because voice should open what exists, start work as a task with an unsent draft,
-and change models rather than build structure. No coding-agent runtime, permission answers,
-private reasoning, or arbitrary execution enters Live.
+Binding voice to a coding agent exposed the wrong tools and hid desktop navigation. A call acts only
+in the window that started it, through fixed tool arrays: Spaces' read-only sidebar tools, five
+desktop actions, plus `taskCreate` and `sessionModelChange` only when the desktop negotiated them.
+Workspace, conversation and bot creation were removed from the surface (they remain in the wire
+union for compatibility) because voice should open what exists, start work as a task with an unsent
+draft, and change models rather than build structure. `sessionWatch` went with the notices it fed.
+Voice acts only on this daemon's conversations; another server's connection is refused. No
+permission answers, private reasoning, or arbitrary execution enters Live.
+
+## Voice is the person's long-running subtask
+
+Each call used to open its own hidden controller conversation. It forgot everything when the call
+ended, could not read the sidebar or other conversations, and its work was invisible. Voice is now
+one long-running, unreported subtask of Happy per person, created with their first call through
+`SubtasksModule.create`, the path every subtask takes, and given its own settled sidebar row by
+Spaces. A conversation subtask without an opening task was considered and dropped: Kirill had
+already rejected that shape for Prioritizing as not a true subtask. Voice's opening task only
+confirms it is set up, and runs on the voice settings' controller as new agents are offered it,
+because a pool's frozen member is hidden from new agents. Every later call hands
+requests to the same Voice until the person archives it; the next call creates a new one. Live
+supplies Voice's instructions and fixed tool arrays through its own hooks, sends each request as
+an agent-originated message on the call's frozen route, and watches Voice's turn through
+`messageAccepted`, `beforeInference`, `onEvent` and `afterAgentSettled`. A restart that would
+resume an interrupted Voice turn stops it instead: speech from a finished call must not act later.
+
+Voice keeps what it was told in its own conversation, including the speech it was handed; the
+person chose that over a hidden history. Each request carries only speech fragments Voice has not
+seen, and the sidebar outline only when it changed since Voice last saw it, tracked by hash.
+
+A request runs in its own named lifetime, detached from the provider event that queued it. The first
+version detached without carrying the agent database, so every request failed at its first read and
+voice heard only the generic failure; the request context now carries the database explicitly.
 
 ## The controller route comes from voice settings
 
@@ -57,49 +82,37 @@ explains a proven account-pool credential selection. Only that fixed configurati
 forwarded; arbitrary provider diagnostics stay private. A pool can select the frozen controller,
 but voice still requires an explicitly selected individual OpenAI credential.
 
-## Visible state can be answered from a supplied snapshot
+## Voice is told the sidebar as an outline of names
 
 The voice prompt previously delegated navigation and actions but omitted questions about the current
-desktop. In a real audio call, asking what it saw produced an unsupported claim about missing
-conversation context even though a named project and workspace were visible. Voice now receives
-compact snapshots of active names, status, and the visible catalog. It answers directly when that
-context is sufficient, and asks the controller when the required context is missing, stale, truncated,
-or insufficient for a deeper read. Ambiguous names require clarification. Startup and quiet updates are attributed data rather than
-instructions. The controller uses explicit targets, without screenshots or private data.
+desktop, and in a real audio call it made an unsupported claim about missing context. Voice then
+received Markdown AppState with statuses, activity times and the focused conversation's latest
+message, pushed as diffs and refreshed every ten minutes. That pushed text on every navigation and
+streaming change, and voice treated some pushes as something to talk about.
 
-## AppState is Markdown the voice model can read
-
-A JSON snapshot keyed by internal fields made voice describe the desktop awkwardly and could not
-include the focused conversation's latest words. Voice now receives `# Desktop AppState` Markdown:
-servers in the desktop's order, top-level bots and tasks, projects with their workspaces and direct
-conversations, local clock times, and the focused conversation's latest public message clipped at
-800 bytes. The startup snapshot is bounded to 8 KiB with an explicit omission marker. Later pushes
-are diffs titled `# Desktop AppState update`, coalesced for 250 ms with one push in flight, split into
-labelled appends of at most 500 bytes rather than truncated, and a complete snapshot is pushed again
-after ten minutes because GPT-Live compacts older context. A desktop with the `appState` capability
-sends AppState as its own frame so sidebar changes never advance revisions or stale actions; an
-older desktop gets the same format derived from its accepted context.
-The delivered baseline contains only startup entries actually included in the 8 KiB snapshot.
-Later complete snapshots have no startup byte cap and are split into bounded appends. Diffs track
-sibling order, focused target identity even when names and messages match, and desktop truncation.
-The baseline and complete-snapshot time advance only after every part is delivered. Failed pushes
-retry with backoff capped at 60 seconds; partial delivery requires a complete recovery snapshot even
-if current desktop state has returned to the old baseline. A request arriving between parts holds
-later background appends until its outcome is delivered.
+GPT-Live is now told only the person's sidebar as names: sections, separators, rows, the sessions
+under expanded rows, and folded counts, without status, activity, messages or IDs. Startup is
+bounded to 8 KiB with a count of omitted entries. A Spaces event re-reads it; only changed text is
+pushed, coalesced for 250 ms with one push in flight and split into appends of at most 500 bytes,
+and voice counts as told only after every part is appended. Anything deeper, such as what a
+conversation said, is a request for Voice. AppState is never pushed; it only resolves names and
+targets for focus and fixed outcomes and validates models. Startup and pushes are attributed data,
+not instructions. Ambiguous names require clarification.
 
 ## Background pushes wait for the requested outcome
 
-Two-action requests spoke a generic "Done" before staging finished. The opened conversation's AppState
-push reached voice mid-request, and voice treated it as the outcome. Background AppState and status
-notices are now held while any accepted request lacks a delivered outcome, then delivered after it:
-status notices first, then one AppState push. A request whose actions all succeed and end in a
-terminal action gets a fixed outcome composed from the verified results, such as "Opened Garden
-notes." or a staged message that has not been sent, with no second controller inference. A request
-that read state or received a refusal continues through the controller. A lone successful open ends the request with "Opened X."
-All-success accounting covers the whole request, including earlier rounds, so a later successful
-action cannot turn a previous refusal into a claim of staging. Outcome delivery and focus cleanup
-remain inside that request's FIFO turn; the next request cannot start navigation or lose its own
-highlight while the previous outcome is being appended.
+Two-action requests spoke a generic "Done" before staging finished: a background push reached
+voice mid-request, and voice treated it as the outcome. A changed outline is now held while any
+accepted request lacks a delivered outcome, and pushed after it; a request that starts between the
+parts of a push holds the rest. A request whose actions all succeed and end in a terminal action
+gets a fixed outcome composed from the verified results, such as "Opened Garden notes." or a staged
+message that has not been sent, delivered at Voice's next inference; nothing later from that turn
+is spoken. A request that read state or received a refusal is answered with Voice's own final text.
+All-success accounting covers the whole request, so a later successful action cannot turn a
+previous refusal into a claim of staging. Outcome delivery and focus cleanup remain inside that
+request's turn; the next request cannot start navigation or lose its own highlight while the
+previous outcome is being appended. An agent target's name in a fixed outcome comes from the
+outline.
 
 ## Sends and drafts open their own conversation
 
@@ -229,27 +242,16 @@ resolve to the deepest; anything else is ambiguous and sends nothing), and again
 action, as `navigation` before `desktopOpen`. The highlight is cleared when the request ends. It never
 authorizes or opens anything.
 
-## Background facts inform discretionary notices
+## Background notices were dropped
 
-A real audio call acknowledged a workspace switch after a channel-less native context append,
-even though the preceding requested outcome had finished and no new speech arrived. The native
-thinking append follows Codex's wire format, but channel omission alone does not guarantee silence.
-Three real calls, including an explicit desktopSnapshot marker and OpenAI's GPT-Live prompt
-structure, failed the former strict silence checks. The last call's complete upstream append timeline
-showed only one channel-less snapshot in each quiet interval, excluding a separate speakable
-status notification. Those failures remain recorded; neither the thinking channel nor a prompt
-supplies a verified silence guarantee.
-
-The user now wants proactive facts with model discretion about useful notices. The prompt identifies
-snapshots and selected-session updates as background data, not requests or orders to speak. Routine
-navigation needs no acknowledgment. Voice may briefly report a verified focused or explicitly watched
-conversation's completion, error, or need for input, without repeating notices or unnecessarily
-interrupting the person. The existing status path recognizes running/waiting to idle as completion;
-selecting an already-idle conversation does not create one. No broader watching or polling is added.
-Acceptance evaluates relevance and truthfulness rather than requiring zero audio after every update.
-A subsequent real call delivered an explicitly requested completion notice after the real agent had
-finished and the focused session changed from running to idle. Routine navigation produced no speech
-in that call. This verifies the candidate path and a useful model choice, not an always-silent guarantee.
+A real audio call acknowledged a workspace switch after a channel-less native context append, and
+three real calls, including an explicit snapshot marker and OpenAI's GPT-Live prompt structure,
+failed strict silence checks: neither the thinking channel nor a prompt guarantees silence. Voice
+was then allowed to choose brief notices about a focused or watched conversation's completion,
+error, or need for input. The person later decided against notices altogether: they made calls
+chatty and depended on churn the desktop should not have to send. There are no notices now.
+`sessionUpdate` frames are validated against the active session and ignored, `sessionWatch` is not
+offered, and selected-session status never reaches voice or Voice.
 
 ## Staging is not sending
 
@@ -266,22 +268,18 @@ emits the supported untimed variant and ignores aggregate turn events to avoid d
 does not prove usage finalization; public close requires its actual terminal event. Neither path
 retries allocation or silently switches credential, model, account, or transport.
 
-## Streaming snapshots do not rewrite accepted desktop context
+## Accepted desktop context is immutable for its revision
 
 Using changing message text under the same desktop revision made identical-revision checks reject
-ordinary streaming. Accepted desktop context remains immutable for its revision. Selected public
-session snapshots have a separate bounded store. Their current status enters each controller request;
-public message bodies are fetched on demand rather than appended repeatedly. Routine progress is
-quiet; only a newly observed completion, error, or request for input may be spoken.
+ordinary streaming. Accepted desktop context remains immutable for its revision; a conflicting
+context under the same revision ends the call as invalid control data.
 
 ## Routine conversation must not exhaust lifetime display limits
 
 Transcript deduplication now evicts old display-only keys rather than ending a call after a few
-hundred fragments. Follow-up delegations queue instead of refusing ordinary speech.
-Full streaming snapshots remain local;
-only short status transitions enter the voice model, and optional update backpressure is dropped.
-Public fractional transcript times remain untimed rather than rounded into invented millisecond
-intervals. Invalid intervals still fail closed.
+hundred fragments. Follow-up delegations queue instead of refusing ordinary speech. Public
+fractional transcript times remain untimed rather than rounded into invented millisecond intervals.
+Invalid intervals still fail closed.
 
 ## A failed controller request does not end voice
 
@@ -300,18 +298,15 @@ invalid desktop protocol data, and the lifetime action-capacity boundary still e
 The call-wide controller guard refused a new native delegation even after a desktop action had
 completed, while the earlier controller was still composing its response. A real audio test
 reproduced the spoken busy warning with one request and a three-millisecond successful staging
-action. Live now owns one logical controller conversation with a first-in, first-out queue. One request
-runs at a time, and the desktop has at most one outstanding action. Queued turns take current
-compact state while preserving their original speech attribution. Completed controller history
-contains only attributed user text and the exact assistant outcome; tool calls and results exist
-only within the active exchange. Duplicate identities remain remembered and uncertain mutations
-are never replayed. The 120-second controller deadline races provider iteration rather than merely signalling
-abort, and socket writes have a 30-second deadline, so a stalled iterator or callback cannot retain
-an unbounded wait. An aborted iterator is settled before reusing its provider session. If it remains
-stuck after three seconds, that instance is fenced and retired once; a subsequent new request may
-open a replacement with the same text history and account. Closing during provider opening also
-retires the late result. Short response-frame ordering
-is separate from inference; it never waits for playback or a desktop acknowledgement.
+action. Requests now queue first-in, first-out per person, across all of their calls, and one runs
+at a time; Voice's turn settles before the next request reaches it, so two requests never share a
+turn. The desktop has at most one outstanding action, and Voice's actions run one at a time in the
+order it called them. Duplicate delegation identities are ignored and uncertain mutations are never
+replayed. A request has 120 seconds and eight inferences; past either, Voice's turn is stopped,
+voice gets a fixed explanation, and the stopped turn has ten seconds to settle before the next
+request reaches Voice. Queued requests expire after 120 seconds without starting an action. Short
+response-frame ordering is separate from inference; it never waits for playback or a desktop
+acknowledgement.
 
 ## Voice needs a local diagnostic timeline
 

@@ -20,6 +20,11 @@ export {
     type SpaceTarget,
 } from "./Space.js";
 export { spaceEventSchema, type SpaceEvent, type SpaceEventListener } from "./SpaceEvent.js";
+export type {
+    SpaceSidebarOutline,
+    SpaceSidebarOutlineGroup,
+    SpaceSidebarOutlineRow,
+} from "./SpaceSidebarOutline.js";
 export { spaceMigrations, SPACES_TABLE, SPACE_SECTIONS_TABLE } from "./SpaceMigrations.js";
 export { SpacesModule } from "./SpacesModule.js";
 export { SPACE_ICON_SLUGS } from "./impl/spaceIconSlugs.js";

@@ -71,6 +71,13 @@ it.each([
         bootstrap.closeProviders();
         const target = { connectionId: "connection", groupId: "group", sessionId: "conversation" };
         const controller = new ScriptedProvider([
+            // Voice's opening turn, when the first call creates it.
+            [
+                { type: "text_start" },
+                { type: "text_delta", delta: "Ready." },
+                { type: "text_end" },
+                { type: "done", state: "normal", tokens: { input: 1, output: 1 } },
+            ],
             ...(recoverController
                 ? [
                       [
@@ -78,7 +85,7 @@ it.each([
                               type: "done",
                               state: "error",
                               kind: "unknown",
-                              message: "Private provider diagnostic fixture-only-key",
+                              message: "Private provider diagnostic sentinel",
                           } as const,
                       ],
                   ]
@@ -585,21 +592,41 @@ it.each([
         const journal = await client.getEvents();
         expect(JSON.stringify(journal)).not.toContain("fixture-only-key");
         expect(JSON.stringify(journal)).not.toContain("v=fixture-offer");
-        expect(JSON.stringify(journal)).not.toContain("Stage a test investigation request");
+        // Speech is kept only in the person's Voice conversation, never anywhere else.
+        const voice = await runtime.modules.live.voiceAgent(
+            withAgentDatabase(runtime.ctx.named("live-test-voice"), runtime.database),
+            "standalone",
+        );
+        if (voice === undefined) throw new Error("The call did not create Voice.");
+        const mentions = journal.events
+            .map((event) => JSON.stringify(event))
+            .filter((event) => event.includes("Stage a test investigation request"));
+        // The native call's later speech pushes the first fragment out of the bounded window.
+        if (!native) expect(mentions.length).toBeGreaterThan(0);
+        expect(mentions.every((event) => event.includes(voice))).toBe(true);
         expect(providerRequests).toHaveLength(1);
-        const captured = controller.sessions.findLast((session) =>
-            session.id.startsWith("live-controller:"),
-        );
-        expect(captured?.options.tools).toHaveLength(6);
-        expect(controller.sessions.filter((session) => session.requests.length > 0)).toHaveLength(
-            1,
-        );
+        const used = controller.sessions.filter((session) => session.requests.length > 0);
+        // Voice's opening turn runs on the pool; its requests run on the account the call froze.
+        expect(used).toHaveLength(smartDefault ? 2 : 1);
+        const captured = used.at(-1);
+        expect(captured?.options.tools?.map((tool) => tool.name)).toEqual([
+            "list_sidebar",
+            "read_conversations",
+            "get_sidebar_styles",
+            "request_space_placement",
+            "request_sidebar_tidy",
+            "desktopState",
+            "desktopOpen",
+            "sessionRead",
+            "sessionSend",
+            "composerDraftAppend",
+        ]);
         expect(
             captured?.requests.every(
                 (request) => request.model === "openai/gpt-6.1-sol" && request.effort === "low",
             ),
         ).toBe(true);
-        expect(snapshots).toHaveLength((recoverController ? 4 : 3) + (native ? 1 : 0));
+        expect(snapshots).toHaveLength(1 + (recoverController ? 4 : 3) + (native ? 1 : 0));
         expect(JSON.stringify(snapshots[0])).not.toContain('"tool_call"');
         await runtime.modules.observation.flush();
         const localLog = await readFile(runtime.configuration.paths.logPath, "utf8");
@@ -661,7 +688,8 @@ it.each([
             );
         expect(localLog).not.toContain("fixture-only-key");
         expect(localLog).not.toContain("v=fixture-offer");
-        expect(localLog).not.toContain("Private provider diagnostic");
+        // Voice's own inference failures are logged like any agent's; voice diagnostics never are.
+        expect(JSON.stringify(voiceLogs)).not.toContain("Private provider diagnostic");
         expect(localLog).not.toContain("Stage a test investigation request");
         expect(localLog).not.toContain("Please inspect the failing test.");
         expect(localLog).not.toContain("The exact message is staged.");
@@ -720,7 +748,7 @@ it.each([
     30000,
 );
 
-it("queues a follow-up voice request behind the active desktop action and retains only completed controller text", async () => {
+it("queues a follow-up voice request behind the active desktop action and keeps one Voice conversation", async () => {
     const target = { connectionId: "connection", groupId: "group", sessionId: "conversation" };
     const text = (value: string): SessionEvent[] => [
         { type: "block_start" },
@@ -988,9 +1016,10 @@ it("queues a follow-up voice request behind the active desktop action and retain
         .poll(() => providerFrames)
         .toEqual(
             expect.arrayContaining([
+                // The name is resolved when the outcome is spoken, from the desktop's newest context.
                 delivered(
                     "first_request",
-                    "Opened Original session title.",
+                    "Opened Fresh session title.",
                     LIVE_QUEUED_REQUEST_INSTRUCTIONS,
                 ),
                 delivered("second_request", "Second outcome.", LIVE_LATER_REQUEST_INSTRUCTIONS),
@@ -998,7 +1027,7 @@ it("queues a follow-up voice request behind the active desktop action and retain
         );
     expect(actions()).toHaveLength(2);
 
-    // One logical controller conversation, pinned to GPT-6.1 Sol at low effort.
+    // One Voice conversation, pinned to GPT-6.1 Sol at low effort.
     expect(new Set(runs.map((run) => run.sessionId)).size).toBe(1);
     expect(runs.every((run) => run.request.model === "openai/gpt-6.1-sol")).toBe(true);
     expect(runs.every((run) => run.request.effort === "low")).toBe(true);
@@ -1009,31 +1038,14 @@ it("queues a follow-up voice request behind the active desktop action and retain
                 "Read the second desktop state",
             ),
     );
-    if (followUp === undefined) throw new Error("Missing follow-up controller request.");
-    const retained = followUp.request.context.messages;
-    expect(
-        retained.every((message) => message.role === "user" || message.role === "assistant"),
-    ).toBe(true);
-    expect(
-        retained.every(
-            (message) =>
-                typeof message.content === "string" ||
-                (message.content ?? []).every((block) => block.type === "text"),
-        ),
-    ).toBe(true);
-    const history = JSON.stringify(retained);
-    expect(history).toContain("Opened Original session title.");
-    expect(
-        runs.some(
-            (run) =>
-                (run.request.context.messages.at(-1) as { callId?: string } | undefined)?.callId ===
-                "open",
-        ),
-    ).toBe(false);
-    expect(history).toContain("Fresh session title");
-    expect(history).not.toContain("tool_call");
-    expect(history).not.toContain('"callId"');
-    expect(history).not.toContain("Private controller reasoning sentinel");
+    if (followUp === undefined) throw new Error("Missing follow-up Voice request.");
+    // Voice remembers the earlier request, and is handed only speech it has not seen.
+    const latest = JSON.stringify(followUp.request.context.messages.at(-1));
+    expect(latest).toContain("Then read the desktop");
+    expect(latest).not.toContain("Open the first conversation please");
+    expect(JSON.stringify(followUp.request.context.messages.slice(0, -1))).toContain(
+        "Open the first conversation please",
+    );
 
     await client.closeLiveSession("livefifo");
     await expect

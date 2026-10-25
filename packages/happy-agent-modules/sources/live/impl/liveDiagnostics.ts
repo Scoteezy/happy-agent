@@ -22,6 +22,7 @@ const identity = Type.Object(
         sessionId: Type.Optional(id),
         botId: Type.Optional(id),
         taskId: Type.Optional(id),
+        agentId: Type.Optional(id),
     },
     { additionalProperties: false },
 );
@@ -124,9 +125,8 @@ const diagnosticSchema = Type.Object(
             "action.result",
             "action.expired",
             "action.lateIgnored",
-            "session.snapshot",
             "appState.accepted",
-            "appState.pushed",
+            "outline.pushed",
             "focus.sent",
         ]),
         controllerProviderId: Type.Optional(id),
@@ -136,13 +136,13 @@ const diagnosticSchema = Type.Object(
         capabilities: Type.Optional(Type.Array(Type.String({ maxLength: 64 }), { maxItems: 16 })),
         appendCount: Type.Optional(count),
         bytes: Type.Optional(count),
-        snapshotKind: Type.Optional(choices(["full", "update"])),
         focusReason: Type.Optional(choices(["mention", "navigation", "clear"])),
         outcome: Type.Optional(choices(["fixed", "controller"])),
         outcomeHint: Type.Optional(choices(["queued", "later"])),
         inFlight: Type.Optional(count),
         credentialKind: Type.Optional(choices(["codex_subscription", "openai_api_key"])),
         credentialProviderId: Type.Optional(id),
+        voiceAgentId: Type.Optional(id),
         status: Type.Optional(choices(["starting", "active", "closing", "closed", "failed"])),
         context: Type.Optional(contextSummarySchema),
         delegationId: Type.Optional(id),
@@ -271,11 +271,12 @@ export function liveActionSummary(
         actionType: action.type,
     };
     if ("target" in action) {
-        const { connectionId, groupId } = action.target;
+        const target = action.target;
         details.target = {
-            connectionId,
-            groupId,
-            ...("sessionId" in action.target ? { sessionId: action.target.sessionId } : {}),
+            connectionId: target.connectionId,
+            ...("groupId" in target ? { groupId: target.groupId } : {}),
+            ...("sessionId" in target ? { sessionId: target.sessionId } : {}),
+            ...("agentId" in target ? { agentId: target.agentId } : {}),
         };
         if (action.type === "desktopOpen") {
             if ("projectId" in action.target) details.target.projectId = action.target.projectId;

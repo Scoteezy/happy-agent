@@ -3,6 +3,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { SIDEBAR_STYLES } from "../impl/sidebarStyles.js";
 import { spaceIconSlugSchema } from "../Space.js";
 import type { SpacesModule } from "../SpacesModule.js";
+import { requestSpacePlacementTool } from "./request_space_placement.js";
 
 const resultSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
 const toLLM = (result: Static<typeof resultSchema>) => [
@@ -60,40 +61,8 @@ export function prioritizingTools(
     agentId: string,
 ): AnyAgentTool[] {
     return [
-        defineAgentTool({
-            name: "list_sidebar",
-            defer: false,
-            capabilities: ["Read the person's sidebar artifact and live spaces."],
-            description:
-                "Read {artifactId, version, html, spaces, sessions, visibleRows, manualIds}. The html is the sidebar exactly as the person sees it. spaces describe each row; sessions list every session under the rows with its parent, whether or not it is shown. visibleRows counts the rows and widgets shown outside collapsed sections and the sessions shown under them, not counting Happy and new work waiting for its first message, against the budget to stay within. manualIds are the items whose place, fold, name, or content the person last set; keepInPlace marks the rows they keep above the first separator. Pending edits are included with the version your next edit must use.",
-            parameters: emptySchema,
-            returnType: resultSchema,
-            durable: true,
-            shouldReviewInAutoMode: () => false,
-            execute: async (ctx) => ({
-                text: JSON.stringify(await spaces.prioritizingSidebar(ctx, ownerUserId)),
-            }),
-            toLLM,
-        }),
-        defineAgentTool({
-            name: "read_conversations",
-            defer: false,
-            capabilities: ["Read what was said in several sidebar rows' conversations."],
-            description:
-                "Read up to 12 conversations at once, each a row (its space ID) or a session under a row (its agent ID): its title, when it was last active, and its latest turns (default 4), oldest first. A turn is a message from the person or another agent (such as a subtask's task or report) with the agent's last replies to it (default 1). Tool calls, their output, and reasoning are left out, and long messages are shortened.",
-            parameters: conversationsSchema,
-            returnType: resultSchema,
-            durable: true,
-            shouldReviewInAutoMode: () => false,
-            execute: async (ctx, input: Static<typeof conversationsSchema>) => ({
-                text: await spaces.readConversations(ctx, ownerUserId, {
-                    ids: input.ids,
-                    turns: input.turns ?? 4,
-                    replies: input.replies ?? 1,
-                }),
-            }),
-            toLLM,
-        }),
+        listSidebarTool(spaces, ownerUserId),
+        readConversationsTool(spaces, ownerUserId, "rows"),
         defineAgentTool({
             name: "propose_sidebar",
             defer: false,
@@ -139,19 +108,7 @@ export function prioritizingTools(
             }),
             toLLM,
         }),
-        defineAgentTool({
-            name: "get_sidebar_styles",
-            defer: false,
-            capabilities: ["Read the sidebar document's grammar."],
-            description:
-                "Read the sidebar's allowed elements, their attributes and children, and its rules. The app draws every element itself; nothing else is allowed.",
-            parameters: emptySchema,
-            returnType: resultSchema,
-            durable: true,
-            shouldReviewInAutoMode: () => false,
-            execute: async () => ({ text: JSON.stringify(SIDEBAR_STYLES) }),
-            toLLM,
-        }),
+        sidebarStylesTool(),
         defineAgentTool({
             name: "set_space_icon",
             defer: false,
@@ -169,4 +126,108 @@ export function prioritizingTools(
         }),
         ...spaces.sidebarArtifactTools(agentId),
     ];
+}
+
+/**
+ * Voice's fixed sidebar surface: Prioritizing's own read tools, and requests to Prioritizing for
+ * any rearrangement. Voice never edits the sidebar itself.
+ */
+export function voiceSidebarTools(
+    spaces: SpacesModule,
+    ownerUserId: string,
+    agentId: string,
+): AnyAgentTool[] {
+    return [
+        listSidebarTool(spaces, ownerUserId),
+        readConversationsTool(spaces, ownerUserId, "machine"),
+        sidebarStylesTool(),
+        // Voice's array is fixed and complete, so the request is offered directly.
+        { ...requestSpacePlacementTool(spaces, agentId), defer: false },
+        requestSidebarTidyTool(spaces, ownerUserId),
+    ];
+}
+
+export function listSidebarTool(spaces: SpacesModule, ownerUserId: string): AnyAgentTool {
+    return defineAgentTool({
+        name: "list_sidebar",
+        defer: false,
+        capabilities: ["Read the person's sidebar artifact and live spaces."],
+        description:
+            "Read {artifactId, version, html, spaces, sessions, visibleRows, manualIds}. The html is the sidebar exactly as the person sees it. spaces describe each row, with the agent ID of its conversation; sessions list every session under the rows with its parent, whether or not it is shown. visibleRows counts the rows and widgets shown outside collapsed sections and the sessions shown under them, not counting Happy and new work waiting for its first message, against the budget to stay within. manualIds are the items whose place, fold, name, or content the person last set; keepInPlace marks the rows they keep above the first separator. Pending edits are included with the version your next edit must use.",
+        parameters: emptySchema,
+        returnType: resultSchema,
+        durable: true,
+        shouldReviewInAutoMode: () => false,
+        execute: async (ctx) => ({
+            text: JSON.stringify(await spaces.prioritizingSidebar(ctx, ownerUserId)),
+        }),
+        toLLM,
+    });
+}
+
+/**
+ * Prioritizing reads the person's rows and the sessions under them; Voice may read any
+ * conversation on this machine the person can see.
+ */
+export function readConversationsTool(
+    spaces: SpacesModule,
+    ownerUserId: string,
+    scope: "rows" | "machine",
+): AnyAgentTool {
+    return defineAgentTool({
+        name: "read_conversations",
+        defer: false,
+        capabilities: ["Read what was said in several sidebar rows' conversations."],
+        description: `Read up to 12 conversations at once, each a row (its space ID) or ${scope === "rows" ? "a session under a row" : "any conversation on this machine"} (its agent ID): its title, when it was last active, and its latest turns (default 4), oldest first. A turn is a message from the person or another agent (such as a subtask's task or report) with the agent's last replies to it (default 1). Tool calls, their output, and reasoning are left out, and long messages are shortened.`,
+        parameters: conversationsSchema,
+        returnType: resultSchema,
+        durable: true,
+        shouldReviewInAutoMode: () => false,
+        execute: async (ctx, input: Static<typeof conversationsSchema>) => ({
+            text: await spaces.readConversations(ctx, ownerUserId, {
+                ids: input.ids,
+                turns: input.turns ?? 4,
+                replies: input.replies ?? 1,
+                scope,
+            }),
+        }),
+        toLLM,
+    });
+}
+
+export function sidebarStylesTool(): AnyAgentTool {
+    return defineAgentTool({
+        name: "get_sidebar_styles",
+        defer: false,
+        capabilities: ["Read the sidebar document's grammar."],
+        description:
+            "Read the sidebar's allowed elements, their attributes and children, and its rules. The app draws every element itself; nothing else is allowed.",
+        parameters: emptySchema,
+        returnType: resultSchema,
+        durable: true,
+        shouldReviewInAutoMode: () => false,
+        execute: async () => ({ text: JSON.stringify(SIDEBAR_STYLES) }),
+        toLLM,
+    });
+}
+
+/** The person's Tidy button, asked for in words: one message in Prioritizing's conversation. */
+function requestSidebarTidyTool(spaces: SpacesModule, ownerUserId: string): AnyAgentTool {
+    return defineAgentTool({
+        name: "request_sidebar_tidy",
+        defer: false,
+        capabilities: ["Ask Prioritizing to tidy the person's whole sidebar."],
+        description:
+            "Ask Prioritizing, the helper that organises the person's sidebar, to tidy the whole sidebar now, as the person's Tidy button does. Use request_space_placement instead to move one conversation's row.",
+        parameters: emptySchema,
+        returnType: resultSchema,
+        durable: true,
+        shouldReviewInAutoMode: () => false,
+        execute: async (ctx) => ({
+            text: (await spaces.requestTidy(ctx, ownerUserId))
+                ? "Prioritizing was asked to tidy the sidebar and decides shortly."
+                : "Nothing organizes this sidebar yet; the person can tidy it themselves.",
+        }),
+        toLLM,
+    });
 }

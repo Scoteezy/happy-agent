@@ -24,13 +24,14 @@ export const spaceTextSchema = Type.String({
 export const spaceIconSlugSchema = Type.Union(SPACE_ICON_SLUGS.map((slug) => Type.Literal(slug)));
 
 /**
- * Happy is row one, exactly once per person; `focus` is Prioritizing's own conversation, at most
- * once per person; every other row is an item.
+ * Happy is row one, exactly once per person; `focus` is Prioritizing's own conversation and `voice`
+ * Voice's, each at most once per person; every other row is an item.
  */
 export const spaceRoleSchema = Type.Union([
     Type.Literal("happy"),
     Type.Literal("item"),
     Type.Literal("focus"),
+    Type.Literal("voice"),
 ]);
 
 /** Pending means Prioritizing has not placed the row yet; its position is still its section. */

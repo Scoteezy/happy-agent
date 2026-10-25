@@ -571,3 +571,14 @@ Six tidy requests in a row led a cheap model to hide every row but Happy, includ
 was running. The daemon then refused to fold or hide work active in the last two hours; that rule
 is gone, and the prompt says never to fold away recent work. Folding is a proposal the person
 accepts, so a bad fold reaches the sidebar only with their consent.
+
+## Voice reads the sidebar and asks Prioritizing to change it
+
+Voice, the person's voice-call agent, needed to know and talk about the sidebar without becoming a
+second organiser. It has its own row (role `voice`), made by the daemon below Happy or below
+Prioritizing's row, settled and never briefed as work, and only read tools; moving, folding or
+hiding goes to Prioritizing through `request_space_placement`, and tidying through
+`request_sidebar_tidy`, which tells Voice when nothing organizes the sidebar yet. Kirill chose that
+Voice may read any conversation's public text on this machine, so `read_conversations` has a
+`machine` scope; on a team installation "this machine" holds other members' work, so the scope
+stays the person's own there.

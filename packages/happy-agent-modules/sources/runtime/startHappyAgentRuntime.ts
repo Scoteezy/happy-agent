@@ -705,7 +705,6 @@ export async function startHappyAgentRuntime(
             await system?.close(shutdownCtx);
             await codeMode.close();
         });
-        const live = new LiveModule(config, durableFunctions, bots);
         const spaces = new SpacesModule(
             config,
             tasks,
@@ -721,6 +720,7 @@ export async function startHappyAgentRuntime(
             artifacts,
         );
         registerShutdown("spaces", async () => await spaces.close());
+        const live = new LiveModule(config, durableFunctions, bots, subtasks, spaces);
         const stories = new StoriesModule(
             team,
             profile,

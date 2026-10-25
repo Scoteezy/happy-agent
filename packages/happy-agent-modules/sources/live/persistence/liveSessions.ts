@@ -31,6 +31,22 @@ export const liveMigrations: readonly AgentModuleMigration[] = [
             );
         },
     ],
+    [
+        "002-live-voice-agents",
+        async (_ctx, db) => {
+            await agentDatabaseRun(
+                db,
+                sql`CREATE TABLE happy_live_voice_agents (
+        owner_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, outline_sent TEXT,
+        created_at INTEGER NOT NULL
+    )`,
+            );
+            await agentDatabaseRun(
+                db,
+                sql`CREATE INDEX happy_live_voice_agent ON happy_live_voice_agents(agent_id)`,
+            );
+        },
+    ],
 ];
 
 const storedSchema = Type.Object({ ownerId: Type.String(), session: liveSessionSchema });

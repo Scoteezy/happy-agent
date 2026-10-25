@@ -23,7 +23,13 @@ describe("voice settings through the public API", () => {
         running.push(gym);
         expect((await gym.client.getHealth()).capabilities).toMatchObject({
             desktopLiveControl: true,
-            desktopLiveCapabilities: ["appState", "voiceFocus", "taskCreate", "sessionModelChange"],
+            desktopLiveCapabilities: [
+                "appState",
+                "voiceFocus",
+                "taskCreate",
+                "sessionModelChange",
+                "agentTargets",
+            ],
         });
         const initial = (await gym.client.getConfig()).config.voice!;
         expect(initial).toMatchObject({
