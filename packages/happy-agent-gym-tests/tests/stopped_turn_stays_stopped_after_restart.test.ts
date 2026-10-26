@@ -13,7 +13,8 @@ it("keeps a stopped turn stopped across a restart, and answers the next message 
             if (request.sessionId.startsWith("naming:"))
                 return { content: [{ type: "text", text: "Long answer" }] };
             const last = JSON.stringify(request.messages.at(-1));
-            if (last.includes("Something else.")) return { content: [{ type: "text", text: "Ok." }] };
+            if (last.includes("Something else."))
+                return { content: [{ type: "text", text: "Ok." }] };
             // Streams slowly, so the person stops it partway.
             return {
                 content: [{ type: "text", text: "word ".repeat(2_000) }],

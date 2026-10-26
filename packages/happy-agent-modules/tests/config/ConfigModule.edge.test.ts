@@ -1279,11 +1279,11 @@ describe("ConfigModule edge coverage", () => {
                 [
                     "[providers.work]",
                     'type = "codex"',
-                    'include_models = ["openai/gpt-5.6-sol"]',
+                    'include_models = ["openai/gpt-6.1-sol"]',
                     "",
                     "[providers.personal]",
                     'type = "codex"',
-                    'include_models = ["openai/gpt-5.6-sol", "openai/gpt-5.6-terra"]',
+                    'include_models = ["openai/gpt-6.1-sol", "openai/gpt-6.1-terra"]',
                     "",
                     "[providers.other-kind]",
                     'type = "claude"',
@@ -1293,8 +1293,8 @@ describe("ConfigModule edge coverage", () => {
                     'type = "smart"',
                     'strategy = "round_robin"',
                     'providers = ["missing", "work", "other-kind", "personal", "router"]',
-                    'include_subagent_models = ["openai/gpt-5.6-sol", "openai/gpt-5.6-terra"]',
-                    'exclude_subagent_models = ["openai/gpt-5.6-terra"]',
+                    'include_subagent_models = ["openai/gpt-6.1-sol", "openai/gpt-6.1-terra"]',
+                    'exclude_subagent_models = ["openai/gpt-6.1-terra"]',
                 ].join("\n"),
             );
 
@@ -1304,25 +1304,25 @@ describe("ConfigModule edge coverage", () => {
                 providers: ["missing", "work", "other-kind", "personal", "router"],
                 strategy: "round_robin",
                 type: "smart",
-                includeSubagentModels: ["openai/gpt-5.6-sol", "openai/gpt-5.6-terra"],
-                excludeSubagentModels: ["openai/gpt-5.6-terra"],
+                includeSubagentModels: ["openai/gpt-6.1-sol", "openai/gpt-6.1-terra"],
+                excludeSubagentModels: ["openai/gpt-6.1-terra"],
             });
             expect(
                 config.offeredModels
                     .filter((model) => model.providerId === "router")
                     .map((model) => model.id),
-            ).toEqual(["openai/gpt-5.6-sol", "openai/gpt-5.6-terra"]);
+            ).toEqual(["openai/gpt-6.1-sol", "openai/gpt-6.1-terra"]);
             expect(config.providers.typeOf("router")).toBe("codex");
-            expect(config.isSubagentModelAllowed("router", "openai/gpt-5.6-sol")).toBe(true);
-            expect(config.isSubagentModelAllowed("router", "openai/gpt-5.6-terra")).toBe(false);
+            expect(config.isSubagentModelAllowed("router", "openai/gpt-6.1-sol")).toBe(true);
+            expect(config.isSubagentModelAllowed("router", "openai/gpt-6.1-terra")).toBe(false);
             expect(smartProviderRoute(config.configuration, "router")?.models).toMatchObject([
                 {
                     candidates: ["work", "personal"],
-                    model: { id: "openai/gpt-5.6-sol" },
+                    model: { id: "openai/gpt-6.1-sol" },
                 },
                 {
                     candidates: ["personal"],
-                    model: { id: "openai/gpt-5.6-terra" },
+                    model: { id: "openai/gpt-6.1-terra" },
                 },
             ]);
             await expect(

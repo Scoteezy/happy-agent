@@ -23,7 +23,7 @@ function modelsPath(agentHome: string, route: ForeignAgentRoute): string {
 }
 
 /**
- * The models one route offers, in the agent's own order and then picked and ordered by the
+ * The models one route offers, with current Codex generations first, then picked and ordered by the
  * harness's `include_models` and `exclude_models`: what the agent reported when it was last
  * asked, or its built-in list until it has answered once. OpenCode and ACP agents have no built-in
  * list and offer nothing until they answer.
@@ -33,7 +33,22 @@ export function foreignAgentModels(
     route: ForeignAgentRoute,
 ): readonly ForeignAgentModel[] {
     const models = reportedModels(modelsPath(agentHome, route)) ?? route.agent.models;
-    return pickHarnessModels(models, route.harness.includeModels, route.harness.excludeModels);
+    const current =
+        route.agent.type === "codex-cli"
+            ? models
+                  .filter((model) => !/^codex-cli\/gpt-5\.6(?:-|$)/u.test(model.id))
+                  .toSorted((left, right) => {
+                      const leftVersion = /^codex-cli\/gpt-(\d+)(?:\.(\d+))?/u.exec(left.id);
+                      const rightVersion = /^codex-cli\/gpt-(\d+)(?:\.(\d+))?/u.exec(right.id);
+                      if (leftVersion === null) return rightVersion === null ? 0 : 1;
+                      if (rightVersion === null) return -1;
+                      return (
+                          Number(rightVersion[1]) - Number(leftVersion[1]) ||
+                          Number(rightVersion[2] ?? 0) - Number(leftVersion[2] ?? 0)
+                      );
+                  })
+            : models;
+    return pickHarnessModels(current, route.harness.includeModels, route.harness.excludeModels);
 }
 
 function reportedModels(path: string): readonly ForeignAgentModel[] | undefined {

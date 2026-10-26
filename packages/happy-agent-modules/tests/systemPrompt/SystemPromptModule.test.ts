@@ -152,6 +152,7 @@ describe("SystemPromptModule", () => {
                 "anthropic/sonnet-5-5",
                 "anthropic/sonnet-5",
                 "openai/gpt-6.1-sol",
+                "openai/gpt-6.1-terra",
                 "openai/gpt-6-sol",
                 "xai/grok-4.5",
             ].map((model) => ({ model })),

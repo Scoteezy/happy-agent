@@ -12,6 +12,14 @@ Protocol implementations belong in the `protocol` area of `happy-providers`.
 Provider-specific code should select and configure those implementations rather
 than duplicate them.
 
+## Model catalog and picker maintenance
+
+Keep curated provider catalogs and model pickers current together. Remove the
+GPT-5.6 generation and internal, default, or system model choices from pickers.
+Within each vendor, show newer generations before older ones: every GPT-6.1
+model comes before every GPT-6 model, regardless of model size. Keep that rule
+when adding models or changing catalogs; size must not outrank generation.
+
 ## Responses protocols
 
 OpenAI, Grok, and OpenAI models served through Bedrock use the Responses API

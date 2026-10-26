@@ -39,13 +39,13 @@ External calls block until their agent has finished, even though agents run asyn
 Example:
 phase("Review")
 reviews = parallel([
-    {"prompt": "Review authentication for bugs.", "label": "Auth review", "model": "openai/gpt-5.6-terra", "effort": "medium"},
-    {"prompt": "Review storage for bugs.", "label": "Storage review", "model": "openai/gpt-5.6-terra", "effort": "medium"},
+    {"prompt": "Review authentication for bugs.", "label": "Auth review", "model": "openai/gpt-6.1-terra", "effort": "medium"},
+    {"prompt": "Review storage for bugs.", "label": "Storage review", "model": "openai/gpt-6.1-terra", "effort": "medium"},
 ])
 phase("Verify")
 verified = pipeline(
     [review for review in reviews if review is not None],
-    [{"prompt": "Adversarially verify this finding.", "label": "Verify finding", "model": "openai/gpt-5.6-terra", "effort": "medium"}],
+    [{"prompt": "Adversarially verify this finding.", "label": "Verify finding", "model": "openai/gpt-6.1-terra", "effort": "medium"}],
 )
 {"verified": [result for result in verified if result is not None]}
 

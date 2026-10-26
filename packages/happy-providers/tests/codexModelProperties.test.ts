@@ -1,11 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import { createCodexCliRequest } from "@/vendors/codex/impl/createCodexCliRequest.js";
+import { codexModelsShareConfiguration } from "@/vendors/codex/impl/codexModelsShareConfiguration.js";
 import { getCodexModelProperties } from "@/vendors/codex/impl/getCodexModelProperties.js";
 import { isCodexV2Model } from "@/vendors/codex/impl/isCodexV2Model.js";
 import { resolveCodexReasoningEffort } from "@/vendors/codex/impl/resolveCodexReasoningEffort.js";
 
 describe("Codex model properties", () => {
+    it("uses the Terra request profile for GPT-6.1 Terra", () => {
+        expect(getCodexModelProperties("gpt-6.1-terra")).toEqual({
+            compactionHash: "3000",
+            contextWindow: 272_000,
+            defaultEffort: "medium",
+            responsesLite: true,
+        });
+        expect(resolveCodexReasoningEffort("gpt-6.1-terra", undefined)).toBe("medium");
+        expect(isCodexV2Model("gpt-6.1-terra")).toBe(true);
+        expect(codexModelsShareConfiguration("gpt-6.1-terra", "gpt-6.1-terra")).toBe(true);
+        for (const other of ["gpt-6.1-sol", "gpt-5.6-terra"]) {
+            expect(codexModelsShareConfiguration("gpt-6.1-terra", other)).toBe(false);
+            expect(codexModelsShareConfiguration(other, "gpt-6.1-terra")).toBe(false);
+        }
+    });
+
     it("uses GPT-6 Astra's native Codex defaults and request profiles", () => {
         expect(getCodexModelProperties("gpt-6-astra")).toEqual({
             compactionHash: "3000",

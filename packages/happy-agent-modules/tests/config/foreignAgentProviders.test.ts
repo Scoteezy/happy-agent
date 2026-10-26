@@ -55,6 +55,49 @@ const ACCOUNTS = [
 ];
 
 describe("harnesses", () => {
+    it("offers current Codex CLI generations first while honoring an explicit include order", async () => {
+        for (const include of [undefined, ["codex-cli/gpt-6-sol", "codex-cli/gpt-6.1-terra"]]) {
+            const config = await testConfigRootedAt(
+                await root(),
+                [
+                    ...ACCOUNTS,
+                    "[harnesses.codex_cli]",
+                    ...(include === undefined
+                        ? []
+                        : [`include_models = ${JSON.stringify(include)}`]),
+                ].join("\n"),
+            );
+            await report(
+                join(config.configuration.paths.agentHome, "foreign-agents", "codex_cli", "codex"),
+                [
+                    reported("codex-cli/gpt-6-sol", "GPT-6 Sol"),
+                    reported("codex-cli/future-model", "Future model"),
+                    reported("codex-cli/gpt-5.6-sol", "GPT-5.6 Sol"),
+                    reported("codex-cli/gpt-6.1-terra", "GPT-6.1 Terra"),
+                    reported("codex-cli/gpt-5.6-terra", "GPT-5.6 Terra"),
+                    reported("codex-cli/gpt-6.1-sol", "GPT-6.1 Sol"),
+                    reported("codex-cli/gpt-7-luna", "GPT-7 Luna"),
+                ],
+            );
+            expect(
+                config.offeredModels
+                    .filter(
+                        (model) =>
+                            model.providerId === "codex" && model.id.startsWith("codex-cli/"),
+                    )
+                    .map((model) => model.id),
+            ).toEqual(
+                include ?? [
+                    "codex-cli/gpt-7-luna",
+                    "codex-cli/gpt-6.1-terra",
+                    "codex-cli/gpt-6.1-sol",
+                    "codex-cli/gpt-6-sol",
+                    "codex-cli/future-model",
+                ],
+            );
+        }
+    });
+
     it("runs Claude Code and Codex CLI on the accounts they accept, beside Happy's own models", async () => {
         const config = await testConfigRootedAt(
             await root(),

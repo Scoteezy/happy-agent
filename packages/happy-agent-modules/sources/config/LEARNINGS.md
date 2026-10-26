@@ -1,5 +1,13 @@
 # Config module learnings
 
+## Selectable catalogs follow generations
+
+Model size used to outrank generation in Claude's catalog, and GPT-5.6 remained selectable after
+GPT-6 and GPT-6.1 arrived. Curated catalogs now put each vendor's newer generations first and
+exclude GPT-5.6. Reported Codex CLI models follow the same rule before a person's explicit
+`include_models` order is applied. Provider support and context metadata for historical GPT-5.6
+conversations remain available; retirement changes current choices and defaults.
+
 ## Credential selectors must leave provider diagnostics before shared consumers see them
 
 Credential-source paths, configuration keys, environment variable names, and host labels used to

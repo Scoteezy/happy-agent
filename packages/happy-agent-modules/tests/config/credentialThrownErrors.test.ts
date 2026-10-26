@@ -34,7 +34,7 @@ enabled = true
 providers = ["private_account"]
 [defaults]
 provider = "router"
-model = "openai/gpt-5.6-sol"
+model = "openai/gpt-6.1-sol"
 `;
 
 it("copies a native SDK error body without leaking its diagnostic message or mutating the original", () => {
@@ -100,7 +100,7 @@ it.each(["run", "session"] as const)(
                 text: "Exercise the credential exception.",
                 mode: {
                     providerId: "router",
-                    modelId: "openai/gpt-5.6-sol",
+                    modelId: "openai/gpt-6.1-sol",
                     effort: "medium",
                     serviceTier: null,
                     permissionMode: "auto",
@@ -168,7 +168,7 @@ it.each(["run", "compact", "session"] as const)(
             config = await testConfigRootedAt(root, configuration);
             const provider = await config.providers.resolve(
                 "private_account",
-                "openai/gpt-5.6-sol",
+                "openai/gpt-6.1-sol",
             );
             if (provider === null) throw new Error("Missing fixture provider.");
             const received = await (async () => {
@@ -228,7 +228,7 @@ it.each(["run", "compact", "session"] as const)(
             config = await testConfigRootedAt(root, configuration);
             const provider = await config.providers.resolve(
                 "private_account",
-                "openai/gpt-5.6-sol",
+                "openai/gpt-6.1-sol",
             );
             if (provider === null) throw new Error("Missing fixture provider.");
             const received = await (async () => {
@@ -273,7 +273,7 @@ it("preserves an abort reason's identity and the provider's cancelled terminal e
                 ),
         );
         config = await testConfigRootedAt(root, configuration);
-        const provider = await config.providers.resolve("private_account", "openai/gpt-5.6-sol");
+        const provider = await config.providers.resolve("private_account", "openai/gpt-6.1-sol");
         if (provider === null) throw new Error("Missing fixture provider.");
         session = await provider.session("conversation", { instructions: "test" });
         const iterator = session
@@ -312,7 +312,7 @@ it("withholds a real discovery filesystem exception's selected auth-file path fr
                 text: "Exercise credential discovery.",
                 mode: {
                     providerId: "router",
-                    modelId: "openai/gpt-5.6-sol",
+                    modelId: "openai/gpt-6.1-sol",
                     effort: "medium",
                     serviceTier: null,
                     permissionMode: "auto",

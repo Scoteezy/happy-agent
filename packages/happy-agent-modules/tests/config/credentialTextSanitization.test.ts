@@ -109,7 +109,7 @@ describe.each([
                 vi.spyOn(prototype, "session").mockImplementation(
                     async (id, options) => new ScriptedSession(id, [scripted], options),
                 );
-                const selectedModel = claude ? "anthropic/sonnet-5-5" : "openai/gpt-5.6-sol";
+                const selectedModel = claude ? "anthropic/sonnet-5-5" : "openai/gpt-6.1-sol";
                 // Resolving the concrete provider constructs the real selected credential.
                 await config.providers.resolve("private_account", selectedModel);
                 if (claude) {

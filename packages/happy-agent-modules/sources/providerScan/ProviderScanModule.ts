@@ -338,7 +338,7 @@ function verificationModel(
     const preferred: Readonly<Record<string, string>> = {
         bedrock: "anthropic/fable-5",
         claude: "anthropic/sonnet-5",
-        codex: "openai/gpt-5.6-luna",
+        codex: "openai/gpt-6-luna",
         grok: "xai/grok-composer-2.5-fast",
     };
     const routes = models.filter((model) => model.providerId === providerId);

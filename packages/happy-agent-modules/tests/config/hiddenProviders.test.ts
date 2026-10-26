@@ -236,7 +236,7 @@ describe("hidden providers", () => {
         const scripted = await ConfigModule.load(config.configuration.paths.happyHome, {
             inference: (real) => ({ models: real.models, providers: source }),
         });
-        const model = "openai/gpt-5.6-sol";
+        const model = "openai/gpt-6.1-sol";
         expect(scripted.visibleModels.some((entry) => entry.providerId === "router")).toBe(true);
         const router = await scripted.providers.resolve("router", model);
         expect(router).not.toBeNull();

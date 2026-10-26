@@ -13,7 +13,7 @@ export interface NamingRoute {
 /** Inexpensive models worth naming a chat with, one per vendor. */
 const ECONOMICAL_MODEL_IDS = [
     "anthropic/sonnet-5",
-    "openai/gpt-5.6-luna",
+    "openai/gpt-6-luna",
     "xai/grok-composer-2.5-fast",
 ];
 

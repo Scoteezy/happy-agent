@@ -68,7 +68,7 @@ it("routes to another real Codex account after a safe terminal credential-recove
         if (firstCredential === null) throw new Error("Missing synthetic credential.");
         const providerOptions = {
             endpoint: `${endpoint}/backend-api`,
-            model: "gpt-5.6-sol",
+            model: "gpt-6.1-sol",
             transport: "sse" as const,
             inferenceMaxRetries: 0,
         };
@@ -114,7 +114,7 @@ it("routes to another real Codex account after a safe terminal credential-recove
             { inference: (real) => ({ models: real.models, providers: accounts }) },
         );
         vi.spyOn(Math, "random").mockReturnValue(0);
-        const router = await config.providers.resolve("router", "openai/gpt-5.6-sol");
+        const router = await config.providers.resolve("router", "openai/gpt-6.1-sol");
         if (router === null) throw new Error("Missing configured router.");
         routed = await router.session("routed-codex", { instructions: "test" });
         const result: SessionEvent[] = [];

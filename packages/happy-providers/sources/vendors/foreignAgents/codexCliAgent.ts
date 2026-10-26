@@ -12,9 +12,9 @@ const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 const models: readonly ForeignAgentModel[] = [
     model("gpt-6.1-sol", "Codex · GPT-6.1 Sol", "high"),
+    model("gpt-6.1-terra", "Codex · GPT-6.1 Terra", "medium"),
     model("gpt-6-sol", "Codex · GPT-6 Sol", "high"),
     model("gpt-6-luna", "Codex · GPT-6 Luna", "medium"),
-    model("gpt-5.6-sol", "Codex · GPT-5.6 Sol", "medium"),
 ];
 
 /**

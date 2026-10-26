@@ -9,7 +9,7 @@ export const HAPPY_TOML_TEMPLATE = `# Happy configuration for Happy Agent.
 
 # [defaults]
 # provider = "codex"
-# model = "openai/gpt-5.6-sol"
+# model = "openai/gpt-6.1-sol"
 # effort = "medium"
 # permission_mode = "auto"
 # service_tier = "default"
@@ -168,9 +168,9 @@ export const HAPPY_TOML_TEMPLATE = `# Happy configuration for Happy Agent.
 # auth_file = "/absolute/path/to/auth.json"
 # base_url = "https://api.openai.com/v1"
 # transport = "auto"
-# include_models = ["openai/gpt-5.6-sol"]
+# include_models = ["openai/gpt-6.1-sol"]
 # exclude_models = []
-# include_subagent_models = ["openai/gpt-5.6-terra"]
+# include_subagent_models = ["openai/gpt-6.1-terra"]
 # exclude_subagent_models = []
 
 # [providers.claude]
@@ -204,12 +204,12 @@ export const HAPPY_TOML_TEMPLATE = `# Happy configuration for Happy Agent.
 # Model that answers bedrock_web_search. Bedrock hosts Web Search on its GPT models, in
 # us-east-1, us-east-2, and us-west-2 only. Defaults to GPT-5.6 Luna.
 # search_model = "openai/gpt-5.6-luna"
-# include_models = ["openai/gpt-5.6-sol"]
+# include_models = ["openai/gpt-6-sol"]
 # exclude_models = []
-# include_subagent_models = ["openai/gpt-5.6-sol"]
+# include_subagent_models = ["openai/gpt-6-sol"]
 # exclude_subagent_models = []
 
-# [providers.bedrock.model_overrides."openai/gpt-5.6-sol"]
+# [providers.bedrock.model_overrides."openai/gpt-6-sol"]
 # endpoint = "https://bedrock-mantle.us-east-1.api.aws"
 # region = "us-east-1"
 # transport = "mantle"
@@ -223,7 +223,7 @@ export const HAPPY_TOML_TEMPLATE = `# Happy configuration for Happy Agent.
 # strategy = "round_robin"
 # providers = ["codex-work", "codex-personal"]
 # enabled = true
-# include_subagent_models = ["openai/gpt-5.6-terra"]
+# include_subagent_models = ["openai/gpt-6.1-terra"]
 # exclude_subagent_models = []
 
 # Gemini powers the universal media and search tools rather than chat models, so it has no

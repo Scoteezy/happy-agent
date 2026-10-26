@@ -22,7 +22,7 @@ import { testConfigRootedAt } from "../support/configModule.js";
 const MODEL: AgentModel = {
     defaultEffort: "off",
     effortLevels: ["off"],
-    id: "openai/gpt-5.6-luna",
+    id: "openai/gpt-6-luna",
     name: "GPT-5.6 Luna",
     providerId: "codex",
 };

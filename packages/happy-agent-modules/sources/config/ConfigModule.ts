@@ -1531,7 +1531,7 @@ type ConfigSourceKind = "global" | "local" | "runtime";
 
 const DEFAULT_VALUES: HappyAgentConfigValues = {
     defaults: {
-        modelId: "openai/gpt-5.6-sol",
+        modelId: "openai/gpt-6.1-sol",
         permissionMode: "auto",
     },
     features: {
