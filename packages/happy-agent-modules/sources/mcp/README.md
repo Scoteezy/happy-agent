@@ -7,22 +7,25 @@ and on `UserInputModule` for MCP elicitation. It does not inspect or import MCP 
 Codex, Claude, or another model provider.
 
 The module connects enabled user-wide stdio and Streamable HTTP servers concurrently at startup.
-The first durable session in a workspace activates its workspace catalog; the last archived
-session or workspace archival releases it. Identical normalized configurations share one client
+A workspace catalog is the root `mcp.toml` of an agent's working directory, so a project workspace,
+a bot's folder, and a task's folder each have one, shared by every agent working there. The first
+durable session in a folder activates its catalog; the last archived session or workspace archival
+releases it. Identical normalized configurations share one client
 and process across catalogs. A failed server is reported as failed without preventing unrelated
 servers or the daemon from starting. A server that fails to start, or stops later, is started again
 in the background while any catalog still uses it: first after one second, then with the delay
 doubling up to five minutes. A retry runs outside every request and reload, so a slow server never
 delays a turn. `reload_mcp_servers` reconciles the caller's workspace by
 default and the user-wide catalog with `global = true`; `configure_mcp_server` updates one
-user-wide server without exposing or replacing unrelated records and then performs the same online
-reconciliation.
+user-wide server, or with `scope = "folder"` one server in the caller's folder catalog, without
+exposing or replacing unrelated records and then performs the same online reconciliation of that
+catalog.
 
 Every MCP operation remains on the shared permission surface. Catalog and resource inspection are
 intrinsically read-only but still declare the external boundary. Tool calls and prompt loading are
 reviewed in Auto mode regardless of untrusted server annotations. Configuration changes and live
-reloads are reviewed and request temporary Full access because they update global configuration
-and start external processes or network connections.
+reloads are reviewed and request temporary Full access because they update user-wide or folder
+configuration and start external processes or network connections.
 
 ## Elicitation
 

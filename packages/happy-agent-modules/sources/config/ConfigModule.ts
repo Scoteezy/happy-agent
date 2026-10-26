@@ -3503,10 +3503,7 @@ export class ConfigModule implements AgentModule {
         workspacePath: string,
         machine?: Compute,
     ): Promise<HappyAgentConfigValues["mcpServers"]> {
-        if (workspacePath.length === 0 || workspacePath.length > MAX_PATH_LENGTH) {
-            throw new Error("Workspace path is invalid.");
-        }
-        const path = join(resolve(workspacePath), "mcp.toml");
+        const path = this.workspaceMcpConfigPath(workspacePath);
         if (machine === undefined) return await readMcpConfigurationFile(path);
         let text: string;
         try {
@@ -3522,6 +3519,50 @@ export class ConfigModule implements AgentModule {
             );
         }
         return mcpServersFromSource(parseHappyAgentConfigToml(text));
+    }
+
+    /** The MCP catalog of a workspace or of a bot's or task's folder: `mcp.toml` at its root. */
+    workspaceMcpConfigPath(workspacePath: string): string {
+        if (workspacePath.length === 0 || workspacePath.length > MAX_PATH_LENGTH) {
+            throw new Error("Workspace path is invalid.");
+        }
+        return join(resolve(workspacePath), "mcp.toml");
+    }
+
+    /**
+     * Canonically add, replace, or remove one server in a folder's own catalog, on the machine the
+     * folder is on when that is not this one. Like the user's catalog, the file is rewritten from
+     * its parsed values, so comments in it do not survive.
+     */
+    async updateWorkspaceMcpServer(
+        ctx: Context,
+        workspacePath: string,
+        name: string,
+        server: HappyAgentConfigValues["mcpServers"][string] | undefined,
+        machine?: Compute,
+    ): Promise<HappyAgentConfigValues["mcpServers"]> {
+        if (name.length === 0 || name.length > 128) throw new Error("MCP server name is invalid.");
+        const path = this.workspaceMcpConfigPath(workspacePath);
+        return await this.#mcpLock.runInLock(ctx, async () => {
+            const current = structuredClone(
+                await this.readWorkspaceMcpServers(workspacePath, machine),
+            ) as Record<string, unknown>;
+            if (server === undefined) delete current[name];
+            else current[name] = structuredClone(server);
+            if (!Value.Check(resolvedValuesSchema.properties.mcpServers, current)) {
+                throw new Error("MCP server configuration is invalid.");
+            }
+            const servers = current as HappyAgentConfigValues["mcpServers"];
+            if (machine === undefined) await writeMcpConfigurationFile(path, servers);
+            else {
+                await machine.fs.writeFile(
+                    computePermissions("full_access"),
+                    path,
+                    renderMcpConfiguration(servers),
+                );
+            }
+            return deepFreeze(current) as HappyAgentConfigValues["mcpServers"];
+        });
     }
 
     /** The most recently loaded Happy-owned MCP catalog. */
@@ -3682,11 +3723,24 @@ async function writeRuntimeConfigurationFile(path: string, values: PartialValues
     }
 }
 
-/** Replace the user-owned MCP catalog atomically after rendering its normalized values. */
+/** Replace an MCP catalog file on this machine atomically after rendering its normalized values. */
 async function writeMcpConfigurationFile(
     path: string,
     servers: HappyAgentConfigValues["mcpServers"],
 ): Promise<void> {
+    const contents = renderMcpConfiguration(servers);
+    await mkdir(dirname(path), { mode: 0o700, recursive: true });
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    try {
+        await writeFile(temporary, contents, { flag: "wx", mode: 0o600 });
+        await rename(temporary, path);
+    } finally {
+        await rm(temporary, { force: true }).catch(() => undefined);
+    }
+}
+
+/** The canonical TOML for an MCP catalog, bounded like every configuration file. */
+function renderMcpConfiguration(servers: HappyAgentConfigValues["mcpServers"]): string {
     const mcpServers: TomlTable = {};
     for (const [name, server] of Object.entries(servers)) {
         mcpServers[name] =
@@ -3749,14 +3803,7 @@ async function writeMcpConfigurationFile(
     if (Buffer.byteLength(contents, "utf8") > MAX_CONFIG_FILE_BYTES) {
         throw new Error(`MCP configuration exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit.`);
     }
-    await mkdir(dirname(path), { mode: 0o700, recursive: true });
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    try {
-        await writeFile(temporary, contents, { flag: "wx", mode: 0o600 });
-        await rename(temporary, path);
-    } finally {
-        await rm(temporary, { force: true }).catch(() => undefined);
-    }
+    return contents;
 }
 
 function runtimeConfigurationTable(values: PartialValues): TomlTable {

@@ -13,8 +13,8 @@ private `.happy/agent` state does not move.
 
 Repository settings come only from `happy.toml`. Repository values win where
 both are allowed. MCP is separate: user-wide servers live in `~/Happy/Config/mcp.toml` on macOS
-or `~/happy/config/mcp.toml` on Linux, and a
-workspace can add servers in its root `mcp.toml`. Provider configuration files are not imported.
+or `~/happy/config/mcp.toml` on Linux, and a project workspace, bot folder, or task folder can
+add servers in its root `mcp.toml`. Provider configuration files are not imported.
 
 Happy Agent keeps daemon state in `~/.happy/agent`, including its databases, logs, and runtime
 configuration. A standalone deployment also keeps its private API token and socket there; team

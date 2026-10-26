@@ -18,6 +18,24 @@ Workspace `mcp.toml` is intentionally treated as trusted project configuration a
 automatically when a durable session creates demand. Tool allow/deny policy is catalog-local and
 does not split otherwise identical pooled processes.
 
+## Bots and tasks configure their own folders
+
+A bot's or task's folder was already a workspace catalog, because the catalog is keyed by the
+agent's working directory: its root `mcp.toml` loaded at the first session and after a restart, and
+reached the agents sharing that folder and no others. What was missing was a way for the agent to
+write it, since `configure_mcp_server` only changed the user-wide file, so a bot had to edit the
+protected file by hand. The tool now takes `scope = "folder"`, which rewrites the caller's folder
+catalog through the folder's machine and reconciles only that catalog under the reload lock. The
+default stays user-wide, so existing calls keep their meaning. A folder entry whose name the
+user-wide catalog uses is refused instead of being written and silently shadowed. The approval
+names the exact file, and the tool keeps its Auto review and temporary Full access, like editing
+the protected root `mcp.toml` directly.
+
+Bot settings do not withhold folder servers. They are the bot's own folder, shared by its own tree,
+so reach settings have nothing to narrow; secrets are not involved, because a server's
+configuration carries its own values. Stdio servers are processes on the host or on the folder's
+runner, so they run outside a bot's Docker container, exactly as user-wide stdio servers do.
+
 ## Invalid tools are isolated from the catalog
 
 An MCP server's tool descriptors are untrusted independently of the connection itself. Validate

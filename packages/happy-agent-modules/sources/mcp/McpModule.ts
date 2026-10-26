@@ -450,15 +450,7 @@ export class McpModule implements AgentModule {
         await this.#ensureAgentWorkspace(ctx, agentId);
         await this.#reloadLock.runInLock(ctx, async () => {
             this.#assertOpen();
-            const workspace = this.#agentWorkspaces.get(agentId);
-            if (
-                workspace === undefined ||
-                this.#archivedWorkspaces.has(workspace) ||
-                !this.#workspaceAgents.get(workspace)?.has(agentId)
-            ) {
-                throw new Error("This session is not attached to an active workspace directory.");
-            }
-            await this.#reconcileWorkspace(ctx, workspace);
+            await this.#reconcileWorkspace(ctx, this.#attachedWorkspace(agentId));
         });
     }
 
@@ -470,6 +462,54 @@ export class McpModule implements AgentModule {
         this.#assertOpen();
         await this.#config.updateMcpServer(ctx, name, server);
         await this.reload(ctx);
+    }
+
+    /**
+     * Add, replace, or remove one server in the `mcp.toml` of the calling agent's folder, which
+     * every agent in that folder shares, then reconcile only that folder's catalog.
+     */
+    async configureWorkspaceServer(
+        ctx: Context,
+        agentId: string,
+        name: string,
+        server: HappyAgentConfigValues["mcpServers"][string] | undefined,
+    ): Promise<void> {
+        this.#rememberContext(ctx);
+        this.#assertOpen();
+        assertAgentId(agentId);
+        await this.#ensureAgentWorkspace(ctx, agentId);
+        await this.#reloadLock.runInLock(ctx, async () => {
+            this.#assertOpen();
+            const workspace = this.#attachedWorkspace(agentId);
+            if (server !== undefined && this.#catalogs.get(GLOBAL_CATALOG)?.servers.has(name)) {
+                throw new Error(
+                    `The user-wide MCP catalog already has a server named "${name}", and it takes precedence over this folder's. Choose another name, or change the user-wide server instead.`,
+                );
+            }
+            const { path, runnerId } = parseWorkspaceKey(workspace);
+            await this.#config.updateWorkspaceMcpServer(
+                ctx,
+                path,
+                name,
+                server,
+                await this.#workspaceMachine(runnerId),
+            );
+            await this.#reconcileWorkspace(ctx, workspace);
+        });
+    }
+
+    /**
+     * Where the calling agent's folder catalog lives, in words an approval can show, or undefined
+     * while the agent is not attached to a folder.
+     */
+    workspaceMcpConfigLocation(agentId: string): string | undefined {
+        const workspace = this.#agentWorkspaces.get(agentId);
+        if (workspace === undefined) return undefined;
+        const { path, runnerId } = parseWorkspaceKey(workspace);
+        const file = this.#config.workspaceMcpConfigPath(path);
+        return runnerId === undefined
+            ? file
+            : `${file} on the runner ${this.#runners.displayName(runnerId)}`;
     }
 
     async close(): Promise<void> {
@@ -1456,11 +1496,28 @@ export class McpModule implements AgentModule {
     /** A workspace's own catalog, read from the machine the workspace is on. */
     async #readWorkspaceServers(workspace: string): Promise<HappyAgentConfigValues["mcpServers"]> {
         const { path, runnerId } = parseWorkspaceKey(workspace);
-        if (this.#runners.native(runnerId)) return await this.#config.readWorkspaceMcpServers(path);
         return await this.#config.readWorkspaceMcpServers(
             path,
-            await this.#runners.machine(runnerId),
+            await this.#workspaceMachine(runnerId),
         );
+    }
+
+    /** The machine a workspace's files are reached through, or undefined for this daemon's own. */
+    async #workspaceMachine(runnerId: string | undefined) {
+        return this.#runners.native(runnerId) ? undefined : await this.#runners.machine(runnerId);
+    }
+
+    /** The active workspace an agent belongs to, for changes that act on its own catalog. */
+    #attachedWorkspace(agentId: string): string {
+        const workspace = this.#agentWorkspaces.get(agentId);
+        if (
+            workspace === undefined ||
+            this.#archivedWorkspaces.has(workspace) ||
+            !this.#workspaceAgents.get(workspace)?.has(agentId)
+        ) {
+            throw new Error("This session is not attached to an active workspace directory.");
+        }
+        return workspace;
     }
 
     #assertOpen(): void {

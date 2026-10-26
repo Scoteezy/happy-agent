@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -230,6 +230,89 @@ describe("McpModule production discovery", () => {
             await workspaceEvents.create(secondWorkspace);
             await hooks.agentCreated?.(ctx, systemScope(agents), lifecycleAgent("agent-b"));
             await expect(processId(module, "agent-b", "shared")).resolves.toMatch(/^\d+$/u);
+        } finally {
+            await module.close();
+        }
+    });
+
+    it("configures servers in the calling agent's folder catalog only", async () => {
+        const root = await temporaryRoot();
+        const botFolder = join(root, "Happy/Bots/scout");
+        const otherFolder = join(root, "Happy/Bots/other");
+        const userWide = join(
+            process.platform === "darwin" ? "Happy/Config" : "happy/config",
+            "mcp.toml",
+        );
+        await write(root, userWide, providerMcp("global", "global"));
+        await mkdir(botFolder, { recursive: true });
+        await mkdir(otherFolder, { recursive: true });
+        const config = await ConfigModule.load(join(root, ".happy"));
+        const presence = new PresenceModule(config);
+        const module = mcpModule(
+            config,
+            new UserInputModule(presence),
+            new WorkspaceEvents().module,
+        );
+        const agents = new McpAgents({
+            "agent-a": botFolder,
+            "agent-b": botFolder,
+            "agent-c": otherFolder,
+        });
+        try {
+            const hooks = await resolveModuleHooks(ctx, module, agents.ref);
+            for (const id of ["agent-a", "agent-b", "agent-c"]) {
+                await hooks.agentCreated?.(ctx, systemScope(agents), lifecycleAgent(id));
+            }
+            const configure = (await hooks.tools!(ctx, scope("agent-a"))).find(
+                (tool) => tool.name === "configure_mcp_server",
+            );
+            if (configure === undefined)
+                throw new Error("The MCP configure tool was not installed.");
+            const folderSet = {
+                action: "set",
+                name: "folder_tools",
+                scope: "folder",
+                server: stdio("folder"),
+            } as const;
+            expect(configure.describeAutoPermissionAction?.(folderSet as never, ctx)).toContain(
+                join(botFolder, "mcp.toml"),
+            );
+
+            await configure.execute(ctx, folderSet, undefined as never);
+            await expect(readFile(join(botFolder, "mcp.toml"), "utf8")).resolves.toContain(
+                "[mcp_servers.folder_tools]",
+            );
+            await expect(readFile(join(root, userWide), "utf8")).resolves.not.toContain(
+                "folder_tools",
+            );
+            // Every agent in the folder shares it at once; another folder never sees it.
+            await expect(echo(module, "agent-b", "folder_tools", "shared")).resolves.toBe(
+                "folder:shared",
+            );
+            expect(
+                (await module.listServerPage(ctx, "agent-c")).servers.map(({ name }) => name),
+            ).toEqual(["global"]);
+
+            // A folder server the user-wide catalog would shadow is refused rather than ignored.
+            await expect(
+                configure.execute(
+                    ctx,
+                    { ...folderSet, name: "global", server: stdio("shadowed") },
+                    undefined as never,
+                ),
+            ).rejects.toThrow('already has a server named "global"');
+            await expect(readFile(join(botFolder, "mcp.toml"), "utf8")).resolves.not.toContain(
+                "global",
+            );
+
+            await configure.execute(
+                ctx,
+                { action: "remove", name: "folder_tools", scope: "folder" },
+                undefined as never,
+            );
+            expect(
+                (await module.listServerPage(ctx, "agent-b")).servers.map(({ name }) => name),
+            ).toEqual(["global"]);
         } finally {
             await module.close();
         }

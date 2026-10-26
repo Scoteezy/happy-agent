@@ -13,14 +13,21 @@ Configure user-wide servers in:
 ```
 
 Happy Agent creates this file with commented examples when it initializes the user configuration
-directory. A workspace may add servers in `mcp.toml` at the root of that workspace. Entries in
-`happy.toml`, Codex configuration, Claude configuration, or another provider's files are
+directory. Any session's folder may add servers of its own in `mcp.toml` at its root: a project
+workspace, a bot's folder (`~/Happy/Bots/<bot>`), or a task's folder (`~/Happy/Tasks/<task>`).
+Entries in `happy.toml`, Codex configuration, Claude configuration, or another provider's files are
 intentionally ignored.
 
 User-wide servers are available in every session: project workspaces, bots, tasks, subtasks,
-collaborators, and exported-bot conversations alike. Workspace servers are available while at least
-one unarchived session belongs to that workspace. A user-wide server wins when both catalogs use
-the same name.
+collaborators, and exported-bot conversations alike. A folder's servers are available to every
+agent working in that folder, while at least one unarchived session does. A bot's folder servers
+therefore reach the bot, its subtasks and collaborators that share its folder, and its exported-bot
+conversations, but not other bots or a subtask given a project workspace of its own. A task's folder
+servers reach the task and its subtasks that share its folder. A user-wide server wins when both
+catalogs use the same name.
+
+A folder's `mcp.toml` is read when the first session in that folder starts, including after Happy
+Agent restarts. Edits made while sessions are running take effect after a reload, described below.
 
 Each table below `[mcp_servers]` defines one server. The table name is the server's display name and
 may be quoted when it contains spaces.
@@ -87,13 +94,18 @@ environment variable for authenticated HTTP servers.
 ## Reloading without restarting
 
 After editing `mcp.toml`, ask the agent to reload the MCP servers. Models can call
-`reload_mcp_servers`, which reconciles the current workspace's file by default. Pass
-`global = true` to reconcile `~/Happy/Config/mcp.toml`. Unchanged shared connections remain live;
+`reload_mcp_servers`, which reconciles the current session's folder file by default: its project
+workspace, bot folder, or task folder. Pass `global = true` to reconcile
+`~/Happy/Config/mcp.toml`. Unchanged shared connections remain live;
 only added or changed connections start, and only connections with no remaining owner stop. The
 next model inference sees the updated tool list.
 
-Models can also call `configure_mcp_server` to add, replace, or remove one named entry. The update
-preserves unrelated servers, writes `mcp.toml` atomically, and performs the same online reload.
+Models can also call `configure_mcp_server` to add, replace, or remove one named entry. By default
+it changes `~/Happy/Config/mcp.toml`; with `scope = "folder"` it changes `mcp.toml` at the root of
+the current session's folder, so a bot or task can be given servers of its own without editing the
+file by hand. The update preserves unrelated servers, rewrites the file from its parsed entries, so
+comments in it are not kept, and performs the same online reload of that catalog. A folder entry
+whose name the user-wide catalog already uses is refused, because the user-wide server would win.
 
 Both operations require Auto or Full access. In Auto they are reviewed and receive temporary Full
 access because they may update configuration, start local processes, or connect to remote services.
@@ -118,6 +130,6 @@ Common causes are an unavailable command, a relative script path resolved from t
 a missing bearer-token environment variable, an unreachable URL, or a startup timeout that is too
 short.
 
-When troubleshooting, first confirm the entry is in the current workspace's `mcp.toml` or in
+When troubleshooting, first confirm the entry is in the current session's folder `mcp.toml` or in
 `~/Happy/Config/mcp.toml`, then ask the agent to reload the corresponding scope and list the MCP
 servers. The resulting server status includes an isolated connection error for each failed entry.

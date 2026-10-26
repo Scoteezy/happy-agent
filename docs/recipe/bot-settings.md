@@ -85,7 +85,10 @@ anything the settings do not cover, below, that matters for the user's goal.
 - Full access, and any command that leaves the sandbox, runs with the host's own reach. On the host
   machine such a command can read files outside Happy Agent's control, including its database. For
   a hard boundary, put the bot in a container and keep its agents out of Full access.
-- MCP servers keep whatever credentials their own configuration gives them.
+- MCP servers keep whatever credentials their own configuration gives them. A bot's agents use
+  the user-wide servers and the servers in the bot folder's own `mcp.toml`, whatever its settings;
+  `configure_mcp_server` with `scope = "folder"` adds one there and is reviewed in Auto. Stdio
+  servers run on the host, or on the folder's runner, not inside the bot's container.
 - The artifact catalog stays shared: a restricted bot's agents can still list and read artifacts
   made elsewhere.
 - Agents outside the bot may still message its agents; the bot's agents just cannot answer outside

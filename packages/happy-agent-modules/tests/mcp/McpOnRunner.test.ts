@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,6 +143,36 @@ describe("MCP servers on a runner", () => {
         await expect(echo(module, "hello")).resolves.toBe("on-runner:hello");
         expect(started).toEqual([
             expect.objectContaining({ command: process.execPath, args: [fixture, "on-runner"] }),
+        ]);
+    });
+
+    it("writes a runner folder's own catalog through that runner and starts its server there", async () => {
+        const { home, module, started } = await runnerWorld();
+        const workspace = join(home, "workspace");
+        await mkdir(workspace, { recursive: true });
+        const agents = agentOnRunner(workspace);
+        const hooks = await resolveModuleHooks(ctx, module, agents);
+        await hooks.agentCreated?.(
+            ctx,
+            { agents, sharedKV: {} } as never,
+            { id: "agent", metadata: undefined } as never,
+        );
+        expect(module.workspaceMcpConfigLocation("agent")).toBe(
+            `${join(workspace, "mcp.toml")} on the runner build-box`,
+        );
+
+        await module.configureWorkspaceServer(ctx, "agent", "tools", {
+            transport: "stdio",
+            command: process.execPath,
+            args: [fixture, "configured"],
+        });
+
+        await expect(readFile(join(workspace, "mcp.toml"), "utf8")).resolves.toContain(
+            "[mcp_servers.tools]",
+        );
+        await expect(echo(module, "hello")).resolves.toBe("configured:hello");
+        expect(started).toEqual([
+            expect.objectContaining({ command: process.execPath, args: [fixture, "configured"] }),
         ]);
     });
 
