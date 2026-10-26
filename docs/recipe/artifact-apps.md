@@ -52,8 +52,13 @@ that contract and is the right choice for almost every page.
    daemon's store is the source of truth.
 8. Start the page with `<link rel="stylesheet" href="/api/v1/style.css">` and leave `html` and
    `body` without a background, margin, or padding, so the page sits on the surface of whatever
-   shows it, in light and dark. An app shown inline is drawn at its full height in the reply, so give it no fixed height
-   and nothing that scrolls inside it. Keep the layout flat: no card inside a card, no stack of
+   shows it, in light and dark. An app shown inline is drawn at its full height in the reply, and the reply shifts
+   whenever that height changes, so keep the height of its first render in every state: tabs
+   sized to their tallest panel, details in a popover rather than an accordion, a long or
+   growing list or log in one scrolling region of fixed height, and room reserved for data that
+   is still loading and for empty and error states. Never hold that height with blank space or
+   size anything to the viewport; if a state needs far less room, redesign it or let the page
+   shrink. Keep the layout flat: no card inside a card, no stack of
    rounded cards, and no coloured stripe down a card's left edge. The Happy design system in
    `../DESIGN.md` has the rest.
 9. Write the page in order: CSS, then HTML, then scripts at the end of the body, which run only on

@@ -167,8 +167,20 @@ height. `update_artifact` records one change, so it says `"version"`. A missing 
 The prompt says what an inline page must look like because the default a model reaches for — a
 stack of rounded cards, tinted callouts, a coloured stripe down the left edge — is exactly what the
 master plan rules out. An inline page is part of the reply: laid on the chat with no frame or
-background, never capped and never scrolling inside. Anything that needs its own scrolling is
+background, never capped and never scrolling as a whole. Anything that needs its own scrolling is
 shown beside the chat instead.
+
+## An inline page keeps the height of its first render
+
+Kirill found it jarring that toggling a tab, expanding a section, or filtering a list in an inline
+artifact resized its frame and shifted the whole chat. The prompt now says the first render decides
+the height and every state must fit it: tabs sized to the tallest panel by stacking panels in one
+grid cell, details in a popover instead of an accordion, a long or changing list or log in one
+scrolling region of fixed height (the one exception to an inline page never scrolling), and room
+reserved for loading data, images, and empty and error states. A constant height held by padding
+is worse: content at the top over a big blank area reads as a broken, empty part of the chat. So
+large fixed or minimum heights and viewport units are ruled out, and a state that cannot be
+redesigned to a similar size lets the page shrink. `docs/DESIGN.md` §1.6 has the fuller rules.
 
 ## A live page is an artifact, not a separate presentation
 

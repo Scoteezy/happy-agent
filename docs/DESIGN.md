@@ -126,9 +126,10 @@ with the same renderer and styling as the desktop's changed-file pane and code
 blocks, so use them rather than a hand-made `<pre>` or diff table.
 
 An artifact shown inline is part of the chat's reply. The chat draws it at its
-full height and never caps it, so it is embedded content (§2.2) with **no**
-internal scrollport: no fixed heights, no `overflow: auto` regions, no frame,
-and no background of its own. Lay it out as that part of the reply would read:
+full height and never caps it, so it is embedded content (§2.2) that never
+scrolls as a whole: no fixed page height, no page-level scrollport, no frame,
+and no background of its own. The only scrolling region it may hold is the
+fixed-height one for a long or changing list or log (§1.6). Lay it out as that part of the reply would read:
 headings, prose, code, quotes, file trees, and clean visualizations, separated
 by spacing and hairlines. A stack of rounded cards, tinted callout boxes, and a
 coloured stripe down a block's left edge are never acceptable (§16).
@@ -138,6 +139,57 @@ body is inset by the app's content inset; inline it is not inset at all, so it
 lines up with the reply's text. Give `html` and `body` no margin or padding of
 your own and the page fits all three. To adapt a layout, use
 `--happy-page-inset` as a `padding` value; it may hold two lengths. This replaces the §2.5 gutters for an artifact page.
+
+### 1.6 An inline page keeps the height of its first render
+
+The chat sizes an inline artifact's frame to the page's content height. When
+that height changes — a tab switches, a section expands, a filter runs, data
+arrives — the frame grows or shrinks and the whole conversation around it
+jumps. So the page's first render decides its height, and every later state
+must fit that height.
+
+Give alternate states the same footprint:
+
+- **Tabs and segmented views** are as tall as their tallest panel. Stack the
+  panels in one grid cell and hide the inactive ones with
+  `visibility: hidden`, not `display: none`, so they still take part in sizing:
+
+    ```css
+    .panels {
+        display: grid;
+    }
+    .panels > * {
+        grid-area: 1 / 1;
+    }
+    .panels > [hidden] {
+        display: block;
+        visibility: hidden;
+    }
+    ```
+
+- **Details** open in a popover or overlay (§9.8) instead of an accordion that
+  pushes the content below it down.
+- **Long or variable lists and logs** sit in one scrolling region of fixed
+  height, the one scrollport an inline page may have (§4.4). Choose that height
+  from the content the first render shows, so the region starts full.
+- **Asynchronous content** has its room reserved before it arrives: data that
+  loads in, images (`width` and `height` attributes, or `aspect-ratio`), and the
+  empty and error states (§11), which take the space the populated view will
+  use rather than a smaller block.
+
+Do not reach a constant height by padding. A large fixed `height` or
+`min-height` that leaves blank space, or anything tied to the viewport
+(`100vh`, `min-height: 100vh`), is a defect: the frame grows to fit the content,
+so the viewport is whatever the page makes it. Content pushed to the top with a
+wide blank area below reads as a broken, empty part of the chat.
+
+Sizing to the tallest state is only half the rule: check the shortest one too.
+A short tab beside a long one, such as a paragraph of overview beside a
+200 px task list, leaves the same blank area padding would. If one state
+genuinely needs much less room than another, redesign the interaction so the
+states are similar in size — show both together, or give the smaller one
+useful content. If that is impossible, let the page shrink;
+a shift is better than an unexplained empty gap.
 
 ---
 
@@ -1829,6 +1881,9 @@ generating a web page tends to do by default.
 36. A card inside a card, or any box nested inside another box (§7.5).
 37. A thick, coloured, or rounded left border used as an accent on a card,
     callout, or quote (§7.5).
+38. An inline artifact page whose height changes as people use it — a tab, an
+    accordion, a filter, data arriving — or one that holds its height with a
+    large fixed or minimum height that leaves blank space (§1.6).
 
 ---
 
@@ -2119,6 +2174,9 @@ in **both** light and dark, at **three** container widths: **400**, **640**, and
       is 0, 4, 8, 12, 16, 24, 32, or 48 px. (Padding _inside_ a control is exempt —
       it comes from §9 verbatim.)
 - [ ] No rule anywhere uses `vh` units.
+- [ ] On an inline artifact page, `document.documentElement.scrollHeight` is
+      the same after every tab, toggle, filter, and load as at first render,
+      and no state leaves a blank area where content used to be (§1.6).
 - [ ] At 400 px wide nothing overflows horizontally
       (`document.documentElement.scrollWidth <= clientWidth`).
 - [ ] A row with a 200-character title ellipsizes and its trailing controls stay
