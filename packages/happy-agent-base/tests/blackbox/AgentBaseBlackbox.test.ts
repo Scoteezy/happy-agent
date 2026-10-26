@@ -496,8 +496,8 @@ describe("AgentBase black-box persistence and restart behavior", () => {
         await agent.send(ctx, user("question three"));
         await agent.waitForIdle();
 
-        // The trailing seeded user message is unanswered, so recovery answers it first; the
-        // follow-up waits for that response and joins the next request.
+        // The seeded history ends unanswered but no process left a run unfinished, so nothing is
+        // resumed: the new message joins the reconstructed history in one request.
         const reconstructed = [
             user("question one"),
             {
@@ -512,10 +512,9 @@ describe("AgentBase black-box persistence and restart behavior", () => {
             { role: "assistant", content: [{ type: "text", text: "after tool" }] },
             user("question two"),
         ];
-        expect(provider.sessions[0]?.requests[0]?.context.messages).toEqual(reconstructed);
-        expect(provider.sessions[0]?.requests[1]?.context.messages).toEqual([
+        expect(provider.sessions[0]?.requests).toHaveLength(1);
+        expect(provider.sessions[0]?.requests[0]?.context.messages).toEqual([
             ...reconstructed,
-            { role: "assistant", content: [{ type: "text", text: "new answer" }] },
             user("question three"),
         ]);
         await agent.close();

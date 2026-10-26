@@ -1,5 +1,17 @@
 # Agent Base learnings
 
+## A settled prompt is not an interrupted run
+
+A stopped turn settles like any other: its pending record is erased and no reply is recorded, so
+the conversation ends with the person's prompt. Recovery read that shape alone as a cut-off run.
+After a restart, the next message activated the agent, the stopped prompt was streamed again, and
+the new message waited behind it.
+
+Recovery now resumes from the transcript's shape only when an earlier process left its pending
+record, or when the owner calls `start`. A new message never waits behind a prompt whose run
+already settled. `create` also reads the inherited record before its first claim, as `load` does,
+so an agent's own claim is never mistaken for an earlier process's unfinished work.
+
 ## Completed SQLite transactions return their connection to the upstream pool
 
 The older libSQL client handed its connection to each transaction without taking it back,

@@ -550,6 +550,12 @@ export class AgentBase {
      */
     #recoveryChecked = false;
     /**
+     * Whether the owner called `start` to carry on whatever the loaded conversation still owes.
+     * Without it, only a run an earlier process left unfinished is resumed: a new message must
+     * never wait behind a prompt whose run already settled, as a stopped one does.
+     */
+    #resumeRequested = false;
+    /**
      * Whether this instance has told its listeners to drop a block an earlier process was still
      * streaming. It is decided from the inherited record alone, before this instance writes any
      * record of its own.
@@ -1092,6 +1098,16 @@ export class AgentBase {
         // This instance already recorded the current run, so the work is already owed and
         // nothing here can be an activation.
         if (this.#pendingWritten === serialized) return false;
+        // What an earlier process left is read before this write replaces it, so the record
+        // this activation writes is never mistaken for an interrupted run.
+        if (!this.#inheritedRead) {
+            this.#inheritedRead = true;
+            this.#inherited = await agentBasePendingStateOf(txCtx, this.#persistence);
+            this.#restoreActivationOwed =
+                this.#inherited !== undefined &&
+                !this.#activationAnnounced &&
+                this.#hooks.afterAgentActivatedTransact !== undefined;
+        }
         let created = await this.#persistence.writeValueIfAbsent(
             txCtx,
             AGENT_BASE_PENDING_KEY,
@@ -1581,6 +1597,7 @@ export class AgentBase {
      */
     start(): void {
         if (this.#closed) throw new Error("The agent has been closed.");
+        this.#resumeRequested = true;
         this.#startRun();
     }
 
@@ -3222,7 +3239,12 @@ export class AgentBase {
      * rule already by `#resetInterruptedResponse`, before this run wrote anything.
      */
     async #resumesInterruptedRun(ctx: Context): Promise<boolean> {
-        const owed = this.#lastRecordOwesResponse();
+        // A run an earlier process left unfinished is resumed, and so is whatever the conversation
+        // owes when the owner calls `start`. A run that settled, an aborted one included, left no
+        // record, so a new message is not held behind the prompt it stopped.
+        const owed =
+            (this.#inherited !== undefined || this.#resumeRequested) &&
+            this.#lastRecordOwesResponse();
         if (owed && !this.#interruptionChecked && this.#inherited?.stage === "inference") {
             await this.#emit(ctx, { type: "block_reset" });
         }

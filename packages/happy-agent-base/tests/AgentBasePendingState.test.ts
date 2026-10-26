@@ -171,6 +171,51 @@ describe("durable pending state", () => {
         await restarted.close();
     });
 
+    it("does not answer a prompt again whose run settled before the restart", async () => {
+        // A stopped turn settles like any other, so it leaves its prompt last in the conversation
+        // and no pending record. The next process owes it nothing.
+        const persistence = new InMemoryPersistence([userRecord("stopped question")]);
+        const provider = new ScriptedProvider([textTurn("answer")]);
+        const restarted = await AgentBase.load(ctx, {
+            id: "stopped-before-restart",
+            providers: providersOf(provider),
+            provider: "scripted",
+            persistence,
+        });
+
+        await restarted.send(ctx, user("something else"));
+        await restarted.waitForIdle();
+
+        const requests = provider.sessions.flatMap((session) => session.requests);
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.context.messages.at(-1)).toEqual(user("something else"));
+        await restarted.close();
+    });
+
+    it("still answers a prompt a crashed run left before a newer message", async () => {
+        const persistence = new InMemoryPersistence([userRecord("interrupted question")]);
+        persistence.values.set(AGENT_BASE_PENDING_KEY, {
+            stage: "inference",
+            loopId: LOOP_ID,
+        });
+        const provider = new ScriptedProvider([textTurn("recovered"), textTurn("answer")]);
+        const restarted = await AgentBase.load(ctx, {
+            id: "crashed-before-restart",
+            providers: providersOf(provider),
+            provider: "scripted",
+            persistence,
+        });
+
+        await restarted.send(ctx, user("newer message"));
+        await restarted.waitForIdle();
+
+        const requests = provider.sessions.flatMap((session) => session.requests);
+        expect(requests[0]?.context.messages.at(-1)).toEqual(user("interrupted question"));
+        expect(requests.at(-1)?.context.messages).toContainEqual(user("newer message"));
+        expect(await agentBaseStoreOwesWork(ctx, persistence)).toBe(false);
+        await restarted.close();
+    });
+
     it("commits what a settling hook writes together with the settlement itself", async () => {
         const persistence = new InMemoryPersistence();
         const provider = new ScriptedProvider([textTurn("answer")]);
