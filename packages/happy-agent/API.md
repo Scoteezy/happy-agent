@@ -351,6 +351,10 @@ Sidebar proposals are additive on the same terms. A daemon that serves the propo
 `404`. A client that predates proposals skips the `"agent"` row, as it skips every row of a kind it
 does not know, and shows a `sidebar_proposal` artifact as it shows every artifact type it does not
 know.
+Separator pins are additive on the same terms. A daemon that accepts `pin` on `happy-separator`,
+on an inserted separator, and in `set` reports `capabilities.sidebarSeparatorPins: true` from
+health. Older daemons omit it and refuse a pin with `400 invalid_request`; clients then offer no
+pinning.
 
 Surfaces are additive and do not increment the protocol version. Clients detect them through
 `GET /v0/surfaces`: `404` or `501` means Surface support is unavailable. The desktop bootstrap
@@ -1144,6 +1148,7 @@ Fields:
   `space.sidebar.changed`, described under Spaces. `sidebarAttachments: true` advertises spaces
   attached under rows and the `attach_to_my_row` tool, described under Spaces.
   `sidebarProposals: true` advertises sidebar proposals and Prioritizing's own row, described
+  under Spaces. `sidebarSeparatorPins: true` advertises `pin` on sidebar separators, described
   under Spaces.
 - `ready` — `false` while starting, `true` once the agent system is loaded.
 - `status` — `"starting"` or `"ready"`; the human-readable form of `ready`.
@@ -9869,8 +9874,10 @@ moved by the person anywhere in that list:
   up to the next `happy-section` or `happy-separator`. The heading and those items form the
   section's block, which moves as one unit. `label` is required, 1–256 characters, and not only
   whitespace. `collapsed="true"` folds those items. A section has no children.
-- `<happy-separator id="…"/>` — a plain visual rule with no title. It cannot fold and accepts no
-  attribute other than `id`; it ends the run of the section above it.
+- `<happy-separator id="…" pin="top|bottom"/>` — a plain visual rule with no title. It cannot fold
+  and accepts no attribute other than `id` and `pin`; it ends the run of the section above it.
+  `pin` is optional and absent when unpinned: `pin="top"` keeps everything above the separator in
+  place, `pin="bottom"` everything below it. Any other value is rejected. The pin is the person's.
 - `<happy-space id="…" expanded="true" fold-ribbon="hover|always">` — a row. A `happy-space` that
   is a direct child of `nav` names one of the person's spaces by space ID. A `happy-space` may
   contain only `happy-space` elements. A nested one names either a session by agent ID, whose
@@ -10016,7 +10023,7 @@ The operations:
 
 - `{ "type": "insert", "node": …, "to": … }` adds one node. `node` is
   `{ "type": "space", "id", "expanded"?, "foldRibbon"? }`,
-  `{ "type": "section", "id", "label", "collapsed"? }`, `{ "type": "separator", "id" }`, or
+  `{ "type": "section", "id", "label", "collapsed"? }`, `{ "type": "separator", "id", "pin"? }`, or
   `{ "type": "widget", "id", "html" }`. A row's nested sessions are inserted one by one after it.
   Search and Create cannot be inserted.
 - `{ "type": "move", "id", "to" }` moves a node with everything nested in it. Moving a section
@@ -10026,9 +10033,9 @@ The operations:
   removes only its heading; the items of its block join the block above. Search, Create, and `nav`
   cannot be removed.
 - `{ "type": "set", "id", … }` changes a node's switches and text: `collapsed` and `label` on a
-  section, `expanded` and `foldRibbon` on a row or session, `foldRibbon` on `nav`, and `html` on a
-  widget. `foldRibbon: null` returns to the default. At least one field; a field the node's kind
-  does not have is invalid.
+  section, `pin` on a separator, `expanded` and `foldRibbon` on a row or session, `foldRibbon` on
+  `nav`, and `html` on a widget. `foldRibbon: null` returns to the default; `pin: null` unpins. At
+  least one field; a field the node's kind does not have is invalid.
 
 Every operation must keep the document within the grammar as it applies: where each kind may
 stand, unique IDs, depth, element count, and size. The batch's result must also satisfy the
@@ -10103,7 +10110,9 @@ keeps Prioritizing from folding it.
 Prioritizing never overrides the person: an operation of Prioritizing's that would change an aspect
 the person last set, or would hide a session whose place the person last set, is dropped, as is one
 that breaks Prioritizing's other rules below, and the rest of its batch still applies. Each dropped operation is reported to Prioritizing in a note. The
-person's operations are never dropped.
+person's operations are never dropped. A separator's `pin` is only ever the person's: an operation
+of Prioritizing's that sets, changes, or clears a pin, or inserts a pinned separator, is dropped, in
+its batches and in its proposals alike, so accepting a proposal never changes a pin.
 
 #### Changes and events
 
@@ -10420,9 +10429,9 @@ absent, nested, or inside a collapsed section, they are inserted immediately aft
 with everything nested under them. Lifecycle changes publish `space.sidebar.changed` and ordinary
 artifact events.
 
-Prioritizing never undoes the person's moves, folds, names, fold ribbons, or widgets, and never
-hides a session the person revealed; an item that comes to sit under a different section or
-separator counts as moved. Moves are attributed at block level: when a section's block changes
+Prioritizing never undoes the person's moves, folds, names, fold ribbons, or widgets, never sets a
+separator's pin, and never hides a session the person revealed; an item that comes to sit under a
+different section or separator counts as moved. Moves are attributed at block level: when a section's block changes
 position, its heading counts as moved and its rows as carried, so a person's section drag protects
 the section, not each row. What else its batches may change is set out under "What applies without
 a proposal"; everything beyond that is dropped with a note and belongs in a proposal. Everything

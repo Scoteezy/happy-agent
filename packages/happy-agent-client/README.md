@@ -374,7 +374,9 @@ the very functions the daemon uses: `parseSpaceSidebar()` and `formatSpaceSideba
 the document's canonical form, `applySpaceSidebarOperations()` applies a batch (apply unconfirmed
 batches on top of the last confirmed version to draw optimistically, and replay change events with
 it), and `diffSpaceSidebar()` turns a whole edited document into operations. Older daemons take
-whole documents through `updateSpaceSidebar()`.
+whole documents through `updateSpaceSidebar()`. When health also reports
+`capabilities.sidebarSeparatorPins`, a separator may carry `pin: "top"` or `pin: "bottom"`, set
+with `{ type: "set", id, pin }` and cleared with `pin: null`; the pin is the person's.
 
 Artifacts are additive without a protocol bump. Detect support through `listArtifacts()`: `404`
 means the daemon has no artifacts. The catalog is global and pages newest-created first; filter it by

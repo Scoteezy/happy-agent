@@ -243,6 +243,16 @@ export const spaceSidebarFoldRibbonSchema = Type.Union([
 ]);
 export type SpaceSidebarFoldRibbon = Static<typeof spaceSidebarFoldRibbonSchema>;
 
+/**
+ * Where the person pinned a separator: `"top"` keeps everything above it in place, `"bottom"`
+ * everything below it. An unpinned separator has no `pin`.
+ */
+export const spaceSidebarSeparatorPinSchema = Type.Union([
+    Type.Literal("top"),
+    Type.Literal("bottom"),
+]);
+export type SpaceSidebarSeparatorPin = Static<typeof spaceSidebarSeparatorPinSchema>;
+
 /** A section heading's title: 1–256 characters, not only whitespace. */
 export const spaceSidebarLabelSchema = Type.String({
     minLength: 1,
@@ -279,7 +289,11 @@ export const spaceSidebarItemSchema = Type.Union([
         label: spaceSidebarLabelSchema,
         collapsed: Type.Boolean(),
     }),
-    Type.Object({ type: Type.Literal("separator"), id: spaceSidebarIdSchema }),
+    Type.Object({
+        type: Type.Literal("separator"),
+        id: spaceSidebarIdSchema,
+        pin: Type.Optional(spaceSidebarSeparatorPinSchema),
+    }),
     spaceSidebarSpaceNodeSchema,
     Type.Object({
         type: Type.Literal("widget"),
@@ -328,7 +342,11 @@ export const spaceSidebarNewNodeSchema = Type.Union([
         { additionalProperties: false },
     ),
     Type.Object(
-        { type: Type.Literal("separator"), id: spaceSidebarIdSchema },
+        {
+            type: Type.Literal("separator"),
+            id: spaceSidebarIdSchema,
+            pin: Type.Optional(spaceSidebarSeparatorPinSchema),
+        },
         { additionalProperties: false },
     ),
     Type.Object(
@@ -345,8 +363,8 @@ export type SpaceSidebarNewNode = Static<typeof spaceSidebarNewNodeSchema>;
 /**
  * One change to the sidebar document, keyed by node ID. Moving a section moves its block: the
  * heading and every item after it up to the next section or separator. Removing a section removes
- * only its heading. `set` changes `collapsed` and `label` on a section, `expanded` and `foldRibbon`
- * on a row or session, `foldRibbon` on `nav`, and `html` on a widget.
+ * only its heading. `set` changes `collapsed` and `label` on a section, `pin` on a separator,
+ * `expanded` and `foldRibbon` on a row or session, `foldRibbon` on `nav`, and `html` on a widget.
  */
 export const spaceSidebarOperationSchema = Type.Union([
     Type.Object(
@@ -374,6 +392,8 @@ export const spaceSidebarOperationSchema = Type.Union([
             expanded: Type.Optional(Type.Boolean()),
             /** `null` returns to the default. */
             foldRibbon: Type.Optional(Nullable(spaceSidebarFoldRibbonSchema)),
+            /** `null` unpins. */
+            pin: Type.Optional(Nullable(spaceSidebarSeparatorPinSchema)),
             html: Type.Optional(spaceSidebarWidgetHtmlSchema),
         },
         { additionalProperties: false },

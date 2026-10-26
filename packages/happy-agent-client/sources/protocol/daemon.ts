@@ -168,6 +168,8 @@ export const healthResponseSchema = Type.Object({
              * as `sidebar_proposal` artifacts, served under `/v0/spaces/sidebar/proposals`.
              */
             sidebarProposals: Type.Optional(Type.Boolean()),
+            /** True when a sidebar separator may be pinned with `pin="top"` or `pin="bottom"`. */
+            sidebarSeparatorPins: Type.Optional(Type.Boolean()),
             /**
              * True when the daemon serves `/v0/stories`, the `story` artifact type, `draft_story`,
              * and `story.*` events. A person with Stories off still receives `404` from them.

@@ -16,6 +16,7 @@ import {
     spaceSidebarFoldRibbonSchema,
     spaceSidebarIdSchema,
     spaceSidebarLabelSchema,
+    spaceSidebarSeparatorPinSchema,
     type SidebarDiagnostic,
     type SpaceSidebarDocument,
     type SpaceSidebarItem,
@@ -63,7 +64,10 @@ const ATTRIBUTES: Record<string, TObject> = {
         { id: spaceSidebarIdSchema, label: spaceSidebarLabelSchema, collapsed: switchSchema },
         { additionalProperties: false },
     ),
-    "happy-separator": Type.Object({ id: spaceSidebarIdSchema }, { additionalProperties: false }),
+    "happy-separator": Type.Object(
+        { id: spaceSidebarIdSchema, pin: Type.Optional(spaceSidebarSeparatorPinSchema) },
+        { additionalProperties: false },
+    ),
     "happy-space": Type.Object(
         { id: spaceSidebarIdSchema, expanded: switchSchema, "fold-ribbon": foldRibbonAttribute },
         { additionalProperties: false },
@@ -257,8 +261,14 @@ function documentOf(root: Element): SpaceSidebarDocument {
                     label: node.attrs["label"]!,
                     collapsed: node.attrs["collapsed"] === "true",
                 };
-            case "happy-separator":
-                return { type: "separator", id: identify(node) };
+            case "happy-separator": {
+                const pin = node.attrs["pin"];
+                return {
+                    type: "separator",
+                    id: identify(node),
+                    ...(pin === "top" || pin === "bottom" ? { pin } : {}),
+                };
+            }
             case "happy-widget":
                 return { type: "widget", id: identify(node), html: node.content };
             default:
@@ -337,7 +347,9 @@ export function formatSpaceSidebar(
                     node.collapsed ? attribute("collapsed", "true") : ""
                 }/>\n`;
             case "separator":
-                return `  <happy-separator${attribute("id", node.id)}/>\n`;
+                return `  <happy-separator${attribute("id", node.id)}${
+                    node.pin === undefined ? "" : attribute("pin", node.pin)
+                }/>\n`;
             case "widget":
                 if (options.widgets === false) return "";
                 return node.html === ""

@@ -253,7 +253,7 @@ describe("spaces protocol", () => {
                 ready: true,
                 status: "ready",
                 version: { protocol: 32, daemon: "1.0.0" },
-                capabilities: { sidebarProposals: true },
+                capabilities: { sidebarProposals: true, sidebarSeparatorPins: true },
             }),
         ).toBe(true);
     });

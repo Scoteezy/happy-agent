@@ -410,7 +410,12 @@ describe("diffSpaceSidebar", () => {
                         label: pick(["A", "B"]),
                         collapsed: random() < 0.5,
                     });
-                else if (kind === "separator") items.push({ type: "separator", id });
+                else if (kind === "separator")
+                    items.push({
+                        type: "separator",
+                        id,
+                        ...(random() < 0.3 ? { pin: pick(["top", "bottom"] as const) } : {}),
+                    });
                 else if (kind === "widget")
                     items.push({ type: "widget", id, html: pick(["<p>a</p>", ""]) });
                 else
@@ -478,6 +483,11 @@ describe("diffSpaceSidebar", () => {
                     }
                 }
             }
+            for (const item of next.items)
+                if (item.type === "separator" && random() < 0.2) {
+                    if (item.pin === undefined) item.pin = pick(["top", "bottom"] as const);
+                    else delete item.pin;
+                }
             if (random() < 0.3) next.foldRibbon = "always";
             else delete next.foldRibbon;
             return read(formatSpaceSidebar(next));
@@ -494,6 +504,132 @@ describe("diffSpaceSidebar", () => {
                 }),
             ).toBe(formatSpaceSidebar(proposal));
         }
+    });
+});
+
+describe("separator pins", () => {
+    const sidebar = (separator: string) =>
+        [
+            "<nav>",
+            "  <happy-search/>",
+            "  <happy-create/>",
+            '  <happy-space id="happy"/>',
+            `  ${separator}`,
+            '  <happy-space id="android"/>',
+            "</nav>",
+            "",
+        ].join("\n");
+
+    it.each(["top", "bottom"] as const)("round-trips pin=%s after the ID", (pin) => {
+        const html = sidebar(`<happy-separator id="divider" pin="${pin}"/>`);
+        const document = read(html);
+        expect(document.items[3]).toEqual({ type: "separator", id: "divider", pin });
+        expect(formatSpaceSidebar(document)).toBe(html);
+        // Any valid spelling reads the same, and writes the pin after the ID.
+        expect(
+            formatSpaceSidebar(read(sidebar(`<happy-separator pin='${pin}' id="divider"/>`))),
+        ).toBe(html);
+    });
+
+    it("leaves an unpinned separator without a pin", () => {
+        const html = sidebar('<happy-separator id="divider"/>');
+        const document = read(html);
+        expect(document.items[3]).toEqual({ type: "separator", id: "divider" });
+        expect(document.items[3]).not.toHaveProperty("pin");
+        expect(formatSpaceSidebar(document)).toBe(html);
+    });
+
+    it.each(['pin="left"', 'pin=""', 'pin="TOP"', 'pin="top" pin="bottom"'])(
+        "refuses %s",
+        (attribute) => {
+            expect(() => read(sidebar(`<happy-separator id="divider" ${attribute}/>`))).toThrow(
+                SpaceSidebarError,
+            );
+        },
+    );
+
+    it("pins, repins, and unpins with set, and inserts a pinned separator", () => {
+        const base = read(sidebar('<happy-separator id="divider"/>'));
+        const pinned = applySpaceSidebarOperations(base, [
+            { type: "set", id: "divider", pin: "top" },
+        ]);
+        expect(pinned.document.items[3]).toEqual({ type: "separator", id: "divider", pin: "top" });
+        const again = applySpaceSidebarOperations(pinned.document, [
+            { type: "set", id: "divider", pin: "top" },
+        ]);
+        expect(again.operations).toEqual([]);
+        const unpinned = applySpaceSidebarOperations(pinned.document, [
+            { type: "set", id: "divider", pin: null },
+        ]);
+        expect(formatSpaceSidebar(unpinned.document)).toBe(formatSpaceSidebar(base));
+        expect(
+            applySpaceSidebarOperations(base, [{ type: "set", id: "divider", pin: null }])
+                .operations,
+        ).toEqual([]);
+        const inserted = applySpaceSidebarOperations(base, [
+            {
+                type: "insert",
+                node: { type: "separator", id: "floor", pin: "bottom" },
+                to: { after: "android" },
+            },
+        ]);
+        expect(formatSpaceSidebar(inserted.document)).toContain(
+            '<happy-separator id="floor" pin="bottom"/>',
+        );
+        // Only a separator has a pin.
+        expect(() =>
+            applySpaceSidebarOperations(base, [{ type: "set", id: "android", pin: "top" }]),
+        ).toThrow(SpaceSidebarOperationError);
+        expect(() =>
+            applySpaceSidebarOperations(base, [{ type: "set", id: "divider", collapsed: true }]),
+        ).toThrow(SpaceSidebarOperationError);
+    });
+
+    it("diffs a pin change into one set", () => {
+        const unpinned = read(sidebar('<happy-separator id="divider"/>'));
+        const pinned = read(sidebar('<happy-separator id="divider" pin="bottom"/>'));
+        expect(diffSpaceSidebar(unpinned, pinned)).toEqual([
+            { type: "set", id: "divider", pin: "bottom" },
+        ]);
+        expect(diffSpaceSidebar(pinned, unpinned)).toEqual([
+            { type: "set", id: "divider", pin: null },
+        ]);
+        const added = read(
+            sidebar('<happy-separator id="divider"/>\n  <happy-separator id="floor" pin="top"/>'),
+        );
+        expect(diffSpaceSidebar(unpinned, added)).toEqual([
+            {
+                type: "insert",
+                node: { type: "separator", id: "floor", pin: "top" },
+                to: { after: "divider" },
+            },
+        ]);
+    });
+
+    it("validates pins on the wire", () => {
+        const batch = (operation: unknown) =>
+            Value.Check(spaceSidebarOperationsRequestSchema, {
+                mutationId: "pin-1",
+                baseVersion: 1,
+                operations: [operation],
+            });
+        expect(batch({ type: "set", id: "divider", pin: "top" })).toBe(true);
+        expect(batch({ type: "set", id: "divider", pin: null })).toBe(true);
+        expect(batch({ type: "set", id: "divider", pin: "left" })).toBe(false);
+        expect(
+            batch({
+                type: "insert",
+                node: { type: "separator", id: "s", pin: "bottom" },
+                to: { parent: null },
+            }),
+        ).toBe(true);
+        expect(
+            batch({
+                type: "insert",
+                node: { type: "separator", id: "s", pin: "" },
+                to: { parent: null },
+            }),
+        ).toBe(false);
     });
 });
 

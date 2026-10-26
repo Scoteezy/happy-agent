@@ -241,6 +241,7 @@ function set(
     const allowed: Record<string, readonly string[]> = {
         nav: ["foldRibbon"],
         section: ["label", "collapsed"],
+        separator: ["pin"],
         space: ["expanded", "foldRibbon"],
         widget: ["html"],
     };
@@ -253,7 +254,7 @@ function set(
     const changed: Record<string, unknown> = {};
     for (const field of given) {
         const value = fields[field];
-        if (field === "foldRibbon" && value === null) {
+        if ((field === "foldRibbon" || field === "pin") && value === null) {
             if (node[field] === undefined) continue;
             delete node[field];
         } else {
@@ -355,7 +356,11 @@ function nodeOf(node: SpaceSidebarNewNode): Node {
                 collapsed: node.collapsed === true,
             };
         case "separator":
-            return { type: "separator", id: node.id };
+            return {
+                type: "separator",
+                id: node.id,
+                ...(node.pin === undefined ? {} : { pin: node.pin }),
+            };
         case "widget":
             return { type: "widget", id: node.id, html: node.html };
     }

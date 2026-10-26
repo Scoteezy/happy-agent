@@ -243,7 +243,11 @@ function newNode(node: Node): SpaceSidebarNewNode {
                 ...(node.collapsed ? { collapsed: true } : {}),
             };
         case "separator":
-            return { type: "separator", id: node.id };
+            return {
+                type: "separator",
+                id: node.id,
+                ...(node.pin === undefined ? {} : { pin: node.pin }),
+            };
         case "widget":
             return { type: "widget", id: node.id, html: node.html };
         case "search":
@@ -265,6 +269,8 @@ function changedFields(now: Node, wanted: Node): Record<string, unknown> {
                 ? {}
                 : { foldRibbon: wanted.foldRibbon ?? null }),
         };
+    if (now.type === "separator" && wanted.type === "separator" && now.pin !== wanted.pin)
+        return { pin: wanted.pin ?? null };
     if (now.type === "widget" && wanted.type === "widget" && now.html !== wanted.html)
         return { html: wanted.html };
     return {};
