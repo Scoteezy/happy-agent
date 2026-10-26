@@ -253,6 +253,14 @@ describe("Happy Agent platform API", () => {
                         : undefined;
                 }, "graceful shutdown health");
                 expect(health).toMatchObject({
+                    // A shutdown without a drain is going away for good, and says so.
+                    drain: {
+                        cause: "api",
+                        currentVersion: "gym",
+                        intent: "shutdown",
+                        startedAt: expect.any(Number),
+                        targetVersion: null,
+                    },
                     healthy: true,
                     ready: true,
                     shuttingDown: true,
@@ -319,6 +327,7 @@ describe("Happy Agent platform API", () => {
             expect(helloData).toMatchObject({
                 daemonId: expect.any(String),
                 daemonStartedAt: expect.any(Number),
+                drain: null,
                 draining: false,
             });
             const daemonId = helloData?.daemonId;
@@ -339,18 +348,46 @@ describe("Happy Agent platform API", () => {
                 });
                 await started;
 
-                await expect(gym.client.drain()).resolves.toMatchObject({
+                expect((await gym.client.getHealth()).drain).toBeNull();
+                // A drain that cannot be recorded is refused before the daemon starts draining.
+                await expect(
+                    gym.client.drain({
+                        intent: "shutdown",
+                        targetVersion: "9.9.9",
+                    } as unknown as Parameters<typeof gym.client.drain>[0]),
+                ).rejects.toMatchObject({ code: "invalid_request", status: 400 });
+                expect((await gym.client.getHealth()).draining).toBe(false);
+
+                const restart = {
+                    cause: "update",
+                    currentVersion: "gym",
+                    intent: "restart",
+                    startedAt: expect.any(Number),
+                    targetVersion: "9.9.9",
+                };
+                await expect(
+                    gym.client.drain({
+                        cause: "update",
+                        intent: "restart",
+                        targetVersion: "9.9.9",
+                    }),
+                ).resolves.toMatchObject({
+                    drain: restart,
                     draining: true,
                     pid: expect.any(Number),
                 });
-                await expect(gym.client.drain()).resolves.toMatchObject({ draining: true });
+                // The first drain decides; a retry that says otherwise gets the recorded one.
+                await expect(gym.client.drain()).resolves.toMatchObject({
+                    drain: restart,
+                    draining: true,
+                });
                 const drainFrame = await stream.waitFor(
                     (frame) => frame.event === "daemon.draining",
                     "the ordered daemon drain event",
                 );
                 expect(drainFrame.id).toEqual(expect.any(String));
                 expect(clientFrameEvent(drainFrame)).toMatchObject({
-                    payload: { daemonId, draining: true },
+                    payload: { daemonId, drain: restart, draining: true },
                     type: "daemon.draining",
                 });
 
@@ -362,6 +399,7 @@ describe("Happy Agent platform API", () => {
                     );
                     expect(stickyHello?.data).toMatchObject({
                         daemonId,
+                        drain: restart,
                         draining: true,
                     });
                 } finally {
@@ -383,6 +421,7 @@ describe("Happy Agent platform API", () => {
                         : undefined;
                 }, "the daemon to report its in-flight inference");
                 expect(draining).toMatchObject({
+                    drain: restart,
                     draining: true,
                     healthy: true,
                     ready: true,

@@ -13,7 +13,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@slopus/happy-agent-client", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@slopus/happy-agent-client")>()),
     HappyAgentClient: class {
-        getHealth = async () => ({ healthy: true, ready: true });
+        getHealth = async () => ({
+            healthy: true,
+            ready: true,
+            version: { daemon: "0.0.1-older", protocol: 22 },
+        });
     },
 }));
 vi.mock("../sources/lifecycle/daemonToken.js", () => ({
@@ -76,6 +80,35 @@ it("keeps an external reload synchronous through replacement startup", async () 
         mocks.ensure.mock.invocationCallOrder[0]!,
     );
     expect(await reloadStatus()).toMatchObject({ format: 1, phase: "done", pid: process.pid });
+});
+
+it("tells every client a reload is a restart into this command's own version", async () => {
+    const { runAgentDaemonCommand } = await import("../sources/lifecycle/runAgentDaemonCommand.js");
+    const { getDaemonIdentity } = await import("../sources/lifecycle/getDaemonIdentity.js");
+    mocks.pid.mockResolvedValue(2_147_483_647);
+
+    await runAgentDaemonCommand("reload", { log: () => undefined });
+
+    // The running daemon is another version, so this reload is an update into the CLI's own.
+    expect(mocks.stop.mock.calls[0]?.[2]).toMatchObject({
+        drain: {
+            cause: "update",
+            intent: "restart",
+            targetVersion: getDaemonIdentity().version,
+        },
+    });
+});
+
+it("tells every client a stop is a shutdown nothing replaces", async () => {
+    const { runAgentDaemonCommand } = await import("../sources/lifecycle/runAgentDaemonCommand.js");
+    mocks.pid.mockResolvedValue(2_147_483_647);
+
+    await runAgentDaemonCommand("stop", { log: () => undefined });
+
+    expect(mocks.stop.mock.calls[0]?.[2]).toMatchObject({
+        drain: { cause: "stop", intent: "shutdown" },
+    });
+    expect(mocks.ensure).not.toHaveBeenCalled();
 });
 
 it("reports the drain, stop, and start phases a reload passes through", async () => {

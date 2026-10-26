@@ -123,7 +123,17 @@ export async function runAgentDaemonCommand(
         try {
             if (connection !== undefined) {
                 await recordStopIntentForRecordedDaemon(paths);
+                const targetVersion = getDaemonIdentity().version;
                 await stopLocalProtocolServer(connection.client, paths, {
+                    // The replacement is this command's own executable, so its version is known.
+                    drain: {
+                        cause:
+                            connection.health.version.daemon === targetVersion
+                                ? "reload"
+                                : "update",
+                        intent: "restart",
+                        targetVersion,
+                    },
                     onDrainProgress: log,
                     onDrainWaiting: (waiting) => status.draining(waiting),
                     onStopping: () => status.phase("stopping"),
@@ -193,6 +203,7 @@ export async function runAgentDaemonCommand(
     log("Daemon is stopping.");
     await recordStopIntentForRecordedDaemon(paths);
     await stopLocalProtocolServer(connection.client, paths, {
+        drain: { cause: "stop", intent: "shutdown" },
         onDrainProgress: log,
         onExitedWhileDraining: () => log("The daemon exited while draining."),
     });

@@ -136,3 +136,17 @@ release's own version, even when that blocks a downgrade that would have worked:
 daemon is safe, and handing data to an older one is not. The stamp is advisory only; the
 migration ledger inside each database decides. The supervisor and the CLI read the stamp through
 `@slopus/happy-agent-modules/data-version`, so neither loads the runtime.
+
+## Every drain says whether the daemon is coming back
+
+A CLI reload looked like a dead daemon to every Desktop window that had not started it: the drain
+said nothing about why. The first drain or shutdown of a process now records a drain object at the
+API module's single drain entry, before admission closes: `intent` restart or shutdown, a `cause`,
+the daemon's own version, and the version a restart will start. `reload`, and its `--detach`
+worker, sends restart with the CLI's own version, since the replacement is that executable, with
+`update` as the cause when it differs from the running daemon. `stop` sends shutdown; the drain
+signal and SIGTERM record shutdown by signal, and `POST /v0/shutdown` without a drain records
+shutdown through the API. Health, the stream hello, and `daemon.draining` carry it; nothing is
+persisted. Desktop's own installer still drains without a body, so other clients see its restarts
+as shutdowns until the Electron host passes an intent. How long a client waits for a replacement
+is the client's policy; the daemon promises nothing about it.

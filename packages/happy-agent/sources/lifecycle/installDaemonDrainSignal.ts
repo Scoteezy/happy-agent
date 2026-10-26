@@ -37,7 +37,7 @@ export async function installDaemonDrainSignal(
             return;
         }
         work = (async () => {
-            daemon.drain();
+            daemon.drain({ cause: "signal", intent: "shutdown" });
             let previous = "";
             while (!stopped) {
                 const waitingFor = [...daemon.drainProgress()];

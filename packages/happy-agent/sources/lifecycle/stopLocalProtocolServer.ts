@@ -1,5 +1,6 @@
 import {
     HappyAgentApiError,
+    type DrainRequest,
     type DrainWaitingAgent,
     type DrainWaitingFor,
     type HappyAgentClient,
@@ -20,6 +21,8 @@ const DRAIN_POLL_INTERVAL_MS = 100;
 const DRAIN_MUTATION_TIMEOUT_MS = 30_000;
 
 export interface StopLocalProtocolServerOptions {
+    /** Why the daemon is going away, told to every client before it stops admitting work. */
+    readonly drain?: DrainRequest;
     readonly onDrainProgress?: (message: string) => void;
     /** Every drain report the daemon gives, as it changes. */
     readonly onDrainWaiting?: (waiting: readonly DrainWaitingFor[]) => void;
@@ -45,6 +48,7 @@ export async function stopLocalProtocolServer(
             options.onDrainProgress,
             true,
             options.onDrainWaiting,
+            options.drain,
         );
     } catch (error) {
         // A daemon that dies mid-drain refuses the next health poll. The stop has nothing left to
@@ -86,9 +90,10 @@ export async function drainLocalProtocolServer(
     report: ((message: string) => void) | undefined,
     allowShutdownFallback = false,
     onWaiting?: (waiting: readonly DrainWaitingFor[]) => void,
+    request: DrainRequest = {},
 ): Promise<void> {
     try {
-        await client.drain();
+        await client.drain(request);
     } catch (error: unknown) {
         if (error instanceof HappyAgentApiError && (error.status === 403 || error.status === 404)) {
             if (!allowShutdownFallback)

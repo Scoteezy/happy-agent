@@ -6,7 +6,7 @@ import {
     type StartHappyAgentRuntimeOptions,
 } from "@slopus/happy-agent-modules";
 import { withLogContext, type Context } from "@steve.kite/stdlib";
-import type { DrainWaitingFor } from "@slopus/happy-agent-client";
+import type { DaemonDrain, DrainRequest, DrainWaitingFor } from "@slopus/happy-agent-client";
 import { dirname } from "node:path";
 
 import { removeDaemonPid, writeDaemonPid } from "./lifecycle/daemonPid.js";
@@ -39,8 +39,11 @@ export interface HappyAgentDaemon {
     /** Present while the configured Tailcat transport is open. */
     readonly tailcat?: { readonly address: string; readonly port: number } | undefined;
     readonly tokenPath: string;
-    /** Begin draining without closing transports or stopping background processes. */
-    drain(): void;
+    /**
+     * Begin draining without closing transports or stopping background processes. The request
+     * says whether a replacement is coming; the first drain or shutdown decides it.
+     */
+    drain(request?: DrainRequest): DaemonDrain;
     drainProgress(): readonly DrainWaitingFor[];
     close(reason?: HappyAgentShutdownReason): Promise<void>;
 }
@@ -151,6 +154,11 @@ export async function startHappyAgentDaemon(
                     // Without the record a forced kill reads as a crash; a clean exit still does not.
                 }
             }
+            // Clients still polling health learn this process is going away for good, unless a
+            // drain already said why.
+            runtime.api.recordShutdown(
+                reason === "sigint" || reason === "sigterm" ? "signal" : "api",
+            );
             closing = closeHappyAgentDaemon(
                 runtime,
                 bound,
@@ -175,7 +183,7 @@ export async function startHappyAgentDaemon(
     return {
         close: closeDaemon,
         closed,
-        drain: () => startedRuntime.api.beginDrain(drainContext),
+        drain: (request) => startedRuntime.api.beginDrain(drainContext, request),
         drainProgress: () => startedRuntime.api.drainProgress(drainContext),
         ...(runtime.configuration.values.feature.team.enabled && "url" in bound
             ? { httpUrl: bound.url }

@@ -50,6 +50,7 @@ describe.skipIf(process.platform === "win32")("local signal draining", () => {
             expect((await readDaemonDrainState(path)).phase).toBe("draining"),
         );
         expect(drain).toHaveBeenCalledOnce();
+        expect(drain).toHaveBeenCalledWith({ cause: "signal", intent: "shutdown" });
         expect(close).not.toHaveBeenCalled();
         progress.mockReturnValue([]);
         await vi.waitFor(async () =>

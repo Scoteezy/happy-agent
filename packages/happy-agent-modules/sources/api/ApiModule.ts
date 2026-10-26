@@ -91,6 +91,7 @@ import {
     updateArtifactRequestSchema as publishedUpdateArtifactRequestSchema,
     providerVerificationRequestSchema,
     providerUsageRefreshRequestSchema,
+    drainRequestSchema,
     userIdsSchema,
     networkIdSchema,
     skillPageQuerySchema,
@@ -98,6 +99,8 @@ import {
     type ArtifactFileInput as ArtifactRequestFile,
     type ArtifactSourceInput as ArtifactRequestSource,
     type AuthenticationChallenge,
+    type DaemonDrain,
+    type DrainRequest,
     type AgentRetrying,
     type AuthenticationResponse,
     type DrainWaitingFor,
@@ -718,6 +721,8 @@ export class ApiModule implements AgentModule {
     #agents: AgentSystemRef | undefined;
     #ready = false;
     #draining = false;
+    /** Why this process is going away, recorded once when draining or shutdown begins. */
+    #drain: DaemonDrain | undefined;
     #drainMutationsLoggedAt = 0;
     /** The drain's own log of what holds it open, from its start until it is drained. */
     #drainReport:
@@ -930,11 +935,24 @@ export class ApiModule implements AgentModule {
         };
     }
 
-    /** Enter the same read-only drain boundary for local OS control and HTTP callers. */
-    beginDrain(ctx: Context): void {
+    /**
+     * Enter the same read-only drain boundary for local OS control and HTTP callers. The first
+     * drain or shutdown of this process decides why it is going away; later requests keep it.
+     */
+    beginDrain(ctx: Context, request: DrainRequest = {}): DaemonDrain {
         if (this.#closed || !this.#ready) throw new Error("The daemon is not ready to drain.");
         if (this.#drainSources.size === 0) throw new Error("Daemon draining is not enabled.");
+        const drain = this.#recordDrain(request);
         this.#beginDrain(ctx);
+        return drain;
+    }
+
+    /**
+     * Record that graceful shutdown is beginning, for a process that was not drained first, so
+     * health still says it is going away for good. A drain already recorded is kept.
+     */
+    recordShutdown(cause: "api" | "signal"): DaemonDrain {
+        return this.#recordDrain({ cause, intent: "shutdown" });
     }
 
     /** The same bounded completion barrier exposed by authenticated health. */
@@ -1888,16 +1906,21 @@ export class ApiModule implements AgentModule {
                 return;
             }
             if (request.method === "POST" && url.pathname === "/v0/drain") {
+                const body = await readJson(request, MAX_JSON_BODY_BYTES, true);
+                if (!Value.Check(drainRequestSchema, body)) {
+                    throw invalidRequest("The drain request is invalid.");
+                }
                 if (this.#drainSources.size === 0) {
                     sendJson(response, 403, { error: "Daemon draining is not enabled." });
                     return;
                 }
-                this.beginDrain(ctx);
-                sendJson(response, 202, { draining: true, pid: process.pid });
+                const drain = this.beginDrain(ctx, body);
+                sendJson(response, 202, { draining: true, pid: process.pid, drain });
                 return;
             }
             if (request.method === "POST" && url.pathname === "/v0/shutdown") {
                 ctx.log.info(`daemon:shutdown:request pid=${String(process.pid)} source=api`);
+                this.recordShutdown("api");
                 sendJson(response, 202, { shuttingDown: true, pid: process.pid });
                 setImmediate(() => {
                     for (const listener of [...this.#shutdownListeners]) {
@@ -5816,6 +5839,7 @@ export class ApiModule implements AgentModule {
                     daemonId: this.#daemonId,
                     daemonStartedAt: this.#daemonStartedAt,
                     draining: this.#draining,
+                    drain: this.#drain ?? null,
                     ...(streamId === undefined ? {} : { streamId }),
                 })}\n\n`,
             )
@@ -9724,9 +9748,10 @@ export class ApiModule implements AgentModule {
         this.#journal.append("daemon.draining", {
             daemonId: this.#daemonId,
             draining: true,
+            drain: this.#drain,
         });
         ctx.log.info(
-            `daemon:drain:start pid=${String(process.pid)} mutations=${String(this.#apiMutations.size)}`,
+            `daemon:drain:start pid=${String(process.pid)} intent=${this.#drain?.intent ?? "shutdown"} cause=${this.#drain?.cause ?? "api"} targetVersion=${this.#drain?.targetVersion ?? "none"} mutations=${String(this.#apiMutations.size)}`,
         );
         const timer = setInterval(() => this.#reportDrain(ctx), DRAIN_REPORT_TICK_MS);
         timer.unref();
@@ -9751,6 +9776,21 @@ export class ApiModule implements AgentModule {
         }
         // What was running when the drain began, before any of it has had a chance to finish.
         this.#reportDrain(ctx);
+    }
+
+    /** Record why this process is going away, once; every later caller gets the first answer. */
+    #recordDrain(request: DrainRequest): DaemonDrain {
+        if (this.#drain !== undefined) return this.#drain;
+        const shared = {
+            cause: request.cause ?? "api",
+            currentVersion: this.#config.configuration.version,
+            startedAt: Date.now(),
+        } as const;
+        this.#drain =
+            request.intent === "restart"
+                ? { ...shared, intent: "restart", targetVersion: request.targetVersion ?? null }
+                : { ...shared, intent: "shutdown", targetVersion: null };
+        return this.#drain;
     }
 
     /** Build bounded, stable progress without allowing optional reporting to break health. */
@@ -9892,6 +9932,7 @@ export class ApiModule implements AgentModule {
             ready: this.#ready,
             draining: this.#draining,
             drainWaitingFor: this.#drainWaitingFor(ctx),
+            drain: this.#drain ?? null,
             shuttingDown: gracefulShutdown?.shuttingDown ?? false,
             status: this.#ready ? "ready" : "starting",
             capabilities: {

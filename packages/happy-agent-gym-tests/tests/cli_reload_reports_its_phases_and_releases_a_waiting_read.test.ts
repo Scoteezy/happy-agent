@@ -5,7 +5,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { join, resolve } from "node:path";
 
-import { HappyAgentClient } from "@slopus/happy-agent-client";
+import {
+    HappyAgentClient,
+    type DaemonDrain,
+    type HappyAgentUpdate,
+} from "@slopus/happy-agent-client";
 import { createGymHome, createUnixSocketFetch, type GymHome } from "@slopus/happy-agent-gym";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -154,6 +158,8 @@ describe.skipIf(process.platform === "win32")("happy-agent reload from the CLI",
             "the benchmark to print",
         );
 
+        const version = (await client.getHealth()).version.daemon;
+        const { draining: feed } = await drainingUpdate(client);
         const observed: ReloadStatus[] = [];
         const reloadStartedAt = Date.now();
         const reload = world.cli(["reload"]);
@@ -169,6 +175,16 @@ describe.skipIf(process.platform === "win32")("happy-agent reload from the CLI",
                 : undefined;
         }, "the drain to answer the waiting read");
         expect(Date.now() - reloadStartedAt).toBeLessThan(10_000);
+        // Every connected client is told, before the old daemon goes, that it is coming back.
+        const restart = {
+            cause: "reload",
+            currentVersion: version,
+            intent: "restart",
+            startedAt: expect.any(Number),
+            targetVersion: version,
+        };
+        expect(await feed).toMatchObject({ drain: restart, kind: "draining" });
+        expect((await client.getHealth()).drain).toMatchObject(restart);
         expect(JSON.stringify(await client.getMessages(agentId))).toContain(RESTART_NOTICE);
         await writeFile(join(world.home.workspacePath, "hold-released"), "");
         const result = await reload;
@@ -204,7 +220,23 @@ describe.skipIf(process.platform === "win32")("happy-agent reload from the CLI",
         expect(history.runs.at(-1)).toMatchObject({ status: "completed" });
         const lastAgentRequest = world.inference.agentRequests.at(-1);
         expect(JSON.stringify(lastAgentRequest)).toContain(RESTART_NOTICE);
+        // The replacement is a new process that is going nowhere.
+        expect((await next.getHealth()).drain).toBeNull();
     }, 180_000);
+
+    it("tells connected clients a stop is a shutdown nothing replaces", async () => {
+        const world = await installation();
+        expect((await world.cli(["start"])).code).toBe(0);
+        const client = await world.connect();
+        const { draining: feed } = await drainingUpdate(client);
+
+        const stopped = await world.cli(["stop"]);
+        expect(stopped.code, stopped.output).toBe(0);
+        expect(await feed).toMatchObject({
+            drain: { cause: "stop", intent: "shutdown", targetVersion: null },
+            kind: "draining",
+        });
+    }, 120_000);
 
     it("reports a detached reload's phases and where a failed reload stopped", async () => {
         const world = await installation();
@@ -388,6 +420,35 @@ function toolCallStatus(history: unknown, name: string): string | undefined {
         }
     }
     return undefined;
+}
+
+/**
+ * Opens a client's own reconnecting feed and returns the first draining update it will report. The feed is connected before this returns, so the live event reports the drain.
+ */
+async function drainingUpdate(
+    client: HappyAgentClient,
+): Promise<{ readonly draining: Promise<HappyAgentUpdate & { drain?: DaemonDrain }> }> {
+    const controller = new AbortController();
+    const updates = client.updates({ signal: controller.signal });
+    for (;;) {
+        const next = await updates.next();
+        if (next.done === true) throw new Error("The update feed ended before connecting.");
+        if (next.value.kind === "connected") break;
+    }
+    const draining = (async () => {
+        try {
+            for (;;) {
+                const next = await updates.next();
+                if (next.done === true) throw new Error("The update feed ended before draining.");
+                if (next.value.kind === "draining") return next.value;
+            }
+        } finally {
+            controller.abort();
+        }
+    })();
+    // Awaited later; a scenario that fails first must not leave an unhandled rejection.
+    void draining.catch(() => undefined);
+    return { draining };
 }
 
 /** Read reload.json as fast as it changes until the reload command exits. */

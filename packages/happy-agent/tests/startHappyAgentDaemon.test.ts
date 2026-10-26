@@ -50,13 +50,34 @@ describe("startHappyAgentDaemon", () => {
         const closeHttp = vi.fn();
         arrangeHttp(closeHttp);
         const daemon = await startHappyAgentDaemon();
-        daemon.drain();
-        expect(runtime.beginDrain).toHaveBeenCalledOnce();
+        daemon.drain({ cause: "reload", intent: "restart", targetVersion: "1.2.3" });
+        expect(runtime.beginDrain).toHaveBeenCalledWith(expect.anything(), {
+            cause: "reload",
+            intent: "restart",
+            targetVersion: "1.2.3",
+        });
         expect(daemon.drainProgress()).toEqual([{ name: "agent-system", count: 1 }]);
         expect(runtime.shutdown).not.toHaveBeenCalled();
         expect(closeHttp).not.toHaveBeenCalled();
         await daemon.close();
     });
+    it("says a signalled shutdown is going away for good before shutting down", async () => {
+        const runtime = arrangeRuntime(false);
+        mocks.bindAgentSocket.mockResolvedValue({
+            close: vi.fn(),
+            socketPath: "/tmp/happy-team/server.sock",
+        });
+        arrangeHttp(vi.fn());
+
+        const daemon = await startHappyAgentDaemon();
+        await daemon.close("sigterm");
+
+        expect(runtime.recordShutdown).toHaveBeenCalledWith("signal");
+        expect(runtime.recordShutdown.mock.invocationCallOrder[0]).toBeLessThan(
+            runtime.shutdown.mock.invocationCallOrder[0]!,
+        );
+    });
+
     it("records an intentional stop before a dedicated daemon begins shutting down", async () => {
         const runtime = arrangeRuntime(false);
         mocks.bindAgentSocket.mockResolvedValue({
@@ -206,6 +227,7 @@ function arrangeRuntime(
     readonly attachMobileTransport: ReturnType<typeof vi.fn>;
     readonly attachTransport: ReturnType<typeof vi.fn>;
     readonly beginDrain: ReturnType<typeof vi.fn>;
+    readonly recordShutdown: ReturnType<typeof vi.fn>;
     readonly close: ReturnType<typeof vi.fn>;
     readonly shutdown: ReturnType<typeof vi.fn>;
 } {
@@ -246,6 +268,7 @@ function arrangeRuntime(
         api: {
             onShutdown: vi.fn(() => vi.fn()),
             beginDrain: vi.fn(),
+            recordShutdown: vi.fn(),
             drainProgress: vi.fn(() => [{ name: "agent-system", count: 1 }]),
         },
         modules: {
@@ -280,6 +303,7 @@ function arrangeRuntime(
         attachMobileTransport,
         attachTransport,
         beginDrain: runtime.api.beginDrain,
+        recordShutdown: runtime.api.recordShutdown,
         close: runtime.close,
         shutdown: runtime.shutdown,
     };
