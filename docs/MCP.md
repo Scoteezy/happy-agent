@@ -17,7 +17,8 @@ directory. A workspace may add servers in `mcp.toml` at the root of that workspa
 `happy.toml`, Codex configuration, Claude configuration, or another provider's files are
 intentionally ignored.
 
-User-wide servers are available in every session. Workspace servers are available while at least
+User-wide servers are available in every session: project workspaces, bots, tasks, subtasks,
+collaborators, and exported-bot conversations alike. Workspace servers are available while at least
 one unarchived session belongs to that workspace. A user-wide server wins when both catalogs use
 the same name.
 
