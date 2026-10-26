@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HappyAgentClient } from "../sources/HappyAgentClient.js";
+import type { DaemonDrain } from "../sources/protocol/daemon.js";
 import type { HappyAgentEvent } from "../sources/protocol/events.js";
 
 const CURSOR_0 = "01900000-0000-7000-8000-000000000000";
@@ -386,6 +387,62 @@ describe("HappyAgentClient updates", () => {
         await expect(updates.next()).resolves.toEqual({ done: true, value: undefined });
     });
 
+    it("carries the daemon's drain intent from a live event and a reconnect hello", async () => {
+        vi.useFakeTimers();
+        const drain: DaemonDrain = {
+            cause: "reload",
+            currentVersion: "1.2.3",
+            intent: "restart",
+            startedAt: 20,
+            targetVersion: "1.2.3",
+        };
+        const responses = [
+            sseResponse(
+                hello(CURSOR_0, false, true, {
+                    daemonId: DAEMON_A,
+                    daemonStartedAt: 10,
+                    draining: false,
+                    drain: null,
+                }),
+                daemonDraining(CURSOR_1, DAEMON_A, drain),
+            ),
+            sseResponse(
+                hello(CURSOR_1, false, true, {
+                    daemonId: DAEMON_A,
+                    daemonStartedAt: 10,
+                    draining: true,
+                    drain,
+                }),
+            ),
+        ];
+        const fetch: typeof globalThis.fetch = async () => {
+            const response = responses.shift();
+            if (response === undefined) throw new Error("Unexpected reconnect.");
+            return response;
+        };
+        const controller = new AbortController();
+        const client = new HappyAgentClient({ endpoint: "http://agent.local", token: "t", fetch });
+        const updates = client.updates({ after: CURSOR_0, signal: controller.signal });
+
+        while ((await updates.next()).value?.kind !== "event");
+        await expect(updates.next()).resolves.toEqual({
+            done: false,
+            value: { cursor: CURSOR_1, daemonId: DAEMON_A, drain, kind: "draining" },
+        });
+        await expect(updates.next()).resolves.toMatchObject({ value: { kind: "disconnected" } });
+
+        const reconnected = updates.next();
+        await vi.advanceTimersByTimeAsync(100);
+        await expect(reconnected).resolves.toMatchObject({ value: { kind: "connected" } });
+        await expect(updates.next()).resolves.toEqual({
+            done: false,
+            value: { cursor: CURSOR_1, daemonId: DAEMON_A, drain, kind: "draining" },
+        });
+
+        controller.abort();
+        await expect(updates.next()).resolves.toEqual({ done: true, value: undefined });
+    });
+
     it("keeps retrying at its first interval while a drained daemon is being replaced", async () => {
         vi.useFakeTimers();
         let attempts = 0;
@@ -517,6 +574,7 @@ function hello(
         daemonId: string;
         daemonStartedAt: number;
         draining?: boolean;
+        drain?: DaemonDrain | null;
     } | null = null,
 ): string {
     return `event: hello\ndata: ${JSON.stringify({ connectedAt: 1, cursor, gap, resumed, ...daemon })}\n\n`;
@@ -532,11 +590,11 @@ function update(cursor: string): string {
     return `id: ${cursor}\nevent: config.updated\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
-function daemonDraining(cursor: string, daemonId: string): string {
+function daemonDraining(cursor: string, daemonId: string, drain?: DaemonDrain): string {
     const event: HappyAgentEvent = {
         cursor,
         occurredAt: 1,
-        payload: { daemonId, draining: true },
+        payload: { daemonId, draining: true, ...(drain === undefined ? {} : { drain }) },
         type: "daemon.draining",
     };
     return `id: ${cursor}\nevent: daemon.draining\ndata: ${JSON.stringify(event)}\n\n`;

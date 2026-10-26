@@ -161,6 +161,7 @@ import type {
 import type {
     ConfigPatch,
     ConfigResponse,
+    DrainRequest,
     DrainResponse,
     GreetingResponse,
     HealthResponse,
@@ -585,9 +586,19 @@ export class HappyAgentClient {
         });
     }
 
-    /** `POST /v0/drain` — permanently enters this daemon process's read-only drain mode. */
-    async drain(options: RequestOptions = {}): Promise<DrainResponse> {
-        return await this.#json({ method: "POST", path: "v0/drain", signal: options.signal });
+    /**
+     * `POST /v0/drain` — permanently enters this daemon process's read-only drain mode. The
+     * intent, cause, and target version tell every client whether a replacement is coming; with
+     * none of them the daemon records a shutdown requested through the API.
+     */
+    async drain(options: RequestOptions & DrainRequest = {}): Promise<DrainResponse> {
+        const { signal, ...request } = options;
+        return await this.#json({
+            method: "POST",
+            path: "v0/drain",
+            ...(Object.keys(request).length === 0 ? {} : { json: request }),
+            signal,
+        });
     }
 
     /** `POST /v0/shutdown` — asks the daemon to shut down; it answers first. */

@@ -482,6 +482,12 @@ capabilities are still reported, and the routes answer that person with `404` as
 would. A client that predates stories shows a `story` artifact presentation as it shows every
 artifact type it does not know.
 
+Drain intent is additive and does not increment the protocol version. A daemon that supports it
+accepts the optional `POST /v0/drain` body and includes `drain` in the drain response, health, the
+`hello` frame, and the `daemon.draining` event, as described under Daemon lifecycle. Older
+compatible daemons ignore the request body and omit every `drain` field; clients then cannot tell a
+restart from a shutdown and treat the drain as they did before.
+
 ### Requests and responses
 
 - Request and response bodies are JSON, `content-type: application/json; charset=utf-8`.
@@ -1107,6 +1113,13 @@ Response — `200`:
             ]
         }
     ],
+    "drain": {
+        "intent": "restart",
+        "cause": "reload",
+        "currentVersion": "1.2.3",
+        "targetVersion": "1.2.3",
+        "startedAt": 1755400000000
+    },
     "shuttingDown": true,
     "waitingFor": ["agent-system", "main-database"]
 }
@@ -1146,6 +1159,10 @@ Fields:
   (`"inference"`, `"tools"`, `"compaction"`, or `"settlement"`). When more agents are waiting than
   fit, `truncated` is `true` while `count` remains exact. Non-agent rows omit `agents` and
   `truncated`.
+- `drain` — optional for compatibility; the drain object described under Daemon lifecycle, saying
+  whether this daemon process is going away to be restarted or to stay stopped. It is `null` until
+  draining or graceful shutdown begins, and then stays the same object until the process exits.
+  Older daemons omit it.
 - `shuttingDown` — optional for protocol-22 compatibility; `true` while graceful shutdown is in
   progress and `false` otherwise.
 - `waitingFor` — optional for protocol-22 compatibility; the stable names of graceful-shutdown
@@ -1902,11 +1919,82 @@ sent after draining mode has been published but before the drain necessarily fin
 poll health until `drainWaitingFor` is empty, then call `POST /v0/shutdown` when they want the
 process to exit.
 
+Request — optional JSON body naming why the daemon is going away:
+
+```json
+{ "intent": "restart", "cause": "update", "targetVersion": "1.2.4" }
+```
+
+- `intent` — optional; `"restart"` when the caller will start a replacement daemon once this one
+  exits, or `"shutdown"` when nothing will replace it. Defaults to `"shutdown"`.
+- `cause` — optional; what brought the drain about. Defaults to `"api"`.
+    - `"reload"` — a restart of the same installation, such as `happy-agent reload`.
+    - `"update"` — a restart into a different installed version.
+    - `"stop"` — a person stopped the daemon, such as with `happy-agent stop`.
+    - `"signal"` — an operating-system signal, such as `SIGTERM`, `SIGINT`, or the local drain
+      signal.
+    - `"api"` — an API caller that gave no cause.
+- `targetVersion` — optional; with `"restart"` only, the product version of the executable that
+  will replace this daemon, when the caller knows it. A non-empty string of at most 128
+  characters. Sending it with `"shutdown"` is rejected.
+
+A body that does not match, including one with unknown fields, is rejected with
+`400 invalid_request` before draining begins. No body, or an empty object, is the same as
+`{ "intent": "shutdown", "cause": "api" }`.
+
 Response — `202`:
 
 ```json
-{ "draining": true, "pid": 12345 }
+{
+    "draining": true,
+    "pid": 12345,
+    "drain": {
+        "intent": "restart",
+        "cause": "update",
+        "currentVersion": "1.2.3",
+        "targetVersion": "1.2.4",
+        "startedAt": 1755400000000
+    }
+}
 ```
+
+`drain` is the drain object the daemon recorded. The first drain of a process decides it; a later
+retry with a different body is still accepted, and its response returns the drain already
+recorded. Older compatible daemons ignore the body and omit `drain`.
+
+#### The drain object
+
+The drain object tells every client why this daemon process is going away, before it stops
+admitting work. It lives only in the process it describes, is never persisted, and is never
+carried into the next process.
+
+- `intent` — `"restart"` or `"shutdown"`, as above.
+- `cause` — one of the five causes above. Clients decide what to show from `intent`; `cause`
+  explains it.
+- `currentVersion` — this daemon's own product version, as in health's `version.daemon`.
+- `targetVersion` — the product version a restart will start, or `null` when it is unknown.
+  Always `null` when `intent` is `"shutdown"`.
+- `startedAt` — when draining, or graceful shutdown without a drain, began, in epoch
+  milliseconds.
+
+The daemon records the drain object at its single drain entry, whichever path triggered it: this
+endpoint, the local drain signal (`"shutdown"`, `"signal"`), or graceful shutdown that begins
+without a prior drain (`"shutdown"`, with `"api"` for `POST /v0/shutdown` and `"signal"` for
+`SIGTERM` or `SIGINT`). It is recorded before the daemon stops admitting mutations. A drain then
+appends the `daemon.draining` event carrying it, so every connected client learns the intent
+before the daemon goes away. Shutdown without a prior drain appends no event; health still
+reports the recorded object. Clients that connect later read it from health or the event
+stream's `hello` frame.
+
+A restart has finished, from a client's point of view, when the client reaches a daemon with a
+different `daemonId` and, when `targetVersion` is set, health reports that version. The daemon
+makes no promise about how long its replacement takes to start, or that one starts at all: the
+replacement is started by the caller that announced the restart. Clients choose their own grace
+period. Happy Desktop, for example, keeps showing a restart for 60 seconds after the old daemon
+stops answering and then reports the daemon as unavailable; that is Desktop's policy, not a
+guarantee from the daemon. A replacement whose version differs from `targetVersion` did not start
+the announced version; a client shows that as a failed restart rather than waiting for the
+announced version.
 
 From the instant draining begins, the daemon admits no new mutation except shutdown. Reads,
 health, event pulls and streams remain available. A repeated drain request is accepted as an
@@ -12906,6 +12994,8 @@ how a bootstrap snapshot and an event stream reconcile.
   emitted exactly once, before any drain handler starts.
     - `daemonId` (ID string) — the identity minted for this daemon process.
     - `draining` — always `true`.
+    - `drain` (drain object) — whether the process will be restarted or stay stopped, and why;
+      see Daemon lifecycle. Absent on older compatible daemons.
 
 Daemon start is connection metadata rather than a journal event. A restarted daemon owns a new
 in-memory journal, so a startup event inside that journal could be skipped by the very cursor gap
@@ -13391,14 +13481,18 @@ data: {"cursor":"01991f3a-...","gap":false,"resumed":true,"connectedAt":17554000
 - `draining` — whether the process has entered its sticky draining phase. This closes the race
   where draining began while the client was disconnected and its `daemon.draining` event is no
   longer replayable.
+- `drain` — the drain object described under Daemon lifecycle, or `null` before draining or
+  graceful shutdown begins. A client that connects mid-drain learns from it whether a replacement
+  is coming.
 - `streamId` — a CUID2 naming this one stream connection, for subscribing it to collaborative
   documents. A reconnect gets a new one. Additive; absent on daemons without collaborative
   documents.
 
-`daemonId`, `daemonStartedAt`, and `draining` are additive and may be absent on older compatible
-protocol-22 daemons. `HappyAgentClient.updates()` emits `daemon_started` once for each distinct
-`daemonId` it observes. It emits `draining` after either a draining hello or a live
-`daemon.draining` event, while continuing to pass the underlying journal event through normally.
+`daemonId`, `daemonStartedAt`, `draining`, and `drain` are additive and may be absent on older
+compatible protocol-22 daemons. `HappyAgentClient.updates()` emits `daemon_started` once for each
+distinct `daemonId` it observes. It emits `draining` after either a draining hello or a live
+`daemon.draining` event, carrying the drain object when the daemon supplied one, while continuing
+to pass the underlying journal event through normally.
 
 After `hello`, every event is one SSE frame: the SSE `id:` field carries the event's `cursor`
 (feeding `Last-Event-ID`), the `event:` field is the event's `type`, and `data:` is the

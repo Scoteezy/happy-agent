@@ -1,4 +1,5 @@
 import type { Cuid2, EventCursor, Timestamp } from "./protocol/common.js";
+import type { DaemonDrain } from "./protocol/daemon.js";
 import type { EventStreamFrame, EventStreamOptions, HappyAgentEvent } from "./protocol/events.js";
 import type { SurfaceDocumentLiveFrame } from "./protocol/surfaces.js";
 import { EventStreamProtocolError } from "./readEventStream.js";
@@ -33,7 +34,13 @@ export type HappyAgentUpdate =
           /** `true` when this replaces a daemon already observed by this iterator. */
           replaced: boolean;
       }
-    | { kind: "draining"; cursor: EventCursor; daemonId?: Cuid2 }
+    | {
+          kind: "draining";
+          cursor: EventCursor;
+          daemonId?: Cuid2;
+          /** Whether a replacement is coming, and why. Absent on older daemons. */
+          drain?: DaemonDrain;
+      }
     | { kind: "state_lost"; cursor: EventCursor }
     | { kind: "disconnected"; cursor?: EventCursor }
     | { kind: "event"; event: HappyAgentEvent; cursor: EventCursor }
@@ -122,6 +129,7 @@ export async function* reconnectingUpdates(
                             ...(frame.hello.daemonId === undefined
                                 ? {}
                                 : { daemonId: frame.hello.daemonId }),
+                            ...(frame.hello.drain == null ? {} : { drain: frame.hello.drain }),
                         };
                     }
                     continue;
@@ -150,6 +158,9 @@ export async function* reconnectingUpdates(
                         kind: "draining",
                         cursor,
                         daemonId: frame.event.payload.daemonId,
+                        ...(frame.event.payload.drain === undefined
+                            ? {}
+                            : { drain: frame.event.payload.drain }),
                     };
                 }
             }

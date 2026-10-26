@@ -19,6 +19,7 @@ import {
     timestampSchema,
 } from "./common.js";
 import type { Agent, AgentDraftSnapshot, AgentProfile } from "./agents.js";
+import type { DaemonDrain } from "./daemon.js";
 import {
     artifactAuthorSchema,
     artifactBackgroundSchema,
@@ -125,6 +126,8 @@ export interface MutationEcho {
 export interface DaemonDrainingPayload {
     daemonId: Cuid2;
     draining: true;
+    /** Whether the process will be restarted or stay stopped. Absent on older daemons. */
+    drain?: DaemonDrain;
 }
 
 export type ProjectCreatedPayload = MutationEcho & { project: Project };
@@ -784,6 +787,11 @@ export interface EventStreamHello {
     daemonStartedAt?: Timestamp;
     /** Whether this daemon process is draining. Absent on older compatible daemons. */
     draining?: boolean;
+    /**
+     * Why this daemon process is going away, or `null` before draining or graceful shutdown
+     * begins. Absent on older compatible daemons.
+     */
+    drain?: DaemonDrain | null;
     /**
      * Names this one stream connection for subscribing it to collaborative documents. A
      * reconnect gets a new one. Absent on daemons without collaborative documents.

@@ -130,6 +130,32 @@ describe("HappyAgentClient", () => {
         expect(requests[0]?.body).toBeNull();
     });
 
+    it("tells the daemon a drain is a restart into a named version", async () => {
+        const response = {
+            drain: {
+                cause: "update" as const,
+                currentVersion: "1.2.3",
+                intent: "restart" as const,
+                startedAt: 1,
+                targetVersion: "1.2.4",
+            },
+            draining: true as const,
+            pid: 12345,
+        };
+        const { fetch, requests } = stubFetch(() => json(response, 202));
+        const client = new HappyAgentClient({ endpoint: "http://agent.local", token: "t", fetch });
+
+        await expect(
+            client.drain({ cause: "update", intent: "restart", targetVersion: "1.2.4" }),
+        ).resolves.toEqual(response);
+        expect(requests[0]?.method).toBe("POST");
+        expect(JSON.parse(String(requests[0]?.body))).toEqual({
+            cause: "update",
+            intent: "restart",
+            targetVersion: "1.2.4",
+        });
+    });
+
     it("changes a provider's explicit runtime enablement", async () => {
         const response = { config: {} };
         const { fetch, requests } = stubFetch(() => json(response));

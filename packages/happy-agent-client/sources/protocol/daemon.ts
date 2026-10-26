@@ -67,6 +67,70 @@ export const drainWaitingForSchema = Type.Object({
 });
 export type DrainWaitingFor = Static<typeof drainWaitingForSchema>;
 
+/** Whether a draining daemon will be replaced or stay stopped. */
+export const daemonDrainIntentSchema = Type.Union([
+    Type.Literal("restart"),
+    Type.Literal("shutdown"),
+]);
+export type DaemonDrainIntent = Static<typeof daemonDrainIntentSchema>;
+
+/** What brought a drain about. Clients decide what to show from the intent. */
+export const daemonDrainCauseSchema = Type.Union([
+    Type.Literal("reload"),
+    Type.Literal("update"),
+    Type.Literal("stop"),
+    Type.Literal("signal"),
+    Type.Literal("api"),
+]);
+export type DaemonDrainCause = Static<typeof daemonDrainCauseSchema>;
+
+const daemonDrainVersionSchema = Type.String({ minLength: 1, maxLength: 128 });
+
+/**
+ * Why this daemon process is going away, recorded once before it stops admitting work and
+ * reported until it exits. A shutdown never names a target version.
+ */
+export const daemonDrainSchema = Type.Union([
+    Type.Object({
+        intent: Type.Literal("restart"),
+        cause: daemonDrainCauseSchema,
+        /** This daemon's own product version. */
+        currentVersion: Type.String(),
+        /** The product version the replacement will run, when the restarter knows it. */
+        targetVersion: Nullable(daemonDrainVersionSchema),
+        /** When draining, or graceful shutdown without a drain, began. */
+        startedAt: timestampSchema,
+    }),
+    Type.Object({
+        intent: Type.Literal("shutdown"),
+        cause: daemonDrainCauseSchema,
+        currentVersion: Type.String(),
+        targetVersion: Type.Null(),
+        startedAt: timestampSchema,
+    }),
+]);
+export type DaemonDrain = Static<typeof daemonDrainSchema>;
+
+/** `POST /v0/drain` body. No body is the same as `{ intent: "shutdown", cause: "api" }`. */
+export const drainRequestSchema = Type.Union([
+    Type.Object(
+        {
+            intent: Type.Literal("restart"),
+            cause: Type.Optional(daemonDrainCauseSchema),
+            targetVersion: Type.Optional(daemonDrainVersionSchema),
+        },
+        { additionalProperties: false },
+    ),
+    Type.Object(
+        {
+            intent: Type.Optional(Type.Literal("shutdown")),
+            cause: Type.Optional(daemonDrainCauseSchema),
+        },
+        { additionalProperties: false },
+    ),
+]);
+export type DrainRequest = Static<typeof drainRequestSchema>;
+
 /** `GET /v0/health` */
 export const healthResponseSchema = Type.Object({
     capabilities: Type.Optional(
@@ -121,6 +185,11 @@ export const healthResponseSchema = Type.Object({
     draining: Type.Optional(Type.Boolean()),
     /** Structured progress for components that have not reached a safe draining edge. */
     drainWaitingFor: Type.Optional(Type.Array(drainWaitingForSchema)),
+    /**
+     * Why this process is going away: `null` until draining or graceful shutdown begins. Absent
+     * on older compatible daemons.
+     */
+    drain: Type.Optional(Nullable(daemonDrainSchema)),
     /** `true` while the daemon is completing its graceful-shutdown handlers. */
     shuttingDown: Type.Optional(Type.Boolean()),
     status: Type.Union([Type.Literal("starting"), Type.Literal("ready")]),
@@ -506,6 +575,8 @@ export const drainResponseSchema = Type.Object({
     draining: Type.Literal(true),
     /** The daemon's process ID, so a later stop can confirm the same process exited. */
     pid: Type.Integer(),
+    /** The drain the daemon recorded; the first drain decides it. Absent on older daemons. */
+    drain: Type.Optional(daemonDrainSchema),
 });
 export type DrainResponse = Static<typeof drainResponseSchema>;
 

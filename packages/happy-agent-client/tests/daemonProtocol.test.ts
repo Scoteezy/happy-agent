@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import {
     configPatchSchema,
+    daemonDrainSchema,
+    drainRequestSchema,
     healthResponseSchema,
     modelDefinitionSchema,
     providerScanResponseSchema,
@@ -64,6 +66,62 @@ describe("healthResponseSchema", () => {
                 ],
             }),
         ).toBe(true);
+    });
+});
+
+describe("drain intent schemas", () => {
+    const restart = {
+        cause: "reload",
+        currentVersion: "1.2.3",
+        intent: "restart",
+        startedAt: 1,
+        targetVersion: "1.2.3",
+    } as const;
+
+    it("accepts health that says why the daemon is going away", () => {
+        expect(Value.Check(healthResponseSchema, { ...readyHealth, drain: null })).toBe(true);
+        expect(
+            Value.Check(healthResponseSchema, { ...readyHealth, draining: true, drain: restart }),
+        ).toBe(true);
+        expect(
+            Value.Check(daemonDrainSchema, { ...restart, targetVersion: null, cause: "signal" }),
+        ).toBe(true);
+    });
+
+    it("never lets a shutdown name a target version", () => {
+        expect(
+            Value.Check(daemonDrainSchema, { ...restart, intent: "shutdown", cause: "stop" }),
+        ).toBe(false);
+        expect(
+            Value.Check(daemonDrainSchema, {
+                ...restart,
+                cause: "stop",
+                intent: "shutdown",
+                targetVersion: null,
+            }),
+        ).toBe(true);
+        expect(Value.Check(drainRequestSchema, { intent: "shutdown", targetVersion: "1" })).toBe(
+            false,
+        );
+        expect(Value.Check(drainRequestSchema, { targetVersion: "1" })).toBe(false);
+    });
+
+    it("accepts every drain request the daemon documents and nothing else", () => {
+        expect(Value.Check(drainRequestSchema, {})).toBe(true);
+        expect(Value.Check(drainRequestSchema, { cause: "stop", intent: "shutdown" })).toBe(true);
+        expect(
+            Value.Check(drainRequestSchema, {
+                cause: "update",
+                intent: "restart",
+                targetVersion: "1.2.4",
+            }),
+        ).toBe(true);
+        expect(Value.Check(drainRequestSchema, { intent: "restart" })).toBe(true);
+        expect(Value.Check(drainRequestSchema, { cause: "desktop" })).toBe(false);
+        expect(Value.Check(drainRequestSchema, { intent: "restart", targetVersion: "" })).toBe(
+            false,
+        );
+        expect(Value.Check(drainRequestSchema, { intent: "restart", extra: true })).toBe(false);
     });
 });
 
