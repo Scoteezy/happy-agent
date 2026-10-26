@@ -25,9 +25,12 @@ and native Windows does not support Git Bash. Tool descriptions must agree with 
 A Codex model's own prompt is its `instructions_template` from
 `codex-rs/models-manager/models.json` in openai/codex, with `You are Codex` and `As Codex` turned
 into Happy Agent's identity markers. The model's separate `persistent_instructions` belong to
-Codex's persistent mode and are not part of the prompt. GPT-6.1 Sol is the first Codex model with a
-prompt of its own; the others still share the GPT-5.6 template taken the same way, even where Codex
-now ships a newer one for them.
+Codex's persistent mode and are not part of the prompt. GPT-6.1 Sol and Terra have their own
+instruction templates. Terra originally fell through to the generic GPT-5.6 prompt, which did not
+match its published harness. Its separate literal copy now follows OpenAI's catalog at
+126a0ee92ed2c5e73cd8a8f7e37563e8527552d7, preserving Terra's wording rather than silently inheriting
+later Sol changes. Other Codex models still share the GPT-5.6 template taken the same way, even
+where Codex now ships a newer one for them.
 
 ## Prompts mention only what Happy Agent has
 

@@ -137,9 +137,11 @@ const MODEL_CONTEXTS: Readonly<Record<string, AgentModelContext>> = Object.freez
         contextWindow: 272_000,
         autoCompactWindow: 244_800,
     }),
+    // Codex's subscription default is 500k; 872k is its optional maximum, not its default.
+    // https://github.com/openai/codex/blob/126a0ee92ed2c5e73cd8a8f7e37563e8527552d7/codex-rs/models-manager/models.json
     "openai/gpt-6.1-terra": Object.freeze({
-        contextWindow: 272_000,
-        autoCompactWindow: 244_800,
+        contextWindow: 500_000,
+        autoCompactWindow: 450_000,
     }),
     "openai/gpt-6-astra": Object.freeze({
         contextWindow: 272_000,
@@ -196,7 +198,9 @@ const ALL_BUT_OFF: AgentModel["effortLevels"] = ["low", "medium", "high", "xhigh
  */
 const CATALOG: readonly CatalogAgentModel[] = [
     model("codex", "openai/gpt-6.1-sol", "GPT-6.1 Sol", ALL_BUT_OFF, "high", ["priority"]),
-    model("codex", "openai/gpt-6.1-terra", "GPT-6.1 Terra", ALL_BUT_OFF, "medium", ["priority"]),
+    // Same source as MODEL_CONTEXTS: low by default, Fast=priority (1.5x speed).
+    // Like Sol, omit upstream's automatic-delegation "ultra" from Happy's effort surface.
+    model("codex", "openai/gpt-6.1-terra", "GPT-6.1 Terra", ALL_BUT_OFF, "low", ["priority"]),
     model("codex", "openai/gpt-6-astra", "GPT-6 Astra", ALL_BUT_OFF, "high", ["priority"]),
     model("codex", "openai/gpt-6-sol", "GPT-6 Sol", ALL_BUT_OFF, "high", ["priority"]),
     model("codex", "openai/gpt-6-luna", "GPT-6 Luna", ALL_BUT_OFF, "medium", ["priority"]),

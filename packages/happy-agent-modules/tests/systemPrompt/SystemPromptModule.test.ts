@@ -77,6 +77,18 @@ async function moduleWithCatalog(models: readonly AgentModel[] = []): Promise<{
 }
 
 describe("SystemPromptModule", () => {
+    it("uses Terra's published instructions rather than Sol's or the Codex fallback", () => {
+        const terra = systemPromptForModel({ model: "openai/gpt-6.1-terra" });
+        expect(terra).toContain(
+            "State the intended action directly. Avoid adding what you won't do, what will remain unchanged",
+        );
+        expect(terra).not.toContain("Avoid unnecessary apologies and self-blame.");
+        expect(terra).not.toBe(systemPromptForModel({ model: "openai/gpt-6.1-sol" }));
+        expect(terra).not.toBe(systemPromptForModel({ providerKind: "codex" }));
+        expect(terra).not.toContain("functions.exec`");
+        expect(terra).not.toContain("# Plugins");
+    });
+
     it("gives each model the prompt it was written for", async () => {
         const { instructions } = await moduleWithCatalog();
 

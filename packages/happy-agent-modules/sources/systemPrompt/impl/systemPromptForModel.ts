@@ -9,6 +9,7 @@ import { claude_sonnet_5_5_system_prompt } from "../prompts/claude/claude_sonnet
 import { claude_sonnet_5_system_prompt } from "../prompts/claude/claude_sonnet_5_system_prompt.js";
 import { codex_agent_instructions } from "../prompts/codex/codex_agent_instructions.js";
 import { codex_gpt_6_1_sol_instructions } from "../prompts/codex/codex_gpt_6_1_sol_instructions.js";
+import { codex_gpt_6_1_terra_instructions } from "../prompts/codex/codex_gpt_6_1_terra_instructions.js";
 import { grok_4_5_system_prompt } from "../prompts/grok/grok_4_5_system_prompt.js";
 import { kimi_k3_system_prompt } from "../prompts/kimi/kimi_k3_system_prompt.js";
 import { glm_5_3_system_prompt } from "../prompts/glm/glm_5_3_system_prompt.js";
@@ -28,6 +29,7 @@ const promptsByModel: Readonly<Record<string, string>> = Object.freeze({
     "anthropic/fable-5": claude_fable_5_system_prompt,
     "anthropic/opus-4-8": claude_opus_4_8_system_prompt,
     "openai/gpt-6.1-sol": codex_gpt_6_1_sol_instructions,
+    "openai/gpt-6.1-terra": codex_gpt_6_1_terra_instructions,
     "moonshotai/kimi-k3": kimi_k3_system_prompt,
     "zai/glm-5.3": glm_5_3_system_prompt,
 });

@@ -32,10 +32,12 @@ const MODEL_PROPERTIES: Readonly<Record<string, CodexModelProperties>> = {
         defaultEffort: "low",
         responsesLite: true,
     },
+    // Codex subscription defaults, not the larger OpenAI API window:
+    // https://github.com/openai/codex/blob/126a0ee92ed2c5e73cd8a8f7e37563e8527552d7/codex-rs/models-manager/models.json
     "gpt-6.1-terra": {
         compactionHash: "3000",
-        contextWindow: 272_000,
-        defaultEffort: "medium",
+        contextWindow: 500_000,
+        defaultEffort: "low",
         responsesLite: true,
     },
     "gpt-6-astra": {

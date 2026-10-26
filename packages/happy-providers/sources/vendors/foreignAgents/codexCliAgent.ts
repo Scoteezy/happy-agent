@@ -7,12 +7,13 @@ import {
 } from "@/vendors/foreignAgents/ForeignAgent.js";
 import { codexAppServerConnect } from "@/vendors/codexAppServer/codexAppServerConnect.js";
 import { codexAppServerLaunch } from "@/vendors/codexAppServer/resolveCodexExecutable.js";
+import { getCodexModelProperties } from "@/vendors/codex/impl/getCodexModelProperties.js";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 const models: readonly ForeignAgentModel[] = [
     model("gpt-6.1-sol", "Codex · GPT-6.1 Sol", "high"),
-    model("gpt-6.1-terra", "Codex · GPT-6.1 Terra", "medium"),
+    model("gpt-6.1-terra", "Codex · GPT-6.1 Terra", "low"),
     model("gpt-6-sol", "Codex · GPT-6 Sol", "high"),
     model("gpt-6-luna", "Codex · GPT-6 Luna", "medium"),
 ];
@@ -36,9 +37,9 @@ export const codexCliAgent: ForeignAgent = {
         ),
     models,
     modelsFromSelector: (values) =>
-        foreignModelsWithEfforts("codex-cli", values, (_value, name) => ({
+        foreignModelsWithEfforts("codex-cli", values, (value, name) => ({
             name: `Codex · ${name}`,
-            contextWindow: 272_000,
+            contextWindow: getCodexModelProperties(value)?.contextWindow ?? 272_000,
         })),
     profile: {
         modelOptions: (selected, effort) => {
@@ -80,6 +81,6 @@ function model(
         name: label,
         effortLevels: EFFORTS,
         defaultEffort,
-        contextWindow: 272_000,
+        contextWindow: getCodexModelProperties(name)?.contextWindow ?? 272_000,
     };
 }

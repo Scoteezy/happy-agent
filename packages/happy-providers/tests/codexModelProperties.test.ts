@@ -7,14 +7,14 @@ import { isCodexV2Model } from "@/vendors/codex/impl/isCodexV2Model.js";
 import { resolveCodexReasoningEffort } from "@/vendors/codex/impl/resolveCodexReasoningEffort.js";
 
 describe("Codex model properties", () => {
-    it("uses the Terra request profile for GPT-6.1 Terra", () => {
+    it("uses OpenAI's published GPT-6.1 Terra subscription profile", () => {
         expect(getCodexModelProperties("gpt-6.1-terra")).toEqual({
             compactionHash: "3000",
-            contextWindow: 272_000,
-            defaultEffort: "medium",
+            contextWindow: 500_000,
+            defaultEffort: "low",
             responsesLite: true,
         });
-        expect(resolveCodexReasoningEffort("gpt-6.1-terra", undefined)).toBe("medium");
+        expect(resolveCodexReasoningEffort("gpt-6.1-terra", undefined)).toBe("low");
         expect(isCodexV2Model("gpt-6.1-terra")).toBe(true);
         expect(codexModelsShareConfiguration("gpt-6.1-terra", "gpt-6.1-terra")).toBe(true);
         for (const other of ["gpt-6.1-sol", "gpt-5.6-terra"]) {

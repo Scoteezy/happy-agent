@@ -1,5 +1,14 @@
 # Config module learnings
 
+## Terra uses its published Codex subscription profile
+
+GPT-6.1 Terra initially copied historical Terra limits without published evidence. OpenAI's Codex
+catalog now supplies its actual subscription profile: a 500k default window, low default effort,
+and priority Fast at 1.5x speed. The native catalog and CLI fallback use those values; the normal
+90% Codex compaction threshold is 450k. Codex's optional 872k maximum and the OpenAI API's larger
+window do not replace the subscription default. Keep provenance beside curated model data and
+check the upstream entry before adding or changing a model rather than inferring from its name.
+
 ## Selectable catalogs follow generations
 
 Model size used to outrank generation in Claude's catalog, and GPT-5.6 remained selectable after

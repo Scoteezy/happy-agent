@@ -908,13 +908,13 @@ describe("ConfigModule", () => {
         expect(config.models[0]).toMatchObject({
             id: "openai/gpt-6.1-terra",
             name: "GPT-6.1 Terra",
-            defaultEffort: "medium",
+            defaultEffort: "low",
             effortLevels: ["low", "medium", "high", "xhigh", "max"],
             serviceTiers: ["priority"],
         });
         expect(config.modelContext("codex", "openai/gpt-6.1-terra")).toEqual({
-            contextWindow: 272_000,
-            autoCompactWindow: 244_800,
+            contextWindow: 500_000,
+            autoCompactWindow: 450_000,
         });
         expect(
             config.catalog.filter((model) => model.providerId === "codex").map((model) => model.id),
