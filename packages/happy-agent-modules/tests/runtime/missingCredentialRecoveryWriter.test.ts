@@ -35,7 +35,7 @@ describe.each([
         source: "default Codex",
         type: "codex",
         vendorName: "Codex",
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6.1-sol",
         fields: [],
         product: "Codex",
         command: "codex login",

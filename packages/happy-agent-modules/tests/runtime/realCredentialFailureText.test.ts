@@ -79,7 +79,7 @@ base_url = "http://127.0.0.1:${address.port}/v1"
 transport = "sse"
 [defaults]
 provider = "private_account"
-model = "openai/gpt-5.6-sol"
+model = "openai/gpt-6.1-sol"
 [settings]
 inference_max_retries = 0
 [telegram]
@@ -129,7 +129,7 @@ api_url = "http://127.0.0.1:${address.port}"
                     text: "Exercise the real terminal credential failure.",
                     mode: {
                         providerId: "private_account",
-                        modelId: "openai/gpt-5.6-sol",
+                        modelId: "openai/gpt-6.1-sol",
                         effort: "medium",
                         serviceTier: null,
                         permissionMode: "auto",

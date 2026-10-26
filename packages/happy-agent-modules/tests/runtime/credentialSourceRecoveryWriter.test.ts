@@ -30,7 +30,7 @@ describe.each([
             const secret = "synthetic-S5-private-secret";
             const customDirectory = join(root, "custom-claude");
             const codex = source === "native Codex";
-            const model = codex ? "openai/gpt-5.6-sol" : "anthropic/sonnet-5-5";
+            const model = codex ? "openai/gpt-6.1-sol" : "anthropic/sonnet-5-5";
             let fixture: Awaited<ReturnType<typeof credentialWriterRuntime>> | undefined;
             let nativeClaude: ClaudeCodeCredential | undefined;
             try {

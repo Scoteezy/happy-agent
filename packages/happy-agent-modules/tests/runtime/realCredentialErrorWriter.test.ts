@@ -54,7 +54,7 @@ base_url = "http://127.0.0.1:${address.port}/v1"
 transport = "sse"
 [defaults]
 provider = "private_account"
-model = "openai/gpt-5.6-sol"
+model = "openai/gpt-6.1-sol"
 [settings]
 inference_max_retries = 0
 `);
@@ -69,7 +69,7 @@ inference_max_retries = 0
                 text: "Exercise a real terminal credential failure.",
                 mode: {
                     providerId: "private_account",
-                    modelId: "openai/gpt-5.6-sol",
+                    modelId: "openai/gpt-6.1-sol",
                     effort: "medium",
                     serviceTier: null,
                     permissionMode: "auto",
@@ -114,7 +114,7 @@ inference_max_retries = 0
                         providerId: "private_account",
                         providerType: "codex",
                         account: null,
-                        modelId: "openai/gpt-5.6-sol",
+                        modelId: "openai/gpt-6.1-sol",
                     },
                     credentialSource: {
                         kind: "configuration",

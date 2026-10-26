@@ -20,7 +20,7 @@ export const writerFailureText =
     "private_account couldn't authenticate. Check its sign-in settings, then retry.";
 export const writerMode = {
     providerId: "private_account",
-    modelId: "openai/gpt-5.6-sol",
+    modelId: "openai/gpt-6.1-sol",
     effort: "medium",
     serviceTier: null,
     permissionMode: "auto" as const,
@@ -178,7 +178,7 @@ transport = "sse"`
 }
 [defaults]
 provider = "private_account"
-model = "${options.defaultModel ?? "openai/gpt-5.6-sol"}"
+model = "${options.defaultModel ?? "openai/gpt-6.1-sol"}"
 [settings]
 inference_max_retries = 0
 [feature.team]
