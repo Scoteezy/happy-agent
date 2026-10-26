@@ -3,13 +3,11 @@ import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { credentialWriterRuntime, writerMode } from "../support/credentialWriterRuntime.js";
 
-// Maintainer discussion #9: Base deliberately treats a trailing failure note as owed after a
-// restart (8be07b97; AgentBaseBlackbox "answers again after a restart when the last turn
-// failed"), so it re-answers a settled failure before accepting the next send. Published
-// @slopus/happy-agent-base@0.0.63 dist/AgentBase.js:2988-3002 writes the note; 2616-2622 treats
-// it as owed; 2227-2230 and 2281-2284 run it before the send. This expected failure records the
-// alternative under discussion: one foreground request per send. If Base adopts it, convert
-// this to `it` in that re-pin. Keep it independent of credential diagnostics.
+// Maintainer discussion #9: since @slopus/happy-agent-base 0.0.66, a settled run leaves nothing
+// owed after a restart, so a trailing failure note is not answered again before the next send.
+// Only an explicit start, or a run an earlier process left unfinished, resumes from the
+// transcript. One send makes one foreground request. Keep it independent of credential
+// diagnostics.
 it("the restart-send regression fixture accepts the new user message and sends its foreground request", async () => {
     const result = await restartSend();
     expect(result.userAccepted).toBe(true);
@@ -18,7 +16,7 @@ it("the restart-send regression fixture accepts the new user message and sends i
     ]);
 });
 
-it.fails("maintainer discussion #9: after a settled failure and restart, a new send would make exactly one foreground request (current Base re-answers by design)", async () => {
+it("after a settled failure and restart, a new send makes exactly one foreground request", async () => {
     const result = await restartSend();
     // No session filter or exclusion can conceal an extra foreground request.
     expect(result.requests).toHaveLength(1);
