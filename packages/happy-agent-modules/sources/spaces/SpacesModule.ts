@@ -182,15 +182,15 @@ const CHECK_INTERVAL_MS = 15_000;
 const BRIEF_FUNCTION = "spaces.briefPrioritizing";
 /** The opening task of a new Prioritizing; work seeded before it existed waits for it. */
 const PRIORITIZING_OPENING =
-    "Keep this person's sidebar tidy from now on. It was just made to mirror the sidebar they already know, so change nothing else in it now: read it with list_sidebar, add your own row right below Happy, and give rows and sessions icons. From your next notice on, place new work as your instructions say, and propose anything larger.";
+    "Keep this person's sidebar tidy from now on. It was just made to mirror the sidebar they already know, so change nothing else in it now: read it with list_sidebar, show your own conversation as a session under Happy, and give rows and sessions icons. From your next notice on, place new work as your instructions say, and propose anything larger.";
 /**
  * Told once to a Prioritizing that predates its own row. What it still needs to do is its own call,
  * from its conversation and the sidebar.
  */
 const PRIORITIZING_UPGRADED =
-    "Happy Agent was updated. You now have a conversation and a row of your own, your notes go to your conversation, and larger changes are proposals the person accepts. Check the sidebar and your history: add your own row if it is missing and the person never removed it, and if the person has not seen a proposal from you yet, propose once how to file the work they already have.";
+    "Happy Agent was updated. You now have a conversation of your own, your notes go to your conversation, and larger changes are proposals the person accepts. Check the sidebar and your history: show your conversation as a session under Happy, and if the person has not seen a proposal from you yet, propose once how to file the work they already have.";
 const PRIORITIZING_UPDATED =
-    "Happy Agent was updated, and your instructions may have changed. Check the sidebar against them, starting with where your own row stands.";
+    "Happy Agent was updated, and your instructions may have changed. Check the sidebar against them, starting with where your own conversation stands.";
 /** The icon of Prioritizing's own row. */
 const FOCUS_ICON: SpaceIconSlug = "prioritize";
 /** The icon of Voice's own row. */
@@ -476,8 +476,10 @@ export class SpacesModule implements AgentModule {
             const asked = fromPerson
                 ? await queryOwnerByPrioritizingAgent(ctx, scope.agent.id)
                 : undefined;
-            if (asked !== undefined)
+            if (asked !== undefined) {
                 await writeOwnerState(ctx, { ...asked, applyRequestedAt: Date.now() });
+                return;
+            }
             const own = await querySpacesByAgent(ctx, scope.agent.id);
             const rows = own.length > 0 ? own : await this.#sessionRows(ctx, scope.agent.id);
             const text = accepted.message.content
@@ -485,13 +487,14 @@ export class SpacesModule implements AgentModule {
                 .join("\n")
                 .trim();
             const now = Date.now();
-            let forward: boolean | undefined;
+            let agentText: { readonly text: string | undefined } | undefined;
             for (const row of rows) {
-                if (row.role !== "item" || text.length === 0) continue;
+                if (row.role === "focus" || text.length === 0) continue;
                 // New work is told to Prioritizing with its first message, whoever wrote it:
                 // the person, or the agent that created the task. Another agent's message counts
                 // only when it opens the conversation, not a report into work that had others.
                 if (
+                    row.role === "item" &&
                     own.length > 0 &&
                     row.briefedAt === undefined &&
                     (row.icon === undefined || row.icon.type === "stem_cell") &&
@@ -510,11 +513,12 @@ export class SpacesModule implements AgentModule {
                     continue;
                 }
                 if (!fromPerson) continue;
-                // Every later message in work started as a stem cell, or in a session under it,
-                // waits for the next brief with the agent's reply it answers. While the work still
-                // waits for its first placement, the message may make its subject clear, so it wakes.
-                forward ??= await this.#startedAsStemCell(ctx, scope.agent.id);
-                if (!forward) continue;
+                // Every later message the person writes, in any of their rows or a session under
+                // one, waits for the next brief with the agent's reply it answers: what they say
+                // anywhere is what Focus prioritizes by. While the work still waits for its first
+                // placement, the message may make its subject clear, so it wakes.
+                if (!(await this.#stemCellsEnabled(ctx, row.ownerUserId))) continue;
+                agentText ??= { text: await this.#lastAgentText(ctx, scope.agent.id) };
                 const unplaced =
                     own.length > 0 &&
                     row.placement === "pending" &&
@@ -527,7 +531,7 @@ export class SpacesModule implements AgentModule {
                     formatConversationBrief({
                         rowId: row.id,
                         ...(own.length > 0 ? {} : { sessionId: scope.agent.id }),
-                        agentText: await this.#lastAgentText(ctx, scope.agent.id),
+                        agentText: agentText.text,
                         personText: text,
                     }),
                     { replaces: conversationBriefPrefix(row.id), wake: unplaced },
@@ -1310,13 +1314,17 @@ export class SpacesModule implements AgentModule {
             view.document,
             sidebarDiff(view.document, proposed, { widgets: true }),
         );
-        // While the sidebar still mirrors the classic one, Prioritizing may only add its own row.
+        // While the sidebar still mirrors the classic one, Prioritizing may only show its own
+        // conversation under Happy and take out its own row.
         if (
             state.sidebarSeed === true &&
-            !operations.every((operation) => sidebarTarget(operation) === rules.focusId)
+            !operations.every((operation) => {
+                const target = sidebarTarget(operation);
+                return target === rules.focusId || target === state.prioritizingAgentId;
+            })
         )
             throw new SidebarValidationError(
-                "The sidebar still mirrors the person's classic sidebar. Change nothing but adding your own row until your next notice.",
+                "The sidebar still mirrors the person's classic sidebar. Change nothing but your own conversation under Happy until your next notice.",
             );
         const reviewed = applyPrioritizingOperations(view.document, operations, rules, undefined);
         await this.#checkSidebarIds(

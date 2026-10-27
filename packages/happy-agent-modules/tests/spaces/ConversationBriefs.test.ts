@@ -42,7 +42,11 @@ async function setup() {
     await database.ready;
     const invoked: { arguments: { text: string } }[] = [];
     const replies = new Map<string, string[]>();
-    const parents = new Map<string, string>([[REVIEW, STEM]]);
+    // Focus is a subtask too; without its own row, its messages must not count as a session.
+    const parents = new Map<string, string>([
+        [REVIEW, STEM],
+        [PRIORITIZING, PLAIN],
+    ]);
     const spaces = new SpacesModule(
         { configuration: { values: { feature: { team: { enabled: false } } } } } as Params[0],
         {} as Params[1],
@@ -98,7 +102,7 @@ async function setup() {
     return { database, spaces, hooks, replies, invoked, send, briefs, wakeAt };
 }
 
-it("forwards the person's messages in stem-cell work with the agent's reply before each", async () => {
+it("forwards the person's messages in every conversation with the agent's reply before each", async () => {
     const h = await setup();
     try {
         h.replies.set(STEM, ["Which platform first?", "", "Which platform first, iOS or Android?"]);
@@ -110,10 +114,21 @@ it("forwards the person's messages in stem-cell work with the agent's reply befo
                 "Person: Android first, the beta is due Friday.",
             ].join("\n"),
         ]);
-        // Messages an agent sent, and work that did not start as a stem cell, are not forwarded.
+        // Messages an agent sent are not forwarded.
         await h.send(STEM, "Status of the subtask: done.", "agent");
-        await h.send(PLAIN, "Rename the release branch.");
         expect(await h.briefs()).toHaveLength(1);
+        // Work that did not start as a stem cell is forwarded too: what the person says anywhere
+        // is what Focus prioritizes by.
+        await h.send(PLAIN, "Rename the release branch.");
+        expect((await h.briefs()).at(-1)).toBe(
+            [
+                "Conversation in spaceplainaaaaaaaaaaaaaa: the person wrote in row spaceplainaaaaaaaaaaaaaa.",
+                "Person: Rename the release branch.",
+            ].join("\n"),
+        );
+        // Writing to Focus itself is a request to it, never a notice about another row.
+        await h.send(PRIORITIZING, "This week: the Android beta.");
+        expect(await h.briefs()).toHaveLength(2);
         // A session under stem-cell work is forwarded under its row.
         h.replies.set(REVIEW, ["The patch is ready for your review."]);
         await h.send(REVIEW, "Looks good, merge it.");

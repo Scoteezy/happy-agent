@@ -48,7 +48,7 @@ function rules(
 }
 
 describe("Prioritizing's operations", () => {
-    it("removes its old session copy while its own row stays visible when Happy folds, and keeps a copy the person placed", () => {
+    it("takes out its own top-level row without a proposal, stays under Happy, and keeps a row the person placed", () => {
         const sidebar = doc(
             '<happy-space id="happy" expanded="true"><happy-space id="focus-agent"/></happy-space>',
             '<happy-space id="focus"/>',
@@ -61,21 +61,22 @@ describe("Prioritizing's operations", () => {
                 direct: true,
             },
         );
-        const remove: SpaceSidebarOperation[] = [{ type: "remove", id: "focus-agent" }];
+        const remove: SpaceSidebarOperation[] = [{ type: "remove", id: "focus" }];
         const cleaned = applyPrioritizingOperations(sidebar, remove, direct, undefined);
         expect(cleaned.operations).toEqual(remove);
         expect(cleaned.notes).toEqual([]);
+        // Its conversation is reached only by unfolding Happy.
+        expect(shownSidebarRows(cleaned.document)).toEqual(["happy", "focus-agent"]);
         const folded = applySpaceSidebarOperations(cleaned.document, [
             { type: "set", id: "happy", expanded: false },
         ]).document;
-        expect(shownSidebarRows(folded)).toEqual(["happy", "focus"]);
-        expect(folded.items.at(-1)?.id).toBe("focus");
+        expect(shownSidebarRows(folded)).toEqual(["happy"]);
         const kept = applyPrioritizingOperations(
             sidebar,
             remove,
             {
                 ...direct,
-                person: (id, aspect) => id === "focus-agent" && aspect === "place",
+                person: (id, aspect) => id === "focus" && aspect === "place",
             },
             undefined,
         );

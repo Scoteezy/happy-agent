@@ -1,11 +1,14 @@
 /** How much of the agent's last reply a brief quotes: enough to read the person's answer by. */
-const AGENT_EXCERPT = 400;
-/** How much of the person's own message a brief quotes. */
-const PERSON_EXCERPT = 900;
+const AGENT_EXCERPT = 240;
+/**
+ * How much of the person's own message a brief quotes. Every message they write in any of their
+ * conversations is briefed, so each stays a few hundred characters.
+ */
+const PERSON_EXCERPT = 400;
 
 /**
- * A short notice for Prioritizing about one turn in new work's conversation: what the agent last
- * said, and what the person wrote back, or how a session under the row stopped. Bounded well under
+ * A short notice for Prioritizing about one turn in one of the person's conversations: what the
+ * agent last said, and what the person wrote back, or how a session under the row stopped. Bounded
  * one stored brief, so a chatty conversation never crowds out everything else Prioritizing hears.
  * Every brief about one row starts with the same words, so older ones can be replaced.
  */

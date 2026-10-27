@@ -86,12 +86,14 @@ async function setup(title?: string) {
     return { database, spaces, created, titles };
 }
 
-it("creates a helper named Focus and serves that name on its own row", async () => {
+it("creates a helper named Focus, serves that name, and never puts a row of its own in the sidebar", async () => {
     const h = await setup();
     try {
         const sidebar = await h.spaces.sidebar(h.database.context, "standalone");
         expect(h.created).toMatchObject([{ title: "Focus" }]);
         const focus = sidebar.spaces.find((row) => row.role === "focus")!;
+        // The person opens Focus by unfolding Happy; the daemon never adds it at the top level.
+        expect(sidebar.html).not.toContain(focus.id);
         expect(await h.spaces.describe(h.database.context, focus)).toMatchObject({
             title: "Focus",
             target: { kind: "agent" },

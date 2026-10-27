@@ -40,12 +40,13 @@ with `propose_sidebar`, reads the grammar with `get_sidebar_styles`, and sets ro
 with `set_space_icon`. Where things go is its decision, made from its prompt; the daemon only
 keeps it from overriding anything the person last set, and a section it moves carries its rows
 under the same rule. Without the person's words, its batches apply only new work's first
-placement, the folded Distractions section, adding or moving its own row, and what is nested under
-a row; anything else is proposed. An operation that breaks a rule is dropped with a note and the
-rest still applies. Its prompt keeps its own row right under Happy, makes topic sections the layout, with one folded Distractions section for
-work outside the person's focus, and prefers inserting new work over moving anything. Sessions
-stay hidden unless one needs the person, such as for a review, and a shown session counts toward
-the budget.
+placement, the folded Distractions section, adding, moving, or removing its own row, and what is
+nested under a row; anything else is proposed. An operation that breaks a rule is dropped with a
+note and the rest still applies. Its prompt (revision 4) arranges the sidebar around the
+priorities the person stated: Now, Tell people, one row per neglected priority, Waiting on you,
+In hand, and one folded Later, within ten shown rows. It keeps its own conversation as a session
+under Happy and takes out a top-level row of its own. Sessions stay hidden unless one needs the
+person, such as for a review, and a shown session counts toward the budget.
 One applied batch records one factual note in Prioritizing's own conversation.
 
 ## Proposals
@@ -93,21 +94,24 @@ so it can show the conversation before the daemon answers; the row's ID is the r
 separator it is settled right after it. Nothing touches it before its first human message: Prioritizing is not
 briefed, and its icon, moves, and folds are refused. That message wakes Prioritizing, which names
 an icon and places the row when its subject is clear; so does the first message of work another
-agent created, whose row also wakes it on arrival. Every later message the person writes in work
-that started as a stem cell, or in a session under it, waits for the next brief with the agent's
-last text before it, waking Prioritizing only while the row still waits for its first placement (`formatConversationBrief`, the latest three per row), as
-does a session under it that stops, so Prioritizing can place the row once there is signal
-without reading the thread. Stem-cell origin is the subject-naming mark `createStemCell` sets. Removing a stem cell nobody wrote in archives its
-task.
+agent created, whose row also wakes it on arrival. Every later message the person writes in any
+of their rows (Happy and Voice included, Focus itself excepted) or a session under one waits for
+the next brief with the agent's last text before it, a few hundred characters each, waking
+Prioritizing only while the row still waits for its first placement (`formatConversationBrief`,
+the latest three per row). A session under work that started as a stem cell that stops is briefed
+the same way, so Prioritizing can place the row once there is signal without reading the thread.
+Stem-cell origin is the subject-naming mark `createStemCell` sets. Removing a stem cell nobody
+wrote in archives its task.
 
 ## Focus
 
 One long-running subtask of Happy per person, made through `SubtasksModule.create` — the path
 every subtask takes — with the person's first stem cell, and made again with the next one if the
 person archived it. Until then there is none, and briefs and tidy requests are dropped; its
-opening task adds its own row and gives icons. It appears in Happy's subtasks like any other, but
-is created `unreported`, and its notes go to its own conversation, which has a row of its own
-(role `focus`) that Prioritizing inserts itself: Happy hears nothing from it. It is recognised by
+opening task shows its conversation under Happy and gives icons. It appears in Happy's subtasks
+like any other, but is created `unreported`, and its notes go to its own conversation, which the
+person opens by unfolding Happy: Happy hears nothing from it. Its space (role `focus`) still
+exists for its title and icon, but the prompt keeps it out of the document. It is recognised by
 the agent ID stored
 in the person's bookkeeping, not by metadata. It runs on the default model from Settings at that
 model's default effort, and

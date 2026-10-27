@@ -1,15 +1,38 @@
 # Spaces — learnings
 
-## Focus is the default name and has a top-level row
+## Focus is the default name and lives under Happy
 
 The sidebar helper used to be created as Prioritizing. New helpers are now named Focus; an
 existing conversation keeps its stored title, including a name the person chose. Display and
 batch notes read that stored title, with Focus only as the fallback. No title migration runs.
 
-A helper shown as an agent-ID session under Happy disappears when Happy folds. Its prompt now
-explicitly places its space-ID row at the top level immediately after Happy and removes an old
-nested agent-ID copy unless the person placed it there. Placement stays the model's decision,
-and the instructions revision rises so existing helpers hear the correction on startup.
+A top-level Focus row right after Happy was tried and rejected. Kirill: "focus should not be shown
+on its own why the funck i need it? we only need it if i open it when unfolding happy". Focus now
+keeps its conversation nested under Happy as a session, never unfolds Happy, and removes a
+top-level row of its own unless the person placed it. That removal applies without a proposal, the
+one daemon change; where Focus stands is otherwise only its prompt, and the revision rise tells
+existing helpers on their next start.
+
+## Focus arranges by the person's stated priorities (revision 4)
+
+An eval of Focus prompts on Kirill's real week picked "compass v2", and Kirill said "ship it". The
+prompt now keeps its structure: Now (at most 3 rows serving the priorities), Tell people (shipped,
+no post yet), one row per neglected priority, Waiting on you, In hand (rows written in during the
+last 30 minutes), and one folded Later; at most 10 rows shown and 6 sections, each label once.
+"Doing nothing is usually right" and the topic-section, Bots/Tasks, Distractions, and Stale rules
+are gone; over budget is no longer a resting state. The eval hardcoded Kirill's four priorities;
+in the product they are what the person stated in their own words, kept as a "Priorities: …" line
+in Focus's own replies (its notes), changed only by their words, and guessed aloud until stated.
+Shipping needs explicit evidence (released, published, or the person said done; approval is not
+shipping), and Focus never nudges about releases, regressions, or bug fixes. The first run under
+this revision makes one bold proposal rebuilding an old-style sidebar; no code migration runs, only
+the update notice and the prompt.
+
+Focus heard only the messages in work that began as a stem cell, about a third of what the person
+wrote, so it could not tell what they were pushing. Every message the person writes in any of their
+rows, or a session under one, is now briefed with the agent's last text before it, bounded to a few
+hundred characters each and batched as before. Agents' messages, lifecycle, and status from other
+sessions are still not forwarded.
 
 ## Prioritizing decides from its prompt; the daemon keeps integrity
 
@@ -221,9 +244,9 @@ characters), conversation (about 4,000), and answer (about 24,000) is bounded
 Reading every thread made each turn long, and the first message alone often said too little to
 place new work. Kirill: send every message the person writes in stem-cell chats to the focus
 agent, "and the last text message before", so it has enough context. Each later message the person
-writes in work that started as a stem cell, or in a session under it, is now a short
-notice quoting the agent's last text reply (400 characters) and the message (900), without tool
-calls; a session under such work that stops is one too, with its last reply. Only the latest three
+writes is now a short notice quoting the agent's last text reply and the message, without tool
+calls (widened from stem-cell work to every row, and shortened to 240 and 400 characters, in
+revision 4 above); a session under stem-cell work that stops is one too, with its last reply. Only the latest three
 notices per row wait, so a busy chat never crowds the rest out. They wait for the next wake rather
 than causing one, except while the work still waits for its first placement, when a message may
 make its subject clear. Stem-cell origin is read from the subject-naming mark, which only
@@ -322,11 +345,12 @@ rows in between, and the refusal of a move placed right after its own row says t
 instead. `list_sidebar` also marked its own row `noConversation`, though it has one; only shared
 Surfaces carry that mark now.
 
-## Prioritizing shows its own row, once
+## Prioritizing has its own conversation
 
 Notes in Happy's chat interrupted the main agent: "the focus agent normally should never bother the
-main Happy agent". Prioritizing has a row of its own (role `focus`, target kind `agent`), which is
-how the person learns a proposal exists. The daemon makes the space but never puts it in the
+main Happy agent". Prioritizing has a space of its own (role `focus`, target kind `agent`). It was
+first shown as a top-level row so the person learns a proposal exists; the prompt now keeps that
+row out (see "Focus is the default name and lives under Happy"), and what follows is its history. The daemon makes the space but never puts it in the
 document; Prioritizing inserts it, even during the seed, whenever it finds it missing, unless the
 person removed it. Inserting it twice is a duplicate ID. A Prioritizing from before its row gets
 the space on the first start of a newer daemon, and one upgrade notice; what to do from there it

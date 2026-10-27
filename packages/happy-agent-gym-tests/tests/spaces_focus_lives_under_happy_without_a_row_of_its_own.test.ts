@@ -3,14 +3,17 @@ import { expect, it } from "vitest";
 import { sidebarGym } from "./support/sidebarGym.js";
 
 const line = (id: string) => `  <happy-space id="${id}"/>\n`;
+const under = (parent: string, child: string) =>
+    `  <happy-space id="${parent}">\n    <happy-space id="${child}"/>\n  </happy-space>\n`;
 
-it("lets Prioritizing move its own row back under Happy itself, tells it once after an update, and keeps a row the person placed", async () => {
+it("lets Focus take out its own top-level row and live under Happy, tells it once after an update, and keeps a row the person placed", async () => {
     const h = await sidebarGym();
     try {
         const first = await h.read();
-        const prioritizing = await h.manager();
+        const focus = await h.manager();
         const happy = first.spaces.find((row) => row.title === "Happy")!;
-        const own = first.spaces.find((row) => row.target.agentId === prioritizing)!;
+        const own = first.spaces.find((row) => row.target.agentId === focus)!;
+        // An older Focus put a row of its own right after Happy, as Kirill's sidebar still has.
         await h.call("edit_sidebar", {
             baseVersion: first.version,
             edits: [{ oldText: line(happy.id), newText: `${line(happy.id)}${line(own.id)}` }],
@@ -18,46 +21,26 @@ it("lets Prioritizing move its own row back under Happy itself, tells it once af
         await h.gym.waitUntil(async () => {
             const doc = await h.read();
             return doc.html.includes(`${line(happy.id)}${line(own.id)}`) ? true : undefined;
-        }, "Prioritizing's own row under Happy");
+        }, "Focus's old row under Happy");
         await h.settle();
         await h.unseed();
         await h.settle();
 
-        // New work goes right below Happy, as always; the daemon does not move Prioritizing's row.
-        const task = (await h.gym.client.createTask({ name: "Release notes" })).task.id;
-        const above = await h.gym.waitUntil(async () => {
-            const doc = await h.read();
-            const id = doc.spaces.find((row) => row.target.id === task)?.id;
-            return id !== undefined &&
-                doc.html.includes(`${line(happy.id)}${line(id)}${line(own.id)}`)
-                ? id
-                : undefined;
-        }, "the new row between Happy and Prioritizing's row");
-        await h.settle();
-
-        // Its own row is a conversation it can read, and it is not the person's.
-        const listed = JSON.parse((await h.call("list_sidebar", {})).text) as {
-            version: number;
-            spaces: { id: string; noConversation?: true; placedByPerson?: true }[];
-        };
-        expect(listed.spaces.find((row) => row.id === own.id)).not.toHaveProperty("noConversation");
-        expect(listed.spaces.find((row) => row.id === own.id)).not.toHaveProperty("placedByPerson");
-
-        // Prioritizing moves its own row back with an ordinary edit, no proposal needed.
-        const pushed = await h.read();
+        // Taking out its own row and showing its conversation under Happy needs no proposal.
+        const shown = await h.read();
         const moved = await h.call("edit_sidebar", {
-            baseVersion: pushed.version,
+            baseVersion: shown.version,
             edits: [
-                { oldText: line(own.id), newText: "" },
-                { oldText: line(happy.id), newText: `${line(happy.id)}${line(own.id)}` },
+                { oldText: `${line(happy.id)}${line(own.id)}`, newText: under(happy.id, focus) },
             ],
         });
         expect(moved.text).toContain("queued");
         await h.settle();
-        const restored = await h.read();
-        expect(restored.html).toContain(`${line(happy.id)}${line(own.id)}${line(above)}`);
+        const nested = await h.read();
+        expect(nested.html).toContain(under(happy.id, focus));
+        expect(nested.html).not.toContain(own.id);
 
-        // A Prioritizing from before its current instructions is told once after an update.
+        // A Focus from before its current instructions is told once after an update.
         const told = () =>
             h.gym.inference.requests.filter((request) =>
                 JSON.stringify(request.messages.at(-1)).includes(
@@ -78,23 +61,23 @@ it("lets Prioritizing move its own row back under Happy itself, tells it once af
         await h.settle();
         expect(told()).toBe(1);
 
-        // Once the person places Prioritizing's row, it stays where they put it.
+        // A row of its own the person placed stays where they put it.
         const before = await h.read();
         await h.gym.client.applySpaceSidebarOperations({
             mutationId: "own-row-down",
             baseVersion: before.version,
-            operations: [{ type: "move", id: own.id, to: { after: "tasks" } }],
+            operations: [
+                { type: "insert", node: { type: "space", id: own.id }, to: { after: "tasks" } },
+            ],
         });
         await h.settle();
         const placed = await h.read();
+        expect(placed.html).toContain(line(own.id));
         expect(
             (
                 await h.call("edit_sidebar", {
                     baseVersion: placed.version,
-                    edits: [
-                        { oldText: line(own.id), newText: "" },
-                        { oldText: line(happy.id), newText: `${line(happy.id)}${line(own.id)}` },
-                    ],
+                    edits: [{ oldText: line(own.id), newText: "" }],
                 })
             ).text,
         ).toContain("Keep the person's manual placement.");
