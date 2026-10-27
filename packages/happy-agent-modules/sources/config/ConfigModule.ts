@@ -10,7 +10,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type {
     AgentModel,
@@ -3486,6 +3486,18 @@ export class ConfigModule implements AgentModule {
      */
     get workspaceSettings(): HappyAgentConfigValues["workspace"] {
         return this.configuration.values.workspace;
+    }
+
+    /** The actual user catalog location, home-relative when it belongs to this user's home. */
+    userMcpConfigLocation(): string {
+        const path = this.configuration.paths.mcpConfigPath;
+        const home = this.#environmentValue("HOME")?.trim() || homedir();
+        const fromHome = relative(home, path);
+        return fromHome !== ".." && !fromHome.startsWith(`..${sep}`) && !isAbsolute(fromHome)
+            ? fromHome === ""
+                ? "~"
+                : `~${sep}${fromHome}`
+            : path;
     }
 
     /** Read the Happy-owned MCP catalog fresh so an online reload sees edits immediately. */

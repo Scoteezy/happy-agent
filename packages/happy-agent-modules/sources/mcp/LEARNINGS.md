@@ -1,5 +1,14 @@
 # MCP module learnings
 
+## Model guidance uses the resolved configuration path
+
+The user-wide tools wrote the correct file but described the macOS-only `~/Happy/Config` path
+on every platform. On Linux, agents following those descriptions could not inspect or remove the
+file they had just configured. Tool descriptions, parameter guidance, and review progress now
+ask configuration for the actual MCP path, abbreviated relative to the user's home where possible.
+This preserves custom Happy homes and native platform casing instead of maintaining another path
+rule in the MCP tools. Linux guidance is covered through the real tool definitions.
+
 ## Happy owns global and demand-driven workspace catalogs
 
 Parsing MCP entries from general project or provider configuration without installing a production

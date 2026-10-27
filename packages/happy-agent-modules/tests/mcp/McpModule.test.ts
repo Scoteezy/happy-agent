@@ -26,6 +26,43 @@ afterEach(async () => {
 });
 
 describe("McpModule production discovery", () => {
+    it.runIf(process.platform === "linux")(
+        "names the resolved Linux user catalog in configuration tools",
+        async () => {
+            const root = await temporaryRoot();
+            const config = await ConfigModule.load(join(root, ".happy"), {
+                environment: { HOME: root },
+            });
+            const module = mcpModule(
+                config,
+                new UserInputModule(new PresenceModule(config)),
+                new WorkspaceEvents().module,
+            );
+            try {
+                const tools = await (await resolveModuleHooks(ctx, module)).tools!(ctx, scope());
+                const configure = tools.find((tool) => tool.name === "configure_mcp_server")!;
+                const reload = tools.find((tool) => tool.name === "reload_mcp_servers")!;
+                const expected = "~/happy/config/mcp.toml";
+                for (const text of [
+                    configure.description,
+                    configure.parameters?.properties.scope.description,
+                    configure.describeAutoPermissionAction?.(
+                        { action: "remove", name: "docs" } as never,
+                        ctx,
+                    ),
+                    reload.description,
+                    reload.parameters?.properties.global.description,
+                    reload.describeAutoPermissionAction?.({ global: true } as never, ctx),
+                ]) {
+                    expect(text).toContain(expected);
+                    expect(text).not.toContain("~/Happy/Config");
+                }
+            } finally {
+                await module.close();
+            }
+        },
+    );
+
     it("discovers and calls a Happy-owned stdio server", async () => {
         const { module } = await configuredModule({ docs: stdio("docs") });
         try {

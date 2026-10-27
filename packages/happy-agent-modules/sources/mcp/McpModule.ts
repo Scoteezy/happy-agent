@@ -498,6 +498,11 @@ export class McpModule implements AgentModule {
         });
     }
 
+    /** Where configuration actually reads and writes the shared user catalog. */
+    userMcpConfigLocation(): string {
+        return this.#config.userMcpConfigLocation();
+    }
+
     /**
      * Where the calling agent's folder catalog lives, in words an approval can show, or undefined
      * while the agent is not attached to a folder.

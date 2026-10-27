@@ -360,8 +360,9 @@ cannot set it, since a repository must not choose which account this installatio
 ## MCP has dedicated global and workspace sources
 
 Combining MCP records into `happy.toml` made MCP look configured while provider and runtime wiring
-could disagree about discovery. MCP now comes from dedicated files: `~/Happy/Config/mcp.toml` for
-the user's catalog and root `mcp.toml` for a workspace catalog. Runtime, Codex, Claude, and other
+could disagree about discovery. MCP now comes from dedicated files: user-wide `mcp.toml` in
+`~/Happy/Config` on macOS or `~/happy/config` on Linux and Windows, and root `mcp.toml` for a
+workspace catalog. Runtime, Codex, Claude, and other
 provider MCP settings do not enter the Happy MCP catalog. The config module owns parsing, bounded
 validation, the global path, and atomic global one-server updates, while the MCP module owns live
 clients, workspace demand, sharing, and reconciliation.

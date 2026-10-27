@@ -2,9 +2,10 @@
 
 `McpModule` owns Happy Agent's MCP clients, transports, child processes, live connections, tools,
 workspace demand, and reload lifecycle. It depends on `ConfigModule` for parsing the Happy-owned
-`~/Happy/Config/mcp.toml` and workspace-root `mcp.toml` files, on `WorkspacesModule` for archival,
-and on `UserInputModule` for MCP elicitation. It does not inspect or import MCP configuration from
-Codex, Claude, or another model provider.
+user-wide `mcp.toml` (`~/Happy/Config` on macOS, `~/happy/config` on Linux, or
+`%USERPROFILE%\happy\config` on Windows) and workspace-root `mcp.toml` files, on `WorkspacesModule`
+for archival, and on `UserInputModule` for MCP elicitation. It does not inspect or import MCP
+configuration from Codex, Claude, or another model provider.
 
 The module connects enabled user-wide stdio and Streamable HTTP servers concurrently at startup.
 A workspace catalog is the root `mcp.toml` of an agent's working directory, so a project workspace,

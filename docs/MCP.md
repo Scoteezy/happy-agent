@@ -6,11 +6,10 @@ permission model.
 
 ## Configuration files
 
-Configure user-wide servers in:
-
-```text
-~/Happy/Config/mcp.toml
-```
+Configure user-wide servers in `mcp.toml` in your user configuration directory:
+`~/Happy/Config` on macOS, `~/happy/config` on Linux, or
+`%USERPROFILE%\happy\config` on Windows. If the private Happy home is customized,
+the configuration directory stays beside it; the configuration tools show the resolved file path.
 
 Happy Agent creates this file with commented examples when it initializes the user configuration
 directory. Any session's folder may add servers of its own in `mcp.toml` at its root: a project
@@ -96,12 +95,12 @@ environment variable for authenticated HTTP servers.
 After editing `mcp.toml`, ask the agent to reload the MCP servers. Models can call
 `reload_mcp_servers`, which reconciles the current session's folder file by default: its project
 workspace, bot folder, or task folder. Pass `global = true` to reconcile
-`~/Happy/Config/mcp.toml`. Unchanged shared connections remain live;
+the user-wide `mcp.toml`. Unchanged shared connections remain live;
 only added or changed connections start, and only connections with no remaining owner stop. The
 next model inference sees the updated tool list.
 
 Models can also call `configure_mcp_server` to add, replace, or remove one named entry. By default
-it changes `~/Happy/Config/mcp.toml`; with `scope = "folder"` it changes `mcp.toml` at the root of
+it changes the user-wide `mcp.toml`; with `scope = "folder"` it changes `mcp.toml` at the root of
 the current session's folder, so a bot or task can be given servers of its own without editing the
 file by hand. The update preserves unrelated servers, rewrites the file from its parsed entries, so
 comments in it are not kept, and performs the same online reload of that catalog. A folder entry
@@ -131,5 +130,6 @@ a missing bearer-token environment variable, an unreachable URL, or a startup ti
 short.
 
 When troubleshooting, first confirm the entry is in the current session's folder `mcp.toml` or in
-`~/Happy/Config/mcp.toml`, then ask the agent to reload the corresponding scope and list the MCP
-servers. The resulting server status includes an isolated connection error for each failed entry.
+the user-wide `mcp.toml` in the platform's configuration directory, then ask the agent to reload the
+corresponding scope and list the MCP servers. The resulting server status includes an isolated
+connection error for each failed entry.

@@ -8,12 +8,14 @@ reference.
 
 ## Before editing
 
-1. The file is `~/Happy/Config/happy.toml` (macOS) or `~/happy/config/happy.toml` (Linux). It is
+1. The file is `~/Happy/Config/happy.toml` (macOS), `~/happy/config/happy.toml` (Linux), or
+   `%USERPROFILE%\happy\config\happy.toml` (Windows). It is
    outside the workspace, so writes need reviewed full access.
 2. Read it with credentials redacted:
 
     ```sh
-    sed -E 's/^([[:space:]]*(oauth_token|api_key)[[:space:]]*=).*/\1 "<redacted>"/' ~/Happy/Config/happy.toml
+    happy_config="<resolved happy.toml path from step 1>"
+    sed -E 's/^([[:space:]]*(oauth_token|api_key)[[:space:]]*=).*/\1 "<redacted>"/' "$happy_config"
     ```
 
 3. Back it up: `cp -p happy.toml happy.toml.bak-<timestamp>`.

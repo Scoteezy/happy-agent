@@ -105,8 +105,8 @@ daemon so it inherits the environment:
 HAPPY_OBSERVATION_LOGS=true HAPPY_OBSERVATION_LOG_LEVEL=trace rig daemon reload
 ```
 
-For a persistent setting, put this in `~/Happy/Config/happy.toml` and reload the
-daemon:
+For a persistent setting, put this in `happy.toml` under `~/Happy/Config` on macOS,
+`~/happy/config` on Linux, or `%USERPROFILE%\happy\config` on Windows, and reload the daemon:
 
 ```toml
 [observation]
