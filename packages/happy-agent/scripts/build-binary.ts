@@ -806,6 +806,7 @@ export function resolveBinaryForTarget(key, binaryPath) {
         });
     }
     addDocumentationAdapter(adapters);
+    addNativeSkillsAdapter(adapters);
     addPermissionPromptAdapter(adapters, modulesRoot);
     addAdapter(adapters, onlyMatchingFile(justBashChunks, /^js-exec-[A-Z0-9]+\.js$/u), {
         name: "just-bash JavaScript worker resolver",
@@ -820,9 +821,29 @@ export function resolveBinaryForTarget(key, binaryPath) {
     return adapters;
 }
 
+function addNativeSkillsAdapter(adapters: Map<string, SourceAdapter>): void {
+    const skillsRoot = join(happyAgentRoot, "dist", "skills");
+    // A skill may carry binary supporting files, so contents travel as base64.
+    const files = listShippedFiles(skillsRoot).map((path) => ({
+        contents: readFileSync(path).toString("base64"),
+        relativePath: path.slice(skillsRoot.length + 1),
+    }));
+    if (files.length === 0) {
+        throw new Error("The Happy Agent distribution contains no native skills.");
+    }
+    addAdapter(adapters, join(happyAgentRoot, "dist", "nativeSkills", "syncHappyAgentSkills.js"), {
+        name: "Happy Agent native skills",
+        required: true,
+        adapt: () =>
+            `import { syncHappyAgentNativeSkills } from "./syncHappyAgentNativeSkills.js";\n` +
+            `const files = ${JSON.stringify(files)}.map((file) => ({ relativePath: file.relativePath, contents: Buffer.from(file.contents, "base64") }));\n` +
+            `export async function syncHappyAgentSkills(happyHome) { await syncHappyAgentNativeSkills(happyHome, files); }\n`,
+    });
+}
+
 function addDocumentationAdapter(adapters: Map<string, SourceAdapter>): void {
     const docsRoot = join(happyAgentRoot, "dist", "docs");
-    const documents = listDocumentationFiles(docsRoot).map((path) => ({
+    const documents = listShippedFiles(docsRoot).map((path) => ({
         contents: readFileSync(path, "utf8"),
         relativePath: path.slice(docsRoot.length + 1),
     }));
@@ -839,14 +860,14 @@ function addDocumentationAdapter(adapters: Map<string, SourceAdapter>): void {
     });
 }
 
-function listDocumentationFiles(directory: string): string[] {
+function listShippedFiles(directory: string): string[] {
     return readdirSync(directory, { withFileTypes: true })
         .sort((left, right) => left.name.localeCompare(right.name))
         .flatMap((entry) => {
             const path = join(directory, entry.name);
-            if (entry.isDirectory()) return listDocumentationFiles(path);
+            if (entry.isDirectory()) return listShippedFiles(path);
             if (entry.isFile()) return [path];
-            throw new Error(`The Happy Agent documentation contains an unsafe entry: ${path}`);
+            throw new Error(`The Happy Agent distribution contains an unsafe entry: ${path}`);
         });
 }
 

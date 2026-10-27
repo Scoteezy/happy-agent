@@ -20,7 +20,10 @@ folders come after those: the project root's `happy.toml` is read through the co
 `[skills] directories` entries are resolved against the project root and scanned as project skills;
 the machine's configured folders are scanned as user skills, but only on the daemon's native
 filesystem, since they name paths on this machine. A configured folder never outranks a standard
-root for a same-named skill, and a missing or invalid project file simply adds nothing. Apart from
+root for a same-named skill, and a missing or invalid project file simply adds nothing. The native
+skills Happy Agent ships, which daemon startup installs in the config module's `paths.skillsHome`,
+are scanned last as `builtin` skills, again only on the daemon's native filesystem; any project or
+user skill of the same name replaces one. Apart from
 that, a skill is a file on the agent's own machine, so an agent with no machine has no skills and
 is given no skill tools.
 

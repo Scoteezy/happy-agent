@@ -1,5 +1,20 @@
 # Skill discovery learnings
 
+## Native skills ship with the product and yield to installed ones
+
+Every skill used to have to be installed into `~/.agents/skills` or a repository before any agent
+could use it, so a skill meant for every agent on every project had to be copied around by hand.
+Happy Agent now ships native skills: the repository-root `skills/` directory is copied into the
+package and embedded in the standalone binary exactly like `docs/`, and every daemon start
+installs it read-only in `<happy home>/skills`, the config module's `paths.skillsHome`. Discovery
+scans that folder last, as source `builtin`, only for the daemon's native compute, because like
+the machine-wide folders it names a path on the daemon's own filesystem. A builtin skill has the
+lowest priority, so a project or user skill of the same name replaces it: a shipped skill is a
+default the person can override, never something that hides their own. Unlike documentation, the
+install removes everything the running release does not ship, so a renamed or retired native skill
+stops being discovered instead of lingering from an older release. An empty release is refused
+before anything is removed.
+
 ## Disablement means unavailable, not uninstalled
 
 The human-directed management contract uses the existing `~/.agents/skills` root and returns

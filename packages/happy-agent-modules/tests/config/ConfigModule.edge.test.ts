@@ -197,6 +197,7 @@ describe("ConfigModule edge coverage", () => {
                     process.platform === "darwin" ? "Happy/Config" : "happy/config",
                     "SECURITY.md",
                 ),
+                skillsHome: join(root, ".happy", "skills"),
                 // Windows has no unix socket files: the daemon listens on a named pipe instead.
                 socketPath:
                     process.platform === "win32"

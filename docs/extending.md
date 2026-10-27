@@ -336,8 +336,12 @@ expanded skill runtime, and it does not interpret Claude or Pi skill trees.
 
 Happy Agent searches these roots, in this order:
 
-1. **Builtin** — skills shipped inside Happy Agent (currently `local-plugin-icon`).
-   Read-only; never write here.
+1. **Builtin** — skills shipped inside Happy Agent, such as `guided-review`.
+   Every daemon start installs them read-only in `skills/` beside the Happy
+   Agent documentation and removes any the release no longer ships, so never
+   write there. They are offered only to agents running on the daemon's own
+   machine. To ship a new one with Happy Agent, add its folder with a
+   `SKILL.md` under the repository's root `skills/` directory.
 2. **User** — `~/.codex/skills` and `~/.agents/skills`.
 3. **Project** — `.agents/skills` in every directory from the project root down
    to the working directory.
