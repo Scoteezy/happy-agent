@@ -63,7 +63,7 @@ ${node}</nav>`,
             (await h.gym.http.patch(`/v0/spaces/${happy.id}`, { afterId: happy.id })).status,
         ).toBe(409);
         const tools = h.gym.inference.requests
-            .findLast((request) => request.instructions.includes("You are Prioritizing"))!
+            .findLast((request) => request.instructions.includes("You are Focus"))!
             .tools.map((tool) => tool.name)
             .sort();
         expect(tools).toEqual([

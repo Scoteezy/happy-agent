@@ -139,7 +139,7 @@ describe("naming", () => {
         // Nothing here opted in to the sidebar.
         expect(
             gym.inference.requests.some((request) =>
-                request.instructions.includes("You are Prioritizing"),
+                request.instructions.includes("You are Focus"),
             ),
         ).toBe(false);
         expect(gym.errors).toEqual([]);

@@ -16,6 +16,7 @@ import {
     recordSidebarAuthorship,
 } from "../../../sources/spaces/impl/recordSidebarAuthorship.js";
 import { type PrioritizingRules } from "../../../sources/spaces/impl/reviewPrioritizingOperation.js";
+import { shownSidebarRows } from "../../../sources/spaces/impl/sidebarLayout.js";
 
 const doc = (...items: string[]) =>
     parseSpaceSidebar(`<nav><happy-search/><happy-create/>${items.join("")}</nav>`);
@@ -47,6 +48,42 @@ function rules(
 }
 
 describe("Prioritizing's operations", () => {
+    it("removes its old session copy while its own row stays visible when Happy folds, and keeps a copy the person placed", () => {
+        const sidebar = doc(
+            '<happy-space id="happy" expanded="true"><happy-space id="focus-agent"/></happy-space>',
+            '<happy-space id="focus"/>',
+        );
+        const direct = rules(
+            {},
+            {
+                rows: new Set(["happy", "focus"]),
+                focusId: "focus",
+                direct: true,
+            },
+        );
+        const remove: SpaceSidebarOperation[] = [{ type: "remove", id: "focus-agent" }];
+        const cleaned = applyPrioritizingOperations(sidebar, remove, direct, undefined);
+        expect(cleaned.operations).toEqual(remove);
+        expect(cleaned.notes).toEqual([]);
+        const folded = applySpaceSidebarOperations(cleaned.document, [
+            { type: "set", id: "happy", expanded: false },
+        ]).document;
+        expect(shownSidebarRows(folded)).toEqual(["happy", "focus"]);
+        expect(folded.items.at(-1)?.id).toBe("focus");
+        const kept = applyPrioritizingOperations(
+            sidebar,
+            remove,
+            {
+                ...direct,
+                person: (id, aspect) => id === "focus-agent" && aspect === "place",
+            },
+            undefined,
+        );
+        expect(kept.operations).toEqual([]);
+        expect(kept.document).toEqual(sidebar);
+        expect(kept.notes.join(" ")).toContain("Keep the person's manual placement.");
+    });
+
     it("keeps a row open that the person opened again, though their set changed nothing", () => {
         const open = applySpaceSidebarOperations(base, [
             { type: "set", id: "mine", expanded: true },

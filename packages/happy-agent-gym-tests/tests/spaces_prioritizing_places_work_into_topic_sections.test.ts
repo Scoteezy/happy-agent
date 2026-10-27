@@ -7,7 +7,7 @@ it("hears the person's messages in new work, files it into topic sections and a 
         const prioritizingSaw = (text: string) =>
             h.gym.inference.requests.some(
                 (request) =>
-                    request.instructions.includes("You are Prioritizing") &&
+                    request.instructions.includes("You are Focus") &&
                     JSON.stringify(request.messages).includes(text),
             );
         await h.read();

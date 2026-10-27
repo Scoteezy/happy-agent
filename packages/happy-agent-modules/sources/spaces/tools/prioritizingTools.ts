@@ -216,16 +216,16 @@ function requestSidebarTidyTool(spaces: SpacesModule, ownerUserId: string): AnyA
     return defineAgentTool({
         name: "request_sidebar_tidy",
         defer: false,
-        capabilities: ["Ask Prioritizing to tidy the person's whole sidebar."],
+        capabilities: ["Ask Focus to tidy the person's whole sidebar."],
         description:
-            "Ask Prioritizing, the helper that organises the person's sidebar, to tidy the whole sidebar now, as the person's Tidy button does. Use request_space_placement instead to move one conversation's row.",
+            "Ask Focus, the helper that organises the person's sidebar, to tidy the whole sidebar now, as the person's Tidy button does. Use request_space_placement instead to move one conversation's row.",
         parameters: emptySchema,
         returnType: resultSchema,
         durable: true,
         shouldReviewInAutoMode: () => false,
         execute: async (ctx) => ({
             text: (await spaces.requestTidy(ctx, ownerUserId))
-                ? "Prioritizing was asked to tidy the sidebar and decides shortly."
+                ? "Focus was asked to tidy the sidebar and decides shortly."
                 : "Nothing organizes this sidebar yet; the person can tidy it themselves.",
         }),
         toLLM,

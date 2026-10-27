@@ -1032,9 +1032,7 @@ export class SpacesModule implements AgentModule {
             return;
         }
         if (input.author.agentId !== owner.prioritizingAgentId)
-            throw new SidebarValidationError(
-                "Only Prioritizing may edit this sidebar as an agent.",
-            );
+            throw new SidebarValidationError("Only Focus may edit this sidebar as an agent.");
         await this.#requirePrioritizingEnabled(ctx, owner.ownerUserId);
         const view = await this.#prioritizingView(ctx, owner);
         if (view.version !== input.baseVersion) throw new SidebarConflictError(view.version);
@@ -2303,7 +2301,7 @@ export class SpacesModule implements AgentModule {
         for (const state of await queryOwnerStates(ctx))
             if (state.sidebarProposals?.some((proposal) => proposal.artifactId === artifactId))
                 return;
-        throw new SidebarValidationError("Sidebar proposals are made by Prioritizing.");
+        throw new SidebarValidationError("Sidebar proposals are made by Focus.");
     }
 
     async #ownedProposal(
@@ -2462,7 +2460,7 @@ export class SpacesModule implements AgentModule {
         const timer = setTimeout(() => {
             this.#wakeTimers.delete(ownerUserId);
             void this.#wake(lifetime.named("spaces-wake"), ownerUserId).catch((error: unknown) => {
-                lifetime.log.warn("Prioritizing could not be told.", {}, error);
+                lifetime.log.warn("Focus could not be told.", {}, error);
             });
         }, WAKE_DELAY_MS);
         timer.unref?.();
@@ -2626,7 +2624,7 @@ export class SpacesModule implements AgentModule {
                 const title = config?.metadata?.["title"];
                 const happy = await this.#bots.chiefOfStaff(ctx);
                 return await this.#agentDescription(ctx, space, {
-                    title: typeof title === "string" ? title : "Prioritizing",
+                    title: typeof title === "string" ? title : "Focus",
                     named: true,
                     target: {
                         kind: "agent",
@@ -3366,8 +3364,8 @@ export class SpacesModule implements AgentModule {
                 return "Nothing organises that sidebar yet; the person can move the row themselves.";
             }
             return input.personAsked
-                ? "Prioritizing will make the change shortly."
-                : "Prioritizing has the request and decides shortly.";
+                ? "Focus will make the change shortly."
+                : "Focus has the request and decides shortly.";
         });
     }
 
@@ -3815,9 +3813,7 @@ export class SpacesModule implements AgentModule {
 
     async #requirePrioritizingEnabled(ctx: Context, ownerUserId: SpaceOwnerId): Promise<void> {
         if (!(await this.#stemCellsEnabled(ctx, ownerUserId))) {
-            throw new SpaceConflictError(
-                "Turn on Stem Cells to let Prioritizing change the sidebar.",
-            );
+            throw new SpaceConflictError("Turn on Stem Cells to let Focus change the sidebar.");
         }
     }
 
@@ -3886,7 +3882,7 @@ export class SpacesModule implements AgentModule {
             ctx,
             happyAgentId,
             {
-                title: "Prioritizing",
+                title: "Focus",
                 text: PRIORITIZING_OPENING,
                 provider: route.providerId,
                 model: route.model,

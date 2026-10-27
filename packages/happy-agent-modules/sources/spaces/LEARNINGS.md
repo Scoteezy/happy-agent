@@ -1,5 +1,16 @@
 # Spaces — learnings
 
+## Focus is the default name and has a top-level row
+
+The sidebar helper used to be created as Prioritizing. New helpers are now named Focus; an
+existing conversation keeps its stored title, including a name the person chose. Display and
+batch notes read that stored title, with Focus only as the fallback. No title migration runs.
+
+A helper shown as an agent-ID session under Happy disappears when Happy folds. Its prompt now
+explicitly places its space-ID row at the top level immediately after Happy and removes an old
+nested agent-ID copy unless the person placed it there. Placement stays the model's decision,
+and the instructions revision rises so existing helpers hear the correction on startup.
+
 ## Prioritizing decides from its prompt; the daemon keeps integrity
 
 Evaluation replays kept finding proposals that did something unwanted (folded recent work, put

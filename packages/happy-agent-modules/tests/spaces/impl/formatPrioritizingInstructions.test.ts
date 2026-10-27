@@ -13,6 +13,7 @@ import {
  */
 const REVISIONS: readonly { readonly revision: number; readonly sha256: string }[] = [
     { revision: 2, sha256: "f40d25bc2aa5cb091a3b4bfe151cdbec77e10941f0b251521853e6fdb4f7d11f" },
+    { revision: 3, sha256: "3be0ce92f1a88c95d86102bdf3796d04b74e2f64d95be34fe8aee15ed2f8dee7" },
 ];
 
 it("raises the instructions revision with every change to their text", () => {

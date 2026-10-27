@@ -88,7 +88,7 @@ export async function sidebarGym(
                     ],
                 };
             }
-            if (request.instructions.includes("You are Prioritizing")) {
+            if (request.instructions.includes("You are Focus")) {
                 if (gate !== undefined && last?.role === "tool") await gate;
                 const turn = await options.prioritizing?.(request);
                 if (turn !== undefined) return turn;
@@ -96,7 +96,7 @@ export async function sidebarGym(
             return {
                 delayMs:
                     JSON.stringify(last).includes("Keep running") &&
-                    !request.instructions.includes("You are Prioritizing")
+                    !request.instructions.includes("You are Focus")
                         ? 60000
                         : 0,
                 content: [{ type: "text", text: "Done." }],
@@ -109,7 +109,7 @@ export async function sidebarGym(
         await gym.waitUntil(
             () =>
                 gym.inference.requests.find((request) =>
-                    request.instructions.includes("You are Prioritizing"),
+                    request.instructions.includes("You are Focus"),
                 )?.sessionId,
             "Prioritizing's opening turn",
         );

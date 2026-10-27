@@ -1,5 +1,8 @@
 # Spaces
 
+The sidebar helper is named **Focus** for new conversations. Existing helpers keep their stored
+name, including a name the person chose. The implementation still calls it Prioritizing below.
+
 The experimental sidebar is a `sidebar` artifact, and the artifact is the sidebar's state: one
 `<nav>` holding a flat, ordered list of `<happy-search/>`, `<happy-create/>`,
 `<happy-section id label collapsed?/>`, `<happy-separator id/>`, `<happy-space id expanded?>`, and
@@ -97,7 +100,7 @@ does a session under it that stops, so Prioritizing can place the row once there
 without reading the thread. Stem-cell origin is the subject-naming mark `createStemCell` sets. Removing a stem cell nobody wrote in archives its
 task.
 
-## Prioritizing
+## Focus
 
 One long-running subtask of Happy per person, made through `SubtasksModule.create` — the path
 every subtask takes — with the person's first stem cell, and made again with the next one if the
