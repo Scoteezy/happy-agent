@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     removeDaemonPidSync: vi.fn(),
     startHappyAgentDaemon: vi.fn(),
     syncHappyAgentDocs: vi.fn(),
+    syncHappyAgentSkills: vi.fn(),
 }));
 
 vi.mock("../sources/main.js", () => ({
@@ -30,6 +31,9 @@ vi.mock("../sources/lifecycle/getHappyDaemonPaths.js", () => ({
 vi.mock("../sources/documentation/syncHappyAgentDocs.js", () => ({
     syncHappyAgentDocs: mocks.syncHappyAgentDocs,
 }));
+vi.mock("../sources/nativeSkills/syncHappyAgentSkills.js", () => ({
+    syncHappyAgentSkills: mocks.syncHappyAgentSkills,
+}));
 
 import { runAgentDaemon } from "../sources/lifecycle/runAgentDaemon.js";
 
@@ -49,7 +53,7 @@ afterEach(() => {
 });
 
 describe("runAgentDaemon", () => {
-    it("synchronizes docs before starting the runtime", async () => {
+    it("synchronizes docs and native skills before starting the runtime", async () => {
         mocks.startHappyAgentDaemon.mockResolvedValue({
             close: vi.fn(),
             closed: new Promise<void>(() => undefined),
@@ -61,6 +65,10 @@ describe("runAgentDaemon", () => {
 
         expect(mocks.syncHappyAgentDocs).toHaveBeenCalledWith("/tmp/happy-agent-test");
         expect(mocks.syncHappyAgentDocs.mock.invocationCallOrder[0]).toBeLessThan(
+            mocks.startHappyAgentDaemon.mock.invocationCallOrder[0]!,
+        );
+        expect(mocks.syncHappyAgentSkills).toHaveBeenCalledWith("/tmp/happy-agent-test");
+        expect(mocks.syncHappyAgentSkills.mock.invocationCallOrder[0]).toBeLessThan(
             mocks.startHappyAgentDaemon.mock.invocationCallOrder[0]!,
         );
     });

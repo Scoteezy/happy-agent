@@ -1,7 +1,8 @@
 # build scripts
 
 The package's ordinary TypeScript build produces its published Node-compatible
-JavaScript distribution and copies the repository's `docs/` into `dist/docs/`.
+JavaScript distribution and copies the repository's `docs/` into `dist/docs/` and its
+native `skills/` into `dist/skills/`.
 `build-binary.ts` takes that distribution and compiles
 target-specific Bun executables. The binary compiler owns all platform asset
 discovery and adapts third-party runtime-selected native packages at the bundle
@@ -19,6 +20,7 @@ Bun's default JavaScript JIT tiers enabled.
 ```text
 sources/ ----> tsc ------> dist/cli.js (Node or Bun)
 docs/ ----> copy-docs ---> dist/docs/
+skills/ --> copy-docs ---> dist/skills/
                               |
                               +--> build-binary.ts --> dist/bin/happy-agent-<target>
 ```

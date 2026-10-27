@@ -177,6 +177,7 @@ describe("ConfigModule", () => {
             ),
             publicHome: join(root, process.platform === "darwin" ? "Happy" : "happy"),
             runtimeConfigPath: join(root, ".happy", "agent", "runtime.toml"),
+            skillsHome: join(root, ".happy", "skills"),
         });
         expect(configuration.sources.global.exists).toBe(false);
         expect(configuration.sources.runtime.exists).toBe(false);

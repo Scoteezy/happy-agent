@@ -143,8 +143,9 @@ export class SkillsModule implements AgentModule {
 
     /**
      * Configuration supplies the extra skill folders: `[skills] directories` in the user
-     * `happy.toml` for this machine, and the parser for the same table in a project's own file.
-     * Without it, discovery covers only the standard `.agents/skills` roots.
+     * `happy.toml` for this machine, the parser for the same table in a project's own file, and
+     * the folder holding the native skills this release ships. Without it, discovery covers only
+     * the standard `.agents/skills` roots.
      */
     constructor(compute: ComputeModule, globalSkills?: GlobalSkillsModule, config?: ConfigModule) {
         this.#compute = compute;
@@ -337,13 +338,15 @@ export class SkillsModule implements AgentModule {
     ): Promise<readonly SkillEntry[]> {
         const identity = this.#compute.fileSystemIdentity(compute);
         const config = this.#config;
-        // Machine-wide folders name paths on the daemon's own filesystem, so only a native compute
-        // scans them; a container or remote machine has no such folders.
+        // Machine-wide folders, native skills included, name paths on the daemon's own filesystem,
+        // so only a native compute scans them; a container or remote machine has no such folders.
+        const native = typeof identity === "string";
         const configured: ConfiguredSkillRoots | undefined =
             config === undefined
                 ? undefined
                 : {
-                      global: typeof identity === "string" ? config.globalSkillDirectories : [],
+                      builtin: native ? config.configuration.paths.skillsHome : undefined,
+                      global: native ? config.globalSkillDirectories : [],
                       project: (source) => config.projectSkillDirectories(source),
                   };
         const key = JSON.stringify([
@@ -352,6 +355,7 @@ export class SkillsModule implements AgentModule {
             permissions,
             [...unavailable].sort(),
             configured?.global ?? null,
+            configured?.builtin ?? null,
         ]);
         const existing = this.#discoveries.get(identity)?.get(key);
         if (existing !== undefined) {
@@ -531,8 +535,12 @@ function formatInvokedSkill(invocation: SkillInvocation): string {
     return `The user directly invoked the /${invocation.name} skill for this run. Its complete instructions are below, so there is no need to read it again; follow them.\n\n<skill name="${invocation.name}">\n${invocation.content}\n</skill>`;
 }
 
-/** The extra roots configuration adds: machine folders as paths, project folders as a parser. */
+/**
+ * The extra roots configuration adds: machine folders as paths, project folders as a parser, and
+ * the folder of native skills this release ships.
+ */
 interface ConfiguredSkillRoots {
+    readonly builtin: string | undefined;
     readonly global: readonly string[];
     readonly project: (source: string) => readonly string[];
 }
@@ -570,6 +578,9 @@ function skillSourcePriority(source: string): number {
         case "project":
         case "user":
             return 2;
+        // A native skill is only a default: anything installed under the same name replaces it.
+        case "builtin":
+            return -1;
         default:
             return 0;
     }
@@ -798,6 +809,11 @@ async function filesystemSkillRoots(
     }
     for (const directory of configured?.global ?? []) {
         const root = { path: directory, source: "user" };
+        if (Value.Check(discoveredRootSchema, root)) roots.push(root);
+    }
+    // The skills Happy Agent ships come last, so an installed skill always wins its name.
+    if (configured?.builtin !== undefined) {
+        const root = { path: configured.builtin, source: "builtin" };
         if (Value.Check(discoveredRootSchema, root)) roots.push(root);
     }
     return roots;

@@ -3,6 +3,7 @@ import { HappyAgentNewerDataError } from "@slopus/happy-agent-modules";
 import { startHappyAgentDaemon, type HappyAgentDaemon } from "../main.js";
 import { AgentDaemonError } from "./AgentDaemonError.js";
 import { syncHappyAgentDocs } from "../documentation/syncHappyAgentDocs.js";
+import { syncHappyAgentSkills } from "../nativeSkills/syncHappyAgentSkills.js";
 import { removeDaemonPidSync } from "./daemonPid.js";
 import { createGymInferenceFromEnvironment } from "./gymInference.js";
 import { getDaemonIdentity } from "./getDaemonIdentity.js";
@@ -28,6 +29,7 @@ export async function runAgentDaemon(
     const gymInference = createGymInferenceFromEnvironment();
     const paths = getHappyDaemonPaths();
     await syncHappyAgentDocs(paths.happyHome);
+    await syncHappyAgentSkills(paths.happyHome);
     const persistPid = options.persistPid ?? true;
     const hardExit = options.hardExit ?? persistPid;
     if (persistPid) {

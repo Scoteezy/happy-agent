@@ -1449,6 +1449,7 @@ const pathSchemaSet = Type.Object(
         publicHome: pathSchema,
         runtimeConfigPath: pathSchema,
         securityPath: pathSchema,
+        skillsHome: pathSchema,
         socketPath: pathSchema,
         tailcatAddressPath: pathSchema,
         tailcatHome: pathSchema,
@@ -4126,6 +4127,8 @@ function derivePaths(input: HappyAgentConfigurationInput): HappyAgentConfigurati
         publicHome,
         runtimeConfigPath: join(agentHome, "runtime.toml"),
         securityPath: join(configHome, "SECURITY.md"),
+        // The native skills this release ships, installed and kept current by daemon startup.
+        skillsHome: join(happyHome, "skills"),
         socketPath: localAgentSocketPath(agentHome),
         tailcatAddressPath: join(agentHome, "tailcat", "address"),
         tailcatHome: join(agentHome, "tailcat"),

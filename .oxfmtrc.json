@@ -2,7 +2,8 @@
     "$schema": "./node_modules/oxfmt/configuration_schema.json",
     "ignorePatterns": [
         "packages/rig-codemode-codex/native/**",
-        "packages/happy-agent-modules/sources/artifactData/impl/artifactDiagramsScript.ts"
+        "packages/happy-agent-modules/sources/artifactData/impl/artifactDiagramsScript.ts",
+        "skills/**"
     ],
     "tabWidth": 4,
     "useTabs": false
