@@ -20,6 +20,18 @@ agent identity captured when it was constructed.
 Usage preserves a concrete tier ID reported by the agent context without interpreting it. Ordinary
 provider service has no tier and is omitted; clearing a tier happens before the usage boundary.
 
+## Installation windows read hourly totals, not history
+
+`GET /v0/usage` summed its hour, day, week, and month windows by parsing every record in the last
+30 days. On a long-lived installation with 130,000 such records, that took over 600 ms. It blocked
+the daemon's only thread, so every concurrent request waited, including health checks. The desktop
+asks for usage whenever a conversation opens or a run finishes. Hourly provider/model totals now
+answer each window's whole hours, and a start-time index answers the partial hour at each window's
+start. The result is exact and costs a few milliseconds, whatever the history length. Record
+triggers keep the totals so no insert, delete, reset, or rewrite can bypass them. Each bucket counts
+records whose duration contradicts their span, so the integrity check runs once at write time
+instead of on every read.
+
 ## Page-sized run reads are one query
 
 A history page asked for each run's usage separately, adding one query and span per run.

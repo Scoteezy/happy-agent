@@ -142,11 +142,21 @@ Migration `002-drop-usage-reset-receipts` removes the obsolete reset-receipt tab
 immutable first migration. Migration `003-usage-run-attribution` adds the exact run ID and its
 bounded lookup index. Migration `004-usage-current-context` adds one current-context row per agent;
 a `null` payload is a durable invalidation tombstone. Migration `005-usage-model-totals` adds the
-lifetime per-agent/provider/model counters that survive pruning of recent detail.
+lifetime per-agent/provider/model counters that survive pruning of recent detail. Migration
+`006-usage-hourly-totals` adds hourly provider/model inference totals, backfilled from the records,
+an index on each inference record's start time, and the triggers that keep the hourly totals.
 
 Lifetime totals and the agent-tree snapshot read the model counters. The installation-wide time
-windows read the records, because a counter has no time dimension and cannot answer what happened
-in the last hour.
+windows read the hourly totals for every whole hour they cover and the records only for the partial
+hour each window starts with, found through the start-time index. A window therefore stays exact to
+the millisecond, and reading it costs the same however long the history is.
+
+Triggers on the record table, not the recording code, keep the hourly totals. Every insert, delete,
+and rewrite of a record moves its bucket in the statement that changed the record, so a reset or
+any other path that removes records cannot leave the totals behind. Each bucket also counts its
+records whose duration contradicts their own span. That check runs once, when the record is written,
+and a window over such a record still fails without the read parsing history again. A record that
+is not valid JSON is never bucketed, and the per-record reads still refuse it.
 
 Records are kept forever. Nothing is evicted to make room, because a window that quietly drops the
 oldest work reports the wrong number: a model used yesterday must still appear in a reading about
@@ -161,8 +171,8 @@ does a record that is no longer valid JSON, because reading its fields is what t
 Every field in that comparison is read from the record itself rather than from the indexed
 `finished_at` column, so a row whose column and document disagree cannot pass a check about the
 document. The cost of the whole choice is a scan per read, since the sums are computed from a
-document rather than from indexed columns; reads that answer several windows do it in one scan
-rather than one per window.
+document rather than from indexed columns. The installation-wide windows avoid that scan by
+reading the hourly totals described above.
 
 - `record(ctx, UsageRecord)` inserts one record (`usage_inference_record` or `usage_turn_record`),
   keyed by Base's `inferenceId` or `turnId` and attributed by
@@ -173,11 +183,11 @@ rather than one per window.
   everything the agent ever recorded, so a caller can page through the complete history.
 - `windowUsage(ctx, cutoffs)` sums provider/model inference tokens for several rolling windows
   across the whole collection, in the order the cutoffs were given, capped at `MAX_USAGE_WINDOWS`
-  (8). This is what the installation-wide hour, day, week, and month windows are built from, and
-  they are answered in one pass: the widest window contains the rest, so each narrower one is a
-  conditional sum over the same scan rather than another scan. The breakdown is keyed by model, so
-  inference the provider never attributed to one is left out, exactly as the lifetime model totals
-  leave it out.
+  (8). This is what the installation-wide hour, day, week, and month windows are built from. One
+  pass over the hourly totals answers every window's whole hours, and one indexed read per window
+  adds the partial hour before its first whole one. The breakdown is keyed by model, so inference
+  the provider never attributed to one is left out, exactly as the lifetime model totals leave it
+  out.
 - `modelUsage(ctx, agentId)` reads lifetime provider/model input, output, cache-read, and
   cache-write totals; `totalTokensByAgent(ctx)` sums those durable counters in one pass for an
   agent-tree snapshot.
@@ -191,7 +201,8 @@ rather than one per window.
   Agent Base's completion transaction; the turn record reconciles the same value when the turn
   settles without publishing a duplicate change.
 - `reset(ctx, agentId | null)` deletes matching records, contexts, and lifetime model totals and
-  reports how many records were removed.
+  reports how many records were removed. The record triggers take the deleted records out of the
+  hourly totals in the same statement.
 - The host transaction is the single read/decide/write boundary every mutation runs inside, and
   stdlib `afterCommit(ctx, callback)` registers post-commit event delivery inside that same
   transaction.

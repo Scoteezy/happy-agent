@@ -20,14 +20,17 @@ import {
     type UsageRecord,
     type UsageRunBreakdown,
     type UsageRunSummary,
+    type UsageRunTokens,
     type UsageSummary,
 } from "../Usage.js";
 import { assertUsageRecord } from "./assertUsageRecord.js";
 import { currentContextFromRecord } from "./currentContextFromRecord.js";
+import { USAGE_BUCKET_MS, USAGE_INDEXED_STARTED_AT } from "./usageHourlyTotalsMigration.js";
 
 const RECORDS_TABLE = "happy_agent_usage_records";
 const CONTEXTS_TABLE = "happy_agent_usage_contexts";
 const MODEL_TOTALS_TABLE = "happy_agent_usage_model_totals";
+const HOURLY_TOTALS_TABLE = "happy_agent_usage_hourly_totals";
 
 /**
  * The record's own fields, read out of the stored JSON.
@@ -367,16 +370,117 @@ export class UsageDatabase {
     /**
      * Inference tokens per provider and model for several rolling windows.
      *
-     * The windows are answered together because the widest of them contains all the others.
+     * Every whole hour of a window comes from the hourly totals, all windows in one pass over
+     * them, since the widest contains the rest. The partial hour before a window's first whole
+     * one comes from the records started inside it, found through the start-time index, so each
+     * window still begins at its exact millisecond. Neither read grows with history: the totals
+     * hold one row per model per hour, and an edge holds less than an hour of records.
+     *
+     * The buckets count the records whose duration contradicts their span, and the edge reads
+     * check their own rows, so a window over a record that contradicts itself is still refused.
+     * Both reads share one transaction, so every window describes the same moment.
      */
     async windowUsage(ctx: Context, cutoffs: readonly number[]): Promise<UsageRunBreakdown[]> {
         if (cutoffs.length === 0) return [];
-        const widest = Math.min(...cutoffs);
-        return await this.#tokensByModelWindows(
-            ctx,
-            sql`WHERE ${STARTED_AT} >= ${widest}`,
-            cutoffs,
+        return await ctx.inTx(async (txCtx) => await this.#windowUsage(txCtx, cutoffs));
+    }
+
+    async #windowUsage(ctx: Context, cutoffs: readonly number[]): Promise<UsageRunBreakdown[]> {
+        const firstBuckets = cutoffs.map((cutoff) =>
+            cutoff % USAGE_BUCKET_MS === 0
+                ? cutoff
+                : cutoff - (cutoff % USAGE_BUCKET_MS) + USAGE_BUCKET_MS,
         );
+        // The window starts cut the buckets into segments. Each bucket is summed into its segment
+        // once, and a window is the segments from its own start onward.
+        const segments = [...new Set(firstBuckets)].sort((a, b) => a - b);
+        const segment = sql.join(
+            [
+                sql`CASE`,
+                ...segments
+                    .map((start, index) => sql`WHEN bucket_start >= ${start} THEN ${index}`)
+                    .reverse(),
+                sql`END`,
+            ],
+            sql` `,
+        );
+        const rows = await agentDatabaseRows<Record<string, number | string | null>>(
+            ctx.db,
+            sql`SELECT provider, model, ${segment} AS segment,
+                       SUM(input_tokens) AS input, SUM(output_tokens) AS output,
+                       SUM(cache_read_tokens) AS cache_read, SUM(cache_write_tokens) AS cache_write,
+                       SUM(inconsistent_records) AS inconsistent_duration
+                FROM ${sql.raw(HOURLY_TOTALS_TABLE)}
+                WHERE bucket_start >= ${segments[0] as number}
+                GROUP BY provider, model, segment`,
+        );
+        const windows = cutoffs.map(() => new Map<string, UsageRunTokens>());
+        const add = (index: number, provider: string, model: string, tokens: UsageRunTokens) => {
+            const key = JSON.stringify([provider, model]);
+            const window = windows[index] as Map<string, UsageRunTokens>;
+            const sum = window.get(key) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+            window.set(key, {
+                input: sum.input + tokens.input,
+                output: sum.output + tokens.output,
+                cacheRead: sum.cacheRead + tokens.cacheRead,
+                cacheWrite: sum.cacheWrite + tokens.cacheWrite,
+            });
+        };
+        for (const row of rows) {
+            if (Number(row["inconsistent_duration"] ?? 0) > 0) {
+                throw new Error(
+                    "Usage storage holds a record whose duration contradicts its span.",
+                );
+            }
+            const start = segments[Number(row["segment"])] as number;
+            const tokens = {
+                input: Number(row["input"] ?? 0),
+                output: Number(row["output"] ?? 0),
+                cacheRead: Number(row["cache_read"] ?? 0),
+                cacheWrite: Number(row["cache_write"] ?? 0),
+            };
+            firstBuckets.forEach((firstBucket, index) => {
+                if (start >= firstBucket) {
+                    add(index, String(row["provider"]), String(row["model"]), tokens);
+                }
+            });
+        }
+        for (const [index, cutoff] of cutoffs.entries()) {
+            const firstBucket = firstBuckets[index] as number;
+            if (cutoff === firstBucket) continue;
+            const edge = await this.#tokensByModel(
+                ctx,
+                sql`WHERE kind = 'inference'
+                      AND ${sql.raw(USAGE_INDEXED_STARTED_AT)} >= ${cutoff}
+                      AND ${sql.raw(USAGE_INDEXED_STARTED_AT)} < ${firstBucket}
+                      AND json_type(record_json, '$.startedAt') = 'integer'`,
+            );
+            for (const [provider, models] of Object.entries(edge)) {
+                for (const [model, tokens] of Object.entries(models)) {
+                    add(index, provider, model, tokens);
+                }
+            }
+        }
+        const breakdowns = windows.map((window) => {
+            const breakdown: UsageRunBreakdown = {};
+            const entries = [...window.entries()]
+                .map(([key, tokens]) => [JSON.parse(key) as [string, string], tokens] as const)
+                .sort(([a], [b]) => compareKeys(a, b));
+            for (const [[provider, model], tokens] of entries) {
+                // A model that spent nothing inside this window does not belong to it.
+                if (Object.values(tokens).every((count) => count === 0)) continue;
+                const models = breakdown[provider] ?? {};
+                models[model] = tokens;
+                breakdown[provider] = models;
+            }
+            return breakdown;
+        });
+        for (const breakdown of breakdowns) {
+            if (!Value.Check(usageRunBreakdownSchema, breakdown)) {
+                throw new Error("Usage database returned an invalid model breakdown.");
+            }
+        }
+        return breakdowns;
     }
 
     /** Running totals over a scope, summed by the database rather than by reading records. */
@@ -603,4 +707,11 @@ export class UsageDatabase {
         assertUsageRecord(value);
         return structuredClone(value);
     }
+}
+
+/** Provider, then model, in the order the record-scanning reads have always returned them. */
+function compareKeys(a: readonly [string, string], b: readonly [string, string]): number {
+    if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+    if (a[1] !== b[1]) return a[1] < b[1] ? -1 : 1;
+    return 0;
 }

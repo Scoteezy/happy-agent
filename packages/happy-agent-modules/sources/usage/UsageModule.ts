@@ -66,6 +66,7 @@ import { getUsageTool } from "./tools/get_usage.js";
 import { assertUsageRecord, assertUsageTokens } from "./impl/assertUsageRecord.js";
 import { currentContextFromRecord } from "./impl/currentContextFromRecord.js";
 import { UsageDatabase } from "./impl/usageDatabase.js";
+import { migrateUsageHourlyTotals } from "./impl/usageHourlyTotalsMigration.js";
 
 /**
  * How many raw records one page returns, and the largest page any caller may ask for.
@@ -235,6 +236,7 @@ export class UsageModule implements AgentModule {
                 );
             },
         ],
+        ["006-usage-hourly-totals", migrateUsageHourlyTotals],
     ] as const;
     readonly #transactionalListeners = new Set<UsageEventListener>();
     readonly #listeners = new Set<UsageEventListener>();
@@ -369,11 +371,11 @@ export class UsageModule implements AgentModule {
      * Read provider/model inference totals for several rolling windows, across the whole
      * collection, in the order the cutoffs were given.
      *
-     * Each window is summed by the database over the complete durable history, so it answers for
-     * every agent that ever ran rather than for whatever detail a bounded page still holds. They
-     * are read together because the widest window contains the rest, and asking one at a time
-     * would scan the same history once per window. Only host code may ask, because the answer
-     * spans every agent in the collection.
+     * Each window covers the complete durable history, so it answers for every agent that ever
+     * ran rather than for whatever detail a bounded page still holds. Its whole hours come from
+     * durable hourly totals and only its first partial hour from the records, so the cost does
+     * not grow with history. Only host code may ask, because the answer spans every agent in the
+     * collection.
      */
     async readWindowUsage(ctx: Context, cutoffs: readonly number[]): Promise<UsageRunBreakdown[]> {
         this.#assertAgentAccess(ctx, undefined);
