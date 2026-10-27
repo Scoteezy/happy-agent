@@ -6,6 +6,9 @@ import {
 import { sql } from "drizzle-orm";
 import type { Context } from "@steve.kite/stdlib";
 
+import { renumberLongOrderKeys } from "../utils/renumberLongOrderKeys.js";
+import { MAX_TASK_ORDER_KEY_LENGTH } from "./Task.js";
+
 export const TASKS_TABLE = "happy_agent_module_tasks";
 export const TASK_MEMBERS_TABLE = "happy_agent_module_task_members";
 export const TASK_LEAVES_TABLE = "happy_agent_module_task_leaves";
@@ -111,6 +114,21 @@ export const taskMigrations = [
                     PRIMARY KEY (member_id, task_id)
                 )`,
             );
+        },
+    ],
+    [
+        // Each task joined a list one key before its first task, and that key grew a digit every
+        // few joins until a list ran out of room and refused the next. Keys now stay short;
+        // lists that already grew long are renumbered in their order.
+        "006-task-order-keys-renumbered",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            await renumberLongOrderKeys(database, {
+                table: TASK_MEMBERS_TABLE,
+                listColumns: ["member_id"],
+                idColumn: "task_id",
+                maxLength: MAX_TASK_ORDER_KEY_LENGTH,
+                versioned: false,
+            });
         },
     ],
 ] as const;

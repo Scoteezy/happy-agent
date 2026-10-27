@@ -137,3 +137,13 @@ reads to finish as well.
 A bot whose owner keeps it inside its own tree is not offered the workspace tools, on its own agent
 or on tasks it opened. Opening or browsing another project's workspaces is the reach the setting
 removes; the bot's own dedicated folder is unaffected.
+
+## New workspaces at the top must not grow keys
+
+A new workspace takes a key before its first sibling, and the shared key helper took the midpoint
+below it, a digit longer every three workspaces until the 64-character bound refused the next one. A
+key at an open end now steps one unit past its neighbour, so keys grow with the logarithm of the
+number of workspaces. `011-workspace-order-keys-renumbered` renumbers the siblings under one parent
+that already hold a key past half the bound, in their order, and advances each renumbered
+workspace's version so clients take the new key; other parents are left alone. Agent series keys are
+mirrored into agent metadata the catalog cannot version, so they are not renumbered.

@@ -38,6 +38,7 @@ import { SecretsModule } from "../../sources/secrets/index.js";
 import {
     STANDALONE_TASK_MEMBER,
     taskMigrations,
+    taskOrderKeySchema,
     TaskConflictError,
     TaskInputError,
     TaskNotFoundError,
@@ -815,6 +816,25 @@ describe("TasksModule", () => {
         }
     });
 
+    it("keeps joining new tasks at the top of a long list", async () => {
+        const fixture = await started("tasks-long-list");
+        try {
+            const ctx = fixture.database.context;
+            const names: string[] = [];
+            for (let index = 0; index < 300; index++) {
+                const name = `Task ${index}`;
+                await fixture.tasks.create(ctx, { name });
+                names.unshift(name);
+            }
+            const listed = await fixture.tasks.listForMember(ctx, STANDALONE_TASK_MEMBER);
+            expect(listed.map(({ task }) => task.name)).toEqual(names);
+            const longest = Math.max(...listed.map(({ membership }) => membership.orderKey.length));
+            expect(longest).toBeLessThanOrEqual(8);
+        } finally {
+            await fixture.close();
+        }
+    });
+
     it("lets anyone join and leave a task, idempotently and only in their own list", async () => {
         const fixture = await started("tasks-join-leave", { team: true });
         try {
@@ -1557,6 +1577,51 @@ describe("TasksModule", () => {
         }
     });
 
+    it("renumbers member lists whose keys grew long, keeping their order", async () => {
+        const database = moduleDatabase(taskMigrations.slice(0, 5), "tasks-order-key-migration");
+        try {
+            await database.ready;
+            // Two hundred joins at the top, as released builds keyed them, the last one too long
+            // to load; and a short list that needs nothing.
+            const grown: string[] = ["5", "2", "1"];
+            for (let zeros = 1; grown.length < 200; zeros++)
+                for (const digit of ["5", "2", "1"]) grown.push(`${"0".repeat(zeros)}${digit}`);
+            grown.push(`${"0".repeat(69)}1`);
+            const insert = async (member: string, keys: readonly string[]) => {
+                for (const [index, key] of keys.entries())
+                    await agentDatabaseRun(
+                        database.database,
+                        sql`INSERT INTO ${sql.raw(TASK_MEMBERS_TABLE)}
+                            (task_id, member_id, order_key, joined_at)
+                            VALUES (${`${member}task${index}`}, ${member}, ${key}, ${index})`,
+                    );
+            };
+            await insert("standalone", grown);
+            await insert(OWNER, ["5", "7"]);
+            const list = async (member: string) =>
+                await agentDatabaseRows<{ readonly task_id: string; readonly order_key: string }>(
+                    database.database,
+                    sql`SELECT task_id, order_key FROM ${sql.raw(TASK_MEMBERS_TABLE)}
+                        WHERE member_id = ${member} ORDER BY order_key, task_id`,
+                );
+            const before = (await list("standalone")).map((row) => row.task_id);
+
+            const [key, migrate] = taskMigrations[5];
+            expect(key).toBe("006-task-order-keys-renumbered");
+            await migrate(database.context, database.database);
+            await migrate(database.context, database.database);
+
+            const after = await list("standalone");
+            expect(after.map((row) => row.task_id)).toEqual(before);
+            expect(Math.max(...after.map((row) => row.order_key.length))).toBeLessThanOrEqual(4);
+            for (const row of after)
+                expect(Value.Check(taskOrderKeySchema, row.order_key)).toBe(true);
+            expect((await list(OWNER)).map((row) => row.order_key)).toEqual(["5", "7"]);
+        } finally {
+            database.close();
+        }
+    });
+
     it("drops the retired checklist table before creating the task catalog", async () => {
         const database = moduleDatabase(taskMigrations.slice(0, 1), "tasks-legacy-migration");
         try {
@@ -1582,6 +1647,7 @@ describe("TasksModule", () => {
                 "003-task-catalog",
                 "004-task-naming",
                 "005-task-explicit-leaves",
+                "006-task-order-keys-renumbered",
             ]);
         } finally {
             database.close();

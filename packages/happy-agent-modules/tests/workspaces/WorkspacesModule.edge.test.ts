@@ -1,4 +1,6 @@
+import { agentDatabaseRun } from "@slopus/happy-agent-base";
 import { Value } from "@sinclair/typebox/value";
+import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,6 +9,7 @@ import {
     workspaceBranchSchema,
     workspaceMigrations,
 } from "../../sources/workspaces/index.js";
+import { WORKSPACES_TABLE } from "../../sources/workspaces/WorkspaceMigrations.js";
 import { moduleDatabase } from "../support/moduleDatabase.js";
 import { temporaryWorkspacesCatalog } from "../support/workspacesModule.js";
 
@@ -232,6 +235,49 @@ describe("WorkspacesModule edge contracts", () => {
             expect(await workspaces.list(database.context, { includeArchived: true })).toEqual([
                 archived,
             ]);
+        } finally {
+            database.close();
+        }
+    });
+
+    it("renumbers sibling workspaces whose keys grew long, keeping their order", async () => {
+        const database = moduleDatabase(workspaceMigrations.slice(0, 10), "workspaces-order-keys");
+        await database.ready;
+        try {
+            const { workspaces } = await temporaryWorkspacesCatalog();
+            for (const [index, projectRef] of ["project-a", "project-b", "project-a"].entries())
+                await workspaces.reserve(database.context, {
+                    id: `workspace-order-${String(index)}`,
+                    projectRef,
+                    name: `Order ${String(index)}`,
+                });
+            // Released builds put each new workspace one key before the first, a digit every few.
+            await agentDatabaseRun(
+                database.database,
+                sql`UPDATE ${sql.raw(WORKSPACES_TABLE)}
+                    SET order_key = '0' || substr('0000000000000000000000000000000000000000', 1,
+                        40 - length(order_key)) || order_key`,
+            );
+            const before = await workspaces.list(database.context);
+
+            const [key, migrate] = workspaceMigrations[10];
+            expect(key).toBe("011-workspace-order-keys-renumbered");
+            await migrate(database.context, database.database);
+
+            // Each parent's siblings keep their order with fresh, short keys.
+            const after = await workspaces.list(database.context);
+            const siblings = (listed: typeof after, projectRef: string) =>
+                listed
+                    .filter((workspace) => workspace.projectRef === projectRef)
+                    .map(({ id, orderKey }) => [id, orderKey]);
+            expect(siblings(after, "project-a").map(([id]) => id)).toEqual(
+                siblings(before, "project-a").map(([id]) => id),
+            );
+            expect(siblings(after, "project-a").map(([, key]) => key)).toEqual(["33", "66"]);
+            expect(siblings(after, "project-b")).toEqual([["workspace-order-1", "5"]]);
+            expect(after.map(({ version }) => version)).toEqual(
+                after.map(({ id }) => before.find((workspace) => workspace.id === id)!.version + 1),
+            );
         } finally {
             database.close();
         }

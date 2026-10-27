@@ -1,1 +1,5 @@
-export { orderKeyBetween as spaceOrderKeyBetween } from "../../utils/orderKeyBetween.js";
+export {
+    orderKeyBetween as spaceOrderKeyBetween,
+    orderKeyJustBefore as spaceOrderKeyJustBefore,
+    orderKeyMidpoint as spaceOrderKeyMidpoint,
+} from "../../utils/orderKeyBetween.js";

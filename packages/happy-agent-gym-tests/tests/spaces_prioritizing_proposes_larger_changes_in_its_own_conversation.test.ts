@@ -337,7 +337,7 @@ it("tells an upgraded Prioritizing once and proposes what it may no longer apply
             whileStopped: async () =>
                 await runGymSql(h.gym.happyHome, [
                     "DELETE FROM happy_agent_module_spaces WHERE role = 'focus'",
-                    "DELETE FROM happy_agent_migrations WHERE module_key = 'spaces' AND migration_key IN ('009-sidebar-proposals', '010-voice-row')",
+                    "DELETE FROM happy_agent_migrations WHERE module_key = 'spaces' AND migration_key IN ('009-sidebar-proposals', '010-voice-row', '011-space-order-keys-renumbered')",
                 ]),
         });
         await h.gym.waitUntil(

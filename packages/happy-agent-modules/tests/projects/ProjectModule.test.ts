@@ -55,13 +55,13 @@ describe("ProjectsModule", () => {
                 name: "Third",
                 repositoryRef: "/tmp/projects/order-third",
             });
-            expect(second.orderKey).toBe("5");
-            expect(third.orderKey).toBe("7");
+            expect(second.orderKey).toBe("1");
+            expect(third.orderKey).toBe("2");
             const rows = await agentDatabaseRows<{ order_key: string }>(
                 database.database,
                 sql`SELECT order_key FROM happy_agent_module_projects ORDER BY order_key`,
             );
-            expect(rows.map((row) => row.order_key)).toEqual(["00000000000000000001", "5", "7"]);
+            expect(rows.map((row) => row.order_key)).toEqual(["00000000000000000001", "1", "2"]);
         } finally {
             database.close();
         }

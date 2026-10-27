@@ -160,3 +160,13 @@ A message an agent sent a task showed only "Message from <agent>" until opened.
 as `senderAgentExplanation` beside the sender, and a named task's opening message uses the task's
 name. An unnamed task's opening message has none; `sendMessage` keeps it optional for direct
 callers.
+
+## Joining at the top must not grow keys
+
+Every new task joins its member's list one key before the first task. The shared key helper took the
+midpoint below that key, so each join added a digit every three joins; after about 190 tasks the key
+passed the 64-character bound, and the next join, or `POST /v0/spaces/stem-cells`, failed with "Task
+storage contains an invalid membership". A key at an open end of a list now steps one unit past its
+neighbour, so a list taking work at the top grows keys with the logarithm of its length.
+`006-task-order-keys-renumbered` gives a list that already holds a key past half the bound fresh,
+short keys in its existing order; nothing else changes, and only those lists are read.

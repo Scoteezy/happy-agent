@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { SpaceRecord, SpaceSectionRecord } from "../../../sources/spaces/index.js";
-import { applySpaceChanges, compareRows } from "../../../sources/spaces/impl/applySpaceChanges.js";
+import {
+    applySpaceChanges,
+    compareRows,
+    rowKeyAfter,
+    rowKeyAtTop,
+} from "../../../sources/spaces/impl/applySpaceChanges.js";
 
 const OWNER = "standalone";
 const NOW = 1_000;
@@ -231,5 +236,26 @@ describe("applySpaceChanges", () => {
         expect(outcome.changes[0]).toMatchObject({ from: { index: 2 }, to: { index: 1 } });
         const key = outcome.spaces[0]!.space.orderKey;
         expect(key > "1" && key < "2").toBe(true);
+    });
+
+    it("keeps keys short when new work keeps arriving right after Happy", () => {
+        const rows = [row("happy", "1", { role: "happy" }), row("seeded", "000001")];
+        const expected: string[] = [];
+        for (let index = 0; index < 1_000; index++) {
+            rows.push(row(`work${index}`, rowKeyAtTop(rows)));
+            expected.unshift(`work${index}`);
+        }
+        const shown = [...rows].sort(compareRows).map((space) => space.id);
+        expect(shown).toEqual(["seeded", "happy", ...expected]);
+        expect(Math.max(...rows.map((space) => space.orderKey.length))).toBeLessThanOrEqual(8);
+    });
+
+    it("leaves room under Happy for the daemon's own rows when nothing follows it", () => {
+        const rows = [row("seeded", "000001"), row("happy", "1", { role: "happy" })];
+        // Prioritizing's row is made at 2 and Voice's at 3, right under Happy.
+        expect(rowKeyAtTop(rows)).toBe("5");
+        const placed = [...rows, row("focus", "2", { role: "focus" })];
+        expect(rowKeyAtTop(placed)).toBe("19");
+        expect(rowKeyAfter(placed, "happy")).toBe("19");
     });
 });

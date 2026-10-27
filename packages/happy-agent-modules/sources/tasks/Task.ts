@@ -3,9 +3,10 @@ import { messageModeSchema } from "@slopus/happy-agent-client";
 import { Type, type Static } from "@sinclair/typebox";
 
 export const taskStatusSchema = Type.Union([Type.Literal("active"), Type.Literal("archived")]);
+export const MAX_TASK_ORDER_KEY_LENGTH = 64;
 export const taskOrderKeySchema = Type.String({
     minLength: 1,
-    maxLength: 64,
+    maxLength: MAX_TASK_ORDER_KEY_LENGTH,
     pattern: "^[0-9]+$",
 });
 export const taskVersionSchema = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });

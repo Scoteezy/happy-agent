@@ -582,3 +582,16 @@ hiding goes to Prioritizing through `request_space_placement`, and tidying throu
 Voice may read any conversation's public text on this machine, so `read_conversations` has a
 `machine` scope; on a team installation "this machine" holds other members' work, so the scope
 stays the person's own there.
+
+## New work after Happy must not grow keys
+
+New and moved work goes to the top of a section, right after Happy, so every arrival took the
+midpoint between Happy and the previous top row, a digit longer every three arrivals toward the
+256-character bound. A key right after Happy, whether for new work or an explicit placement after
+it, now sits just below the previous top row, leaving the room after Happy for the next arrival;
+other placements keep the shortest midpoint. With nothing below Happy the key is still the midpoint
+to the end, `5` after Happy's `1`, because Prioritizing's and Voice's rows are made at `2` and `3`
+and the first stem cell can be made before them; a step to `2` would tie with Prioritizing's row.
+The `011-space-order-keys-renumbered` migration gives a sidebar that already grew a key past half
+the bound fresh keys in its order, rows and sections alike, advancing each changed row's version so
+clients holding the old row take the new key.

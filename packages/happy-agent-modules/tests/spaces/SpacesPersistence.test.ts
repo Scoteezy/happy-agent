@@ -11,6 +11,7 @@ import { SPACE_OWNERS_TABLE } from "../../sources/spaces/SpaceMigrations.js";
 import {
     deletePendingChanges,
     SIDEBAR_MUTATIONS_KEPT,
+    insertSection,
     insertSidebarMutation,
     insertSpace,
     insertSpaceIfAbsent,
@@ -18,9 +19,11 @@ import {
     queryOwnerState,
     queryOwnerStates,
     queryPendingChanges,
+    querySections,
     querySidebarMutation,
     querySpace,
     querySpaceByRef,
+    querySpaces,
     querySpacesByAgent,
     updateSpace,
     upsertPendingChange,
@@ -239,6 +242,58 @@ describe("spaces persistence", () => {
             await insertSidebarMutation(ctx, mutation(`later-${String(index)}`, 10 + index));
         expect(await querySidebarMutation(ctx, "standalone", "first")).toBeUndefined();
         expect(await querySidebarMutation(ctx, "standalone", "later-0")).toBeDefined();
+        database.close();
+    });
+
+    it("renumbers a sidebar whose keys grew long after Happy, keeping its order", async () => {
+        const database = moduleDatabase(spaceMigrations.slice(0, 10), "spaces-order-keys");
+        await database.ready;
+        const ctx = database.context;
+        const row = (index: number, orderKey: string, ownerUserId = "standalone") => ({
+            ...stemCell(`row${String(index).padStart(21, "a")}`, ownerUserId),
+            contents: [
+                {
+                    kind: "task" as const,
+                    taskId: `task${String(index).padStart(20, "a")}`,
+                    agentId: `agent${String(index).padStart(19, "a")}`,
+                },
+            ],
+            orderKey,
+        });
+        await insertSpace(ctx, { ...row(0, "1"), role: "happy" });
+        // Released builds put each arrival between Happy and the top row, one digit at a time.
+        for (let index = 1; index <= 40; index++)
+            await insertSpace(ctx, row(index, `1${"0".repeat(200 - index)}5`));
+        await insertSpace(ctx, row(41, `1${"0".repeat(100)}5`, "ownerbbbbbbbbbbbbbbbbbbb"));
+        await insertSection(ctx, {
+            id: "secaaaaaaaaaaaaaaaaaaaaa",
+            ownerUserId: "standalone",
+            name: "Work",
+            collapsed: false,
+            tailExpanded: false,
+            orderKey: "5",
+            version: 1,
+            createdAt: 1,
+            updatedAt: 1,
+        });
+        const before = (await querySpaces(ctx, "standalone")).map(({ id }) => id);
+
+        const [key, migrate] = spaceMigrations[10];
+        expect(key).toBe("011-space-order-keys-renumbered");
+        await migrate(ctx, database.database);
+
+        const after = await querySpaces(ctx, "standalone");
+        expect(after.map(({ id }) => id)).toEqual(before);
+        expect(Math.max(...after.map(({ orderKey }) => orderKey.length))).toBeLessThanOrEqual(3);
+        expect(after.every(({ version, updatedAt }) => version === 2 && updatedAt === 1)).toBe(
+            true,
+        );
+        // Another person's sidebar and short section keys are left as they were.
+        const theirs = await querySpaces(ctx, "ownerbbbbbbbbbbbbbbbbbbb");
+        expect(theirs.map(({ orderKey, version }) => [orderKey.length, version])).toEqual([
+            [102, 1],
+        ]);
+        expect((await querySections(ctx, "standalone")).map(({ version }) => version)).toEqual([1]);
         database.close();
     });
 });

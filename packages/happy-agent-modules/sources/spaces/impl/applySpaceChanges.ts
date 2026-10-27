@@ -5,7 +5,11 @@ import type {
     SpaceRecord,
     SpaceSectionRecord,
 } from "../Space.js";
-import { spaceOrderKeyBetween } from "./spaceOrderKeyBetween.js";
+import {
+    spaceOrderKeyBetween,
+    spaceOrderKeyJustBefore,
+    spaceOrderKeyMidpoint,
+} from "./spaceOrderKeyBetween.js";
 
 /** What one batch does to a sidebar, decided before anything is stored. */
 export interface SpaceChangeOutcome {
@@ -260,7 +264,19 @@ export function rowKeyAfter(siblings: readonly SpaceRecord[], afterId: string | 
     const index = ordered.findIndex((sibling) => sibling.id === afterId);
     const anchor = index === -1 ? ordered.at(-1) : ordered[index];
     const next = index === -1 ? undefined : ordered[index + 1];
+    if (anchor?.role === "happy") return keyAfterHappy(anchor.orderKey, next?.orderKey ?? null);
     return betweenOrEnd(anchor?.orderKey ?? null, next?.orderKey ?? null);
+}
+
+/**
+ * Work keeps arriving right after Happy, so the key sits just below the previous top row,
+ * leaving the room after Happy for the next arrival. With nothing below Happy, the midpoint to
+ * the end leaves room for the rows the daemon keeps right under Happy.
+ */
+function keyAfterHappy(happy: string, next: string | null): string {
+    if (next === null) return spaceOrderKeyMidpoint(happy, null);
+    if (keyValue(happy) >= keyValue(next)) return betweenOrEnd(happy, next);
+    return spaceOrderKeyJustBefore(happy, next);
 }
 
 /** A key placing a section after `afterSectionId`, first when it is null, last when absent. */
@@ -285,11 +301,19 @@ function sectionKeyAfter(
     return betweenOrEnd(anchor?.orderKey ?? null, next?.orderKey ?? null);
 }
 
-/** Equal keys can only come from ties; place after the lower one rather than failing. */
+/**
+ * Equal keys can only come from ties, or from keys equal once their trailing zeros are dropped;
+ * place after the lower one rather than failing.
+ */
 function betweenOrEnd(lower: string | null, upper: string | null): string {
-    if (lower !== null && upper !== null && lower >= upper)
+    if (lower !== null && upper !== null && keyValue(lower) >= keyValue(upper))
         return spaceOrderKeyBetween(lower, null);
     return spaceOrderKeyBetween(lower, upper);
+}
+
+/** Trailing zeros do not change where a key sorts against the keys made between neighbours. */
+function keyValue(key: string): string {
+    return key.replace(/0+$/, "");
 }
 
 function sameSection(left: SpaceSectionRecord, right: SpaceSectionRecord): boolean {

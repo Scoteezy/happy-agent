@@ -2,7 +2,12 @@
 
 Self-contained algorithms used across feature boundaries. `orderKeyBetween` is the existing
 workspace catalog's decimal fractional-key implementation, shared with Surfaces without making
-one feature import another feature's internals.
+one feature import another feature's internals. Between two keys it takes the shortest key near
+their middle; at an open end it steps one unit past the neighbour at a power-of-two width, so
+lists that keep taking work first or last stay short. `orderKeyJustBefore` steps below a row in
+the same way while staying after a fixed one, for work that keeps arriving right after it.
+`renumberLongOrderKeys` is the migration step that gives stored lists whose keys already grew
+past half their bound fresh keys in the same order.
 
 Monotonic UUIDv7 creation is shared here as well, so modules generate resource versions without
 importing the event journal's implementation.

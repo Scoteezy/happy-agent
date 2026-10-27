@@ -2,6 +2,9 @@ import { sql } from "drizzle-orm";
 import { agentDatabaseRun, type AgentDatabase } from "@slopus/happy-agent-base";
 import type { Context } from "@steve.kite/stdlib";
 
+import { renumberLongOrderKeys } from "../utils/renumberLongOrderKeys.js";
+import { MAX_WORKSPACE_ORDER_KEY_LENGTH } from "./Workspace.js";
+
 export const WORKSPACES_TABLE = "happy_agent_module_workspaces";
 export const WORKSPACE_AGENTS_TABLE = "happy_agent_module_workspace_agents";
 const WORKSPACE_RECEIPTS_TABLE = "happy_agent_module_workspace_operation_receipts";
@@ -291,6 +294,23 @@ export const workspaceMigrations = [
                 database,
                 sql`ALTER TABLE ${sql.raw(WORKSPACES_TABLE)} ADD COLUMN docker_image TEXT`,
             );
+        },
+    ],
+    [
+        "011-workspace-order-keys-renumbered",
+        /**
+         * A new workspace took a key before its first sibling, and that key grew a digit every few
+         * workspaces until the bound refused the next one. Keys now stay short. Siblings under one
+         * parent that already grew a long key are renumbered in their order.
+         */
+        async (_ctx: Context, database: AgentDatabase): Promise<void> => {
+            await renumberLongOrderKeys(database, {
+                table: WORKSPACES_TABLE,
+                listColumns: ["project_ref", "parent_id"],
+                idColumn: "id",
+                maxLength: MAX_WORKSPACE_ORDER_KEY_LENGTH,
+                versioned: true,
+            });
         },
     ],
 ] as const;

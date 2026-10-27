@@ -10,9 +10,10 @@ export const SPACE_STANDALONE_OWNER = "standalone";
 export const spaceOwnerIdSchema = Type.Union([cuid2Schema, Type.Literal(SPACE_STANDALONE_OWNER)]);
 export const spaceTimestampSchema = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 export const spaceVersionSchema = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
+export const MAX_SPACE_ORDER_KEY_LENGTH = 256;
 export const spaceOrderKeySchema = Type.String({
     minLength: 1,
-    maxLength: 256,
+    maxLength: MAX_SPACE_ORDER_KEY_LENGTH,
     pattern: "^[0-9]+$",
 });
 /** A short human label: nonblank, without control characters. */

@@ -7,6 +7,9 @@ import {
 import { sql } from "drizzle-orm";
 import type { Context } from "@steve.kite/stdlib";
 
+import { renumberLongOrderKeys } from "../utils/renumberLongOrderKeys.js";
+import { MAX_SPACE_ORDER_KEY_LENGTH } from "./Space.js";
+
 export const SPACES_TABLE = "happy_agent_module_spaces";
 export const SPACE_SECTIONS_TABLE = "happy_agent_module_space_sections";
 export const SPACE_PENDING_TABLE = "happy_agent_module_space_pending";
@@ -266,5 +269,21 @@ export const spaceMigrations = [
         // this marks the change. Nothing is rewritten: the row appears with the next voice call.
         "010-voice-row",
         async (_ctx: Context, _database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {},
+    ],
+    [
+        // New work took a key between Happy and the top row, and that key grew a digit every few
+        // arrivals toward the bound. Keys now stay short; a person's sidebar that already grew
+        // long keys is renumbered in its order, rows and sections alike.
+        "011-space-order-keys-renumbered",
+        async (_ctx: Context, database: AgentDatabaseFacade<AgentDatabase>): Promise<void> => {
+            for (const table of [SPACES_TABLE, SPACE_SECTIONS_TABLE])
+                await renumberLongOrderKeys(database, {
+                    table,
+                    listColumns: ["owner_user_id"],
+                    idColumn: "id",
+                    maxLength: MAX_SPACE_ORDER_KEY_LENGTH,
+                    versioned: true,
+                });
+        },
     ],
 ] as const;

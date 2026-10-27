@@ -190,8 +190,10 @@ describe("Surface instances through the real daemon", () => {
             )
         ).todo;
         expect(reverted.text).toBe("Original");
+        // Reactivation appends with a fresh key after every active todo rather than restoring the
+        // revision's place, which the key one step past the last may happen to equal.
         expect(reverted.orderKey! > third.orderKey!).toBe(true);
-        expect(reverted.orderKey).not.toBe(first.orderKey);
+        expect(reverted.orderKey! > second.orderKey!).toBe(true);
         const repositioned = (
             await client.reorderTodo(
                 surface.id,
