@@ -88,6 +88,15 @@ jobs:
                       exit 1
                   fi
 
+            - name: Set up Node.js
+              uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+
+            - name: Validate the short release notes file
+              run: node scripts/release/validateReleaseNotes.ts "$RELEASE_TAG"
+
     verify:
         name: Verify release source
         needs: validate

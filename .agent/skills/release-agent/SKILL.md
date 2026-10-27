@@ -59,7 +59,8 @@ advance the preview number or stable patch as appropriate. A push never publishe
 ## Before dispatching
 
 1. **Be on current `origin/main`.** The workflow refuses to run unless `HEAD` equals
-   `origin/main` and the ref is `refs/heads/main`. Fetch and rebase first.
+   `origin/main` and the ref is `refs/heads/main`. Fetch and rebase first. The release's
+   [update card file](#writing-the-update-card-file) must already be on `main`.
 2. **Reinstall after any rebase.** A rebase that moves a published SDK dependency leaves
    `node_modules` stale, and the failure shows up as unrelated type errors:
     ```bash
@@ -117,6 +118,52 @@ Write the notes to a file under `.context/`, which is scratch and gitignored:
 .context/release-notes.md
 ```
 
+## Writing the update card file
+
+Every Agent release, preview and production alike, also gets a very short file at
+`release-notes/<tag>.md`, for example `release-notes/v0.4.106.md` or
+`release-notes/v0.4.106-preview.5.md`. Happy Desktop's update card reads it from `main` and lists
+the bullets of every release between the installed version and the new one, newest first, without
+rewriting them. It is an extra artifact; keep writing the full notes above for the GitHub Release.
+
+```md
+## Features
+
+- Sidebar sorts work by topic
+- New work appears instantly
+
+## Fixes
+
+- Reliable task and bot names
+```
+
+- Cover the same range as the full notes: a preview covers only what changed since the previous
+  release on its channel, so previews are more detailed; production covers everything since the
+  previous stable.
+- Write two or three bullets in total for most releases, and never more than three per section.
+  Pick what a person would notice; leave out internal work entirely.
+- Each bullet is three to six plain words, ideally three, with no Markdown, links, code, or
+  trailing period.
+- Label experimental or off-by-default features with `(Beta)` in the bullet. The website
+  changelog at `https://happy.engineering/changelog/` contains production releases only,
+  newest first; previews use these files and GitHub Release notes. Coordinate production
+  feature entries and their dedicated share pages with the website owner.
+- New capabilities go under `## Features`; things that stopped going wrong go under `## Fixes`.
+  The card shows features first and fixes behind a tab. Omit a section with nothing in it.
+
+Check it, then commit it on its own and push that commit to `main` as part of the requested
+release — the workflow only runs from the current `origin/main`, and it fails before building
+when the file is missing or invalid:
+
+```bash
+node scripts/release/validateReleaseNotes.ts v0.4.67-preview.1
+git add release-notes/v0.4.67-preview.1.md
+git commit -m "Add release notes for v0.4.67-preview.1"
+git push origin HEAD:main
+```
+
+If `main` moved, rebase and push again without force.
+
 ## Dispatching
 
 **`gh` needs `@` to read a file into a workflow input.** Without it the literal path string is
@@ -158,6 +205,12 @@ only the body is wrong, so there is no need to re-release:
 
 ```bash
 gh release edit v0.4.67-preview.1 --notes-file .context/release-notes.md
+```
+
+Confirm the update card can read the short file:
+
+```bash
+curl -fsS https://raw.githubusercontent.com/slopus/happy-agent/main/release-notes/v0.4.67-preview.1.md
 ```
 
 Then confirm the rest:
