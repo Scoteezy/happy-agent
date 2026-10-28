@@ -1507,6 +1507,23 @@ Field groups:
     increment the protocol version. Older daemons omit it and instead report hidden providers as
     disabled; clients treat a missing value as `false`.
 
+    A provider whose configured type is `"smart"` also carries `pool`, the accounts it routes
+    through:
+
+    ```json
+    "pool": { "strategy": "round_robin", "members": ["codex", "codex_work"] }
+    ```
+
+    `strategy` is the configured routing strategy. `"round_robin"` is the only strategy today; the
+    set may grow, and clients treat an unknown strategy as an opaque pool. `members` lists the
+    accounts the pool can route at least one of its models to, in configured order, which is the
+    order the pool fails over through. Each member is the ID of another entry in `providers`,
+    hidden and disabled accounts included. Configured IDs the pool can never route to, such as
+    unknown IDs, other smart providers, or accounts of a different type than its first member, are
+    left out, so `members` may be empty. Clients show a pool's members by joining each ID to its own
+    entry here and in `GET /v0/usage`. Only smart providers carry `pool`. It is additive and does
+    not increment the protocol version; older daemons omit it.
+
 - `settings` — daemon behavior toggles and tunables.
 - `theme` — terminal color assignments.
 - `voice` — optional machine-level voice settings, present when the daemon supports voice:
@@ -5835,7 +5852,7 @@ Per kind:
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `signin_missing`                                                       | `provider`, `product` (the native assistant, such as "Claude Code", or `null`), `command` (`claude auth login`, `codex login`, or `grok login` for a default native login, else `null`) |
 | `usage_limit`                                                          | `provider`, `resetsAt`                                                                                                                                                                  |
-| `no_account_available`                                                 | `poolName`, `resetsAt`                                                                                                                                                                  |
+| `no_account_available`                                                 | `poolName`, `resetsAt`, `members` (optional)                                                                                                                                            |
 | `rate_limited`, `provider_unavailable`, `network`, `provider_disabled` | `provider`                                                                                                                                                                              |
 | `context_too_long`                                                     | `modelId`                                                                                                                                                                               |
 | `internal`                                                             | `detail`, one sanitized sentence                                                                                                                                                        |
@@ -5853,6 +5870,44 @@ exactly like an incompatible model switch, records a `service` message with
 `notice: { "kind": "context_reset" }` and the text "Context reset", reports `retrying` with
 `kind: "context_too_long"`, and retries the turn once. Only if that retry overflows too does the
 failure appear. A cancelled run creates no failure.
+
+`no_account_available` may carry `members`, what happened to each account of the pool:
+
+```json
+{
+    "kind": "no_account_available",
+    "message": "No Pool account is available. The first one resets in about 5 days.",
+    "poolName": "Pool",
+    "resetsAt": 1755832000000,
+    "fallbackProviders": [],
+    "members": [
+        {
+            "provider": { "id": "codex", "type": "codex", "vendorName": "Codex", "label": "codex" },
+            "reason": "usage_limit",
+            "command": null,
+            "resetsAt": 1755832000000
+        }
+    ]
+}
+```
+
+Each entry is one account the pool tried and set aside since the person's last message or retry,
+listed in the pool's configured order, which is the order of `pool.members`:
+
+- `provider` — the account, as `provider` above.
+- `reason` — the kind of that account's own failure: `signin_missing`, `usage_limit`,
+  `rate_limited`, `provider_unavailable`, or `network`. The set may grow; clients treat an
+  unknown reason as an account that is unavailable for an unstated reason.
+- `command` — exactly as on `signin_missing`: the default native login command, else `null`.
+  Always `null` unless `reason` is `signin_missing`.
+- `resetsAt` — exactly as on `usage_limit`. Always `null` unless `reason` is `usage_limit`.
+
+Accounts that are turned off are left out, so a pool whose accounts are all off reports an empty
+list. A pool in which any tried account's sign-in was rejected reports that account's
+`signin_missing` instead of `no_account_available`, so today every listed member has
+`usage_limit`. The list holds at most 64 entries. `members` is additive and does not increment the
+protocol version. Older daemons and failures stored before it omit it, and clients then show only
+`poolName` and `resetsAt`.
 
 `failure` is identical for every reader. It contains no credential location, host, or
 configuration key, so the per-caller projection above keeps withholding only the legacy
@@ -7570,7 +7625,8 @@ Response — `200`:
             "refreshedAt": 1755400000000,
             "refreshError": null,
             "retryAt": null,
-            "refreshing": false
+            "refreshing": false,
+            "signIn": "signed_in"
         }
     ],
     "hour": {
@@ -7603,7 +7659,24 @@ Response — `200`:
   reading, or `null` before the first successful reading and for providers such as Bedrock that
   expose no account-usage API. `checkedAt` is when the daemon last finished asking, whether or not
   the request succeeded. `error` explains why no reading is available; a failed refresh does not
-  discard an older successful reading.
+  discard an older successful reading. A smart provider's entry also carries `pool`, exactly as
+  on its `GET /v0/config` entry.
+- `signIn` is the account's sign-in as the daemon last learned it: `"signed_in"`, `"signed_out"`,
+  or `"unknown"`. `"signed_out"` follows exactly the rule of the `signin_missing` failure: the
+  account has no credential, or the vendor rejected it after the provider's own renewal failed.
+  `"signed_in"` means the vendor last accepted the account: a usage reading arrived for it, from a
+  poll or in band, or an inference request on it completed or was refused only because its usage
+  was spent. Each check that can tell replaces the value. A check that cannot tell, such as a
+  network error, throttling, a vendor error, or a usage read that returns nothing, leaves the
+  earlier value in place; when a usage read returns nothing, the daemon also looks for the
+  account's credential locally, and a missing one is `"signed_out"`. `"unknown"` means no check
+  has told since the daemon started. The value lives only in daemon memory, like the readings.
+  Signing an account back in needs no restart: the next usage reading or inference the vendor
+  accepts moves it to `"signed_in"`. Every change of `signIn` emits `provider.usage.updated`,
+  even when nothing else in the entry changed.
+  A smart provider's entry omits `signIn`: a pool is not an account, and each member's own entry
+  carries its sign-in. `signIn` is additive and does not increment the protocol version. Older
+  daemons omit it, and clients treat an account without it as `"unknown"`.
 - `refreshedAt`, `refreshError`, `retryAt`, and `refreshing` are optional for protocol-28
   compatibility. A protocol-29 daemon always sends all four on every entry, with explicit `null`
   or `false`. `refreshedAt` is when the last successful reading arrived, from a poll or from
@@ -13362,9 +13435,11 @@ version rules. Snapshot-to-stream cursor and version-gap recovery rules remain u
 - `provider.usage.updated` — protocol 29 or newer. One provider account's usage entry changed: a
   read started or finished, a vendor reported the account during inference, or a read failed.
   The payload is a complete replacement of that account's entry from `GET /v0/usage`, without the
-  configuration fields `type`, `enabled`, and `models`, which follow `config.updated`:
+  configuration fields `type`, `enabled`, `models`, and `pool`, which follow `config.updated`:
     - `providerId`, `usage`, `checkedAt`, `error`, `refreshedAt`, `refreshError`, `retryAt`, and
       `refreshing` — exactly as on the `GET /v0/usage` entry.
+    - `signIn` — optional, exactly as on the `GET /v0/usage` entry, so it is absent for a smart
+      provider and from older daemons. A change of `signIn` alone emits an event too.
 
     Every change emits one event, in the order the changes happened, so the latest event for a
     `providerId` is its current state. The event is journaled like any other and replays from a

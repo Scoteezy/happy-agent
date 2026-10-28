@@ -83,7 +83,7 @@ import {
 } from "./surfaces.js";
 import { Nullable } from "./common.js";
 import type { Terminal } from "./terminals.js";
-import { providerAccountUsageStateSchema, type AgentContextUsage } from "./usage.js";
+import { providerAccountUsageSnapshotSchema, type AgentContextUsage } from "./usage.js";
 import type { Workspace } from "./workspaces.js";
 import { storedUserSettingSchema } from "./userSettings.js";
 import { mobileConnectorSchema } from "./mobileConnector.js";
@@ -647,7 +647,7 @@ export type MobileConnectorUpdatedPayload = Static<typeof mobileConnectorUpdated
  * reports for it except the configuration fields. Every change emits one, in order, so the latest
  * event for a `providerId` is its current state.
  */
-export const providerUsageUpdatedPayloadSchema = Type.Required(providerAccountUsageStateSchema);
+export const providerUsageUpdatedPayloadSchema = providerAccountUsageSnapshotSchema;
 export type ProviderUsageUpdatedPayload = Static<typeof providerUsageUpdatedPayloadSchema>;
 
 /** One event on the journal. */

@@ -394,6 +394,22 @@ export const providerModelReferenceSchema = Type.Object({
 });
 export type ProviderModelReference = Static<typeof providerModelReferenceSchema>;
 
+/** Pool strategies with understood behavior; unknown wire values are still readable. */
+export const knownProviderPoolStrategySchema = Type.Literal("round_robin");
+export type KnownProviderPoolStrategy = Static<typeof knownProviderPoolStrategySchema>;
+
+/** The accounts a smart provider routes through. */
+export const providerPoolSchema = Type.Object({
+    /** The configured routing strategy, such as `"round_robin"`; extensible. */
+    strategy: Type.String({ minLength: 1, maxLength: 64 }),
+    /**
+     * Provider IDs of the accounts the pool can route to, in configured failover order, hidden and
+     * disabled accounts included. Join each to its own `providers` entry.
+     */
+    members: Type.Array(Type.String({ minLength: 1 })),
+});
+export type ProviderPool = Static<typeof providerPoolSchema>;
+
 /** One configured inference provider and the models it serves. */
 export const providerConfigSchema = Type.Object({
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 256, pattern: "\\S" })),
@@ -405,6 +421,8 @@ export const providerConfigSchema = Type.Object({
      */
     hidden: Type.Optional(Type.Boolean()),
     models: Type.Array(providerModelReferenceSchema),
+    /** Present only for a smart provider; older daemons omit it. */
+    pool: Type.Optional(providerPoolSchema),
     /** The canonical provider key: `"claude"`, `"codex"`, `"grok"`, … */
     type: Type.String(),
 });

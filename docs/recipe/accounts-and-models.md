@@ -88,14 +88,14 @@ providers = ["claude", "claude_work"]
 enabled = true
 ```
 
-| Round robin                    | Behavior                                                                     |
-| ------------------------------ | ---------------------------------------------------------------------------- |
-| New agent or subagent          | Starts on a random member.                                                   |
-| Later turns                    | Stay on that member.                                                         |
-| Auth or quota-exhaustion error | Moves to the next member.                                                    |
-| Every member failed            | Names a member that needs sign-in first, else the earliest usage reset.      |
-| Failure after output started   | Not replayed on another account.                                             |
-| Not supported                  | Weights, usage-aware or priority routing, time windows, UI or API for pools. |
+| Round robin                    | Behavior                                                                |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| New agent or subagent          | Starts on a random member.                                              |
+| Later turns                    | Stay on that member.                                                    |
+| Auth or quota-exhaustion error | Moves to the next member.                                               |
+| Every member failed            | Names a member that needs sign-in first, else the earliest usage reset. |
+| Failure after output started   | Not replayed on another account.                                        |
+| Not supported                  | Weights, usage-aware or priority routing, time windows, editing pools.  |
 
 | Setting           | Effect                                                |
 | ----------------- | ----------------------------------------------------- |

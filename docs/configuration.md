@@ -767,6 +767,12 @@ Vendor quota readings remain attached to concrete accounts; a smart provider doe
 combined quota. Consumed-token accounting is not duplicated between the smart provider and its
 backing accounts.
 
+So clients can still show what a pool is made of, `GET /v0/config` and `GET /v0/usage` report a
+smart provider's `pool`: its strategy and its members in failover order, hidden members included.
+Each account's `GET /v0/usage` entry carries `signIn` (`signed_in`, `signed_out`, or `unknown`),
+and a pool that has no account left lists each member it set aside, with the reason, in its
+`no_account_available` failure.
+
 Set `hidden = false` or remove the setting and reload the daemon to show the provider again.
 
 The [accounts and models recipe](recipe/accounts-and-models.md) walks through adding an account and

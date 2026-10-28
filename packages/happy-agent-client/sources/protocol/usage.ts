@@ -9,7 +9,7 @@
 import { type Static, Type } from "@sinclair/typebox";
 
 import { Nullable } from "./common.js";
-import { providerModelReferenceSchema } from "./daemon.js";
+import { providerModelReferenceSchema, providerPoolSchema } from "./daemon.js";
 
 /** Token counts for one model. */
 export interface ModelUsage {
@@ -61,13 +61,22 @@ export const providerAccountUsageSchema = Type.Object({
 export type ProviderAccountUsage = Static<typeof providerAccountUsageSchema>;
 
 /**
- * Everything the daemon knows about reading one provider account, without its configuration.
- *
- * The refresh fields are optional only for compatibility with older daemons: a protocol-29 daemon
- * always sends them, so an entry without `refreshedAt` comes from a daemon that neither publishes
- * `provider.usage.updated` nor serves `POST /v0/usage/refresh`.
+ * An account's sign-in as the daemon last learned it. `signed_out` follows the `signin_missing`
+ * rule; `unknown` means nothing has told since the daemon started.
  */
-export const providerAccountUsageStateSchema = Type.Object({
+export const providerAccountSignInSchema = Type.Union([
+    Type.Literal("signed_in"),
+    Type.Literal("signed_out"),
+    Type.Literal("unknown"),
+]);
+export type ProviderAccountSignIn = Static<typeof providerAccountSignInSchema>;
+
+const providerAccountSignInFieldSchema = Type.Object({
+    /** Absent for a smart provider and from older daemons; clients treat absent as `unknown`. */
+    signIn: Type.Optional(providerAccountSignInSchema),
+});
+
+const providerAccountReadStateSchema = Type.Object({
     providerId: Type.String(),
     /** The latest successful normalized reading, or `null` when none is available. */
     usage: Nullable(providerAccountUsageSchema),
@@ -84,7 +93,28 @@ export const providerAccountUsageStateSchema = Type.Object({
     /** Whether a read of this account is in flight. */
     refreshing: Type.Optional(Type.Boolean()),
 });
+
+/**
+ * Everything the daemon knows about reading one provider account, without its configuration.
+ *
+ * The refresh fields are optional only for compatibility with older daemons: a protocol-29 daemon
+ * always sends them, so an entry without `refreshedAt` comes from a daemon that neither publishes
+ * `provider.usage.updated` nor serves `POST /v0/usage/refresh`.
+ */
+export const providerAccountUsageStateSchema = Type.Composite([
+    providerAccountReadStateSchema,
+    providerAccountSignInFieldSchema,
+]);
 export type ProviderAccountUsageState = Static<typeof providerAccountUsageStateSchema>;
+
+/**
+ * The `provider.usage.updated` payload: every read-state field is always sent, while `signIn` stays
+ * optional because smart providers and older daemons omit it.
+ */
+export const providerAccountUsageSnapshotSchema = Type.Composite([
+    Type.Required(providerAccountReadStateSchema),
+    providerAccountSignInFieldSchema,
+]);
 
 /** One configured provider, its complete model catalog, and its latest account limits. */
 export const providerUsageEntrySchema = Type.Composite([
@@ -95,6 +125,8 @@ export const providerUsageEntrySchema = Type.Composite([
         enabled: Type.Boolean(),
         /** The same complete model-reference list returned for this provider by `GET /v0/config`. */
         models: Type.Array(providerModelReferenceSchema),
+        /** A smart provider's members, exactly as on its `GET /v0/config` entry. */
+        pool: Type.Optional(providerPoolSchema),
     }),
 ]);
 export type ProviderUsageEntry = Static<typeof providerUsageEntrySchema>;

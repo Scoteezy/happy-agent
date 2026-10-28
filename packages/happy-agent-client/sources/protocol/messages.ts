@@ -639,10 +639,37 @@ export const usageLimitFailureSchema = failureVariant("usage_limit", {
     provider: messageFailureProviderSchema,
     resetsAt: resetsAtSchema,
 });
+/** Why a pool set one of its accounts aside; unknown wire values are still readable. */
+export const knownPoolMemberFailureReasonSchema = Type.Union([
+    Type.Literal("signin_missing"),
+    Type.Literal("usage_limit"),
+    Type.Literal("rate_limited"),
+    Type.Literal("provider_unavailable"),
+    Type.Literal("network"),
+]);
+export type KnownPoolMemberFailureReason = Static<typeof knownPoolMemberFailureReasonSchema>;
+
+/** One account a pool tried and set aside since the person's last message or retry. */
+export const poolMemberFailureSchema = Type.Object({
+    provider: messageFailureProviderSchema,
+    /** The kind of this account's own failure; extensible. */
+    reason: Type.String({ minLength: 1, maxLength: 64 }),
+    /** As on `signin_missing`; always null unless `reason` is `signin_missing`. */
+    command: Nullable(Type.String({ minLength: 1, maxLength: 256 })),
+    /** As on `usage_limit`; always null unless `reason` is `usage_limit`. */
+    resetsAt: resetsAtSchema,
+});
+export type PoolMemberFailure = Static<typeof poolMemberFailureSchema>;
+
 export const noAccountAvailableFailureSchema = failureVariant("no_account_available", {
     /** Display name of the routing pool every account of which is spent. */
     poolName: Type.String({ minLength: 1, maxLength: 256 }),
     resetsAt: resetsAtSchema,
+    /**
+     * The accounts the pool set aside, in configured order, turned-off accounts left out. Older
+     * daemons and failures stored before it omit it.
+     */
+    members: Type.Optional(Type.Array(poolMemberFailureSchema, { maxItems: 64 })),
 });
 export const rateLimitedFailureSchema = failureVariant("rate_limited", {
     provider: messageFailureProviderSchema,
