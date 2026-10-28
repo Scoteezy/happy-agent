@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatSpaceSidebar, parseSpaceSidebar } from "@slopus/happy-agent-client";
+import {
+    applySpaceSidebarOperations,
+    diffSpaceSidebar,
+    formatSpaceSidebar,
+    parseSpaceSidebar,
+} from "@slopus/happy-agent-client";
 
 import {
     archiveOffers,
@@ -104,6 +109,84 @@ describe("sidebar proposals", () => {
         expect(
             formatConversationTurns([], { turns: 4, replies: 1, now, messageLimit: 20, limit: 99 }),
         ).toBe("Nothing has been said here yet.");
+    });
+
+    it("never lets a proposal set a separator's pin, so accepting one keeps the person's", () => {
+        const pinned = doc(
+            '<happy-space id="happy"/>',
+            '<happy-separator id="top" pin="top"/>',
+            '<happy-space id="quiet"/>',
+        );
+        // Prioritizing redraws the separator without its pin, repins it, and adds a pinned one.
+        const reviewed = reviewProposalOperations(
+            pinned,
+            [
+                ...diffSpaceSidebar(
+                    pinned,
+                    doc(
+                        '<happy-space id="quiet"/>',
+                        '<happy-space id="happy"/>',
+                        '<happy-separator id="top"/>',
+                    ),
+                ),
+                { type: "set", id: "top", pin: "bottom" },
+                {
+                    type: "insert",
+                    node: { type: "separator", id: "floor", pin: "bottom" },
+                    to: { after: "quiet" },
+                },
+            ],
+            rules,
+        );
+        expect(reviewed.notes).toEqual([
+            "Dropped set pin on top: Keep the person's separator pins as they are.",
+            "Dropped set pin on top: Keep the person's separator pins as they are.",
+            "Dropped insert separator floor after quiet: Keep the person's separator pins as they are.",
+        ]);
+        expect(formatSpaceSidebar(reviewed.document)).toBe(
+            formatSpaceSidebar(
+                doc(
+                    '<happy-space id="quiet"/>',
+                    '<happy-space id="happy"/>',
+                    '<happy-separator id="top" pin="top"/>',
+                ),
+            ),
+        );
+
+        // Accepting applies the difference between the proposal's first and latest versions, so a
+        // pin the person set after the proposal was drafted stays as well.
+        const first = doc(
+            '<happy-space id="happy"/>',
+            '<happy-separator id="top"/>',
+            '<happy-space id="quiet"/>',
+        );
+        const latest = reviewProposalOperations(
+            first,
+            diffSpaceSidebar(
+                first,
+                doc(
+                    '<happy-space id="quiet"/>',
+                    '<happy-space id="happy"/>',
+                    '<happy-separator id="top"/>',
+                ),
+            ),
+            rules,
+        ).document;
+        const accepted = applySpaceSidebarOperations(pinned, diffSpaceSidebar(first, latest), {
+            base: first,
+        }).document;
+        expect(accepted.items.find((item) => item.id === "top")).toEqual({
+            type: "separator",
+            id: "top",
+            pin: "top",
+        });
+        expect(accepted.items.map((item) => item.id)).toEqual([
+            "happy-search",
+            "happy-create",
+            "quiet",
+            "happy",
+            "top",
+        ]);
     });
 
     it("gives ages in minutes up to three hours, so recent work never reads as two hours", () => {

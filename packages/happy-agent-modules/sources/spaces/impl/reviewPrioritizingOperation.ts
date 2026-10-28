@@ -26,11 +26,20 @@ export interface PrioritizingRules {
     readonly direct: boolean;
 }
 
+/** Whether an operation pins, repins, or unpins a separator, or inserts a pinned one. */
+export function touchesSeparatorPin(operation: SpaceSidebarOperation): boolean {
+    return operation.type === "set"
+        ? operation.pin !== undefined
+        : operation.type === "insert" &&
+              operation.node.type === "separator" &&
+              operation.node.pin !== undefined;
+}
+
 /**
  * Why Prioritizing may not make this change, or `undefined` when it may. Where things go is
  * Prioritizing's decision, made from its prompt; the daemon only keeps what the person did
  * themselves: their placements, folds, names, fold ribbons, widgets, and the sessions they
- * revealed. `before` and `after` are the document around the one applied operation; a move
+ * revealed. A separator's pin is only ever the person's, so Prioritizing never sets one. `before` and `after` are the document around the one applied operation; a move
  * counts what it carries along, and an item that comes to sit under another heading moved.
  */
 export function reviewPrioritizingOperation(
@@ -39,6 +48,7 @@ export function reviewPrioritizingOperation(
     operation: SpaceSidebarOperation,
     rules: PrioritizingRules,
 ): string | undefined {
+    if (touchesSeparatorPin(operation)) return "Keep the person's separator pins as they are.";
     const target = operation.type === "insert" ? operation.node.id : operation.id;
     const moved = new Set<string>(regroupedSidebarIds(before, after));
     if (operation.type !== "set") moved.add(target);

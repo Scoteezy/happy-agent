@@ -451,6 +451,17 @@ conversation counts whoever wrote it (a later report from a subtask does not), a
 first message is told that message at once, and the prompt says pending work is placeable once its
 subject is clear.
 
+## A separator's pin is only the person's
+
+Kirill wanted the person to pin a separator to the top or bottom of their sidebar, as their own data
+in the document: `<happy-separator id pin="top|bottom"/>`, absent when unpinned, changed with
+`set {pin}` (`null` unpins). Unlike folds or labels, which Prioritizing may set until the person
+does, a pin is never Prioritizing's: any operation of its that sets, changes, or clears one, or
+inserts a pinned separator, is dropped, in batches and proposals alike. So a proposal never carries a
+pin change, and accepting one (the difference between its first and latest version) keeps whatever
+pin the person has now, even one set after the proposal was drafted. The prompt says the same in one
+line, so Prioritizing does not keep trying.
+
 ## A set that changes nothing is still the person's
 
 The desktop sends `set {expanded: true}` for "Show subtasks" on a row that may already be open. The

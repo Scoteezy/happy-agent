@@ -1,6 +1,6 @@
 /** The sidebar grammar as Prioritizing reads it from `get_sidebar_styles`. */
 export const SIDEBAR_STYLES = {
-    version: 4,
+    version: 5,
     elements: {
         nav: {
             attributes: { "fold-ribbon": '"hover" (default) or "always"' },
@@ -24,7 +24,10 @@ export const SIDEBAR_STYLES = {
             children: [],
         },
         "happy-separator": {
-            attributes: { id: "required, unique, 1–128 characters without whitespace" },
+            attributes: {
+                id: "required, unique, 1–128 characters without whitespace",
+                pin: '"top" or "bottom", set only by the person; keep it as it is',
+            },
             children: [],
         },
         "happy-space": {

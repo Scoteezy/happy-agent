@@ -314,6 +314,55 @@ describe("Prioritizing's operations", () => {
         ]);
         expect(projected.items.at(-1)?.id).toBe("quiet");
     });
+
+    it("never sets a separator's pin, even when the person asked for a larger change", () => {
+        const pinned = applySpaceSidebarOperations(base, [
+            {
+                type: "insert",
+                node: { type: "separator", id: "floor", pin: "bottom" },
+                to: { after: "quiet" },
+            },
+        ]).document;
+        for (const direct of [true, false]) {
+            const result = applyPrioritizingOperations(
+                pinned,
+                [
+                    { type: "set", id: "floor", pin: null },
+                    { type: "set", id: "floor", pin: "top" },
+                    {
+                        type: "insert",
+                        node: { type: "separator", id: "ceiling", pin: "top" },
+                        to: { after: "happy" },
+                    },
+                ],
+                rules({}, { direct }),
+                undefined,
+            );
+            expect(result.operations).toEqual([]);
+            expect(result.notes).toEqual([
+                "Dropped set pin on floor: Keep the person's separator pins as they are.",
+                "Dropped set pin on floor: Keep the person's separator pins as they are.",
+                "Dropped insert separator ceiling after happy: Keep the person's separator pins as they are.",
+            ]);
+        }
+        // Prioritizing may still add an unpinned separator when asked.
+        const asked = applyPrioritizingOperations(
+            pinned,
+            [
+                {
+                    type: "insert",
+                    node: { type: "separator", id: "ceiling" },
+                    to: { after: "happy" },
+                },
+            ],
+            rules({}, { direct: false }),
+            undefined,
+        );
+        expect(asked.notes).toEqual([]);
+        expect(formatSpaceSidebar(asked.document)).toContain(
+            '<happy-separator id="floor" pin="bottom"/>',
+        );
+    });
 });
 
 describe("sidebar authorship", () => {

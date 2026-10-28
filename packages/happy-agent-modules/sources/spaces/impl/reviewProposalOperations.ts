@@ -8,6 +8,7 @@ import {
 
 import type { SidebarAspect } from "../Space.js";
 import { describeSidebarOperation } from "./applyPrioritizingOperations.js";
+import { touchesSeparatorPin } from "./reviewPrioritizingOperation.js";
 
 /** The section that, in a proposal only, heads the rows offered for archiving. */
 export const ARCHIVE_SECTION_ID = "archive";
@@ -43,7 +44,8 @@ export function withoutArchive(
  * Prioritizing's revision of a proposal, applied one operation at a time. What to propose is
  * Prioritizing's to decide, and the person accepts or declines all of it, so only integrity is
  * checked here: an operation is dropped with a note when it would change what the person set in
- * this proposal, or offer for archiving something that is not a task's row; the rest still apply.
+ * this proposal, set a separator's pin, which only the person does, or offer for archiving
+ * something that is not a task's row; the rest still apply.
  */
 export function reviewProposalOperations(
     document: SpaceSidebarDocument,
@@ -88,6 +90,7 @@ function review(
 ): string | undefined {
     const target = operation.type === "insert" ? operation.node.id : operation.id;
     const kept = "Keep the person's edit of this proposal.";
+    if (touchesSeparatorPin(operation)) return "Keep the person's separator pins as they are.";
     if (operation.type !== "set" && rules.person(target, "place")) return kept;
     if (operation.type === "set") {
         if (

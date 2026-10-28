@@ -16,6 +16,7 @@ const REVISIONS: readonly { readonly revision: number; readonly sha256: string }
     { revision: 3, sha256: "3be0ce92f1a88c95d86102bdf3796d04b74e2f64d95be34fe8aee15ed2f8dee7" },
     { revision: 4, sha256: "1c13954d59d979586cd4d915fe306d901b44514e8c872cf6a0e6dd233a408114" },
     { revision: 5, sha256: "c87cbae3a88dc77de349217f7b9f8e51d5f1389546dfc46c2909572d0f4476c5" },
+    { revision: 6, sha256: "cf9d747ef58f3502258b761c14f9498a86983c28dd2c0b81d08d09df6eb5c759" },
 ];
 
 it("arranges by the person's own priorities into the Focus layout within the budget", () => {

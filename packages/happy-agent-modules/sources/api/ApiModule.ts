@@ -9949,6 +9949,7 @@ export class ApiModule implements AgentModule {
                           sidebarOperations: true,
                           sidebarAttachments: true,
                           sidebarProposals: true,
+                          sidebarSeparatorPins: true,
                       }),
                 ...(this.#live === undefined
                     ? {}

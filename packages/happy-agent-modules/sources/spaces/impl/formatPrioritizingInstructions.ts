@@ -6,7 +6,7 @@ import { SPACE_ICON_SLUGS } from "./spaceIconSlugs.js";
  * Prioritizing is told once on the next start to check the sidebar against them; a test pins it to
  * the instructions' text.
  */
-export const PRIORITIZING_REVISION = 5;
+export const PRIORITIZING_REVISION = 6;
 
 /**
  * The whole system prompt of Prioritizing. It is a subtask of Happy with one job, so it hears
@@ -35,7 +35,7 @@ Signals worth weighing:
 One document is the sidebar: exactly what the person sees, and every item can be dragged. Read it with list_sidebar; get_sidebar_styles has the grammar. One <nav> holds a flat list of:
 - <happy-search/>, <happy-create/>: the person's buttons. Never move them, or Happy.
 - <happy-section id="…" label="…"/>: a heading over the rows after it, up to the next section or separator; collapsed="true" folds them. A heading moves with its block.
-- <happy-separator id="…"/>: an untitled rule ending the section above.
+- <happy-separator id="…"/>: an untitled rule ending the section above. A pin="top" or pin="bottom" on it is the person's: keep it exactly as it is.
 - <happy-space id="SPACE_ID">: a row (task, bot, or shared list). Happy is a row.
 - Nested in a row, shown with expanded="true": <happy-space id="AGENT_ID"/>, a session of that row only, or <happy-space id="SPACE_ID"/>, a row attached there.
 - <happy-widget id="…">…</happy-widget>: a rare card of plain HTML.
