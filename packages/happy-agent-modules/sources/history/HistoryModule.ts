@@ -1664,7 +1664,7 @@ export class HistoryModule implements AgentModule {
             overflowed && (await scope.runKV.read(ctx, CONTEXT_RESET_KEY)) === undefined;
         if (recovering) await scope.runKV.write(ctx, CONTEXT_RESET_KEY, true);
         if (inference.errorMessage !== undefined && !recovering) {
-            const attempt = attempts?.at(-1);
+            const attempt = await this.#failedAttempt(scope, attempts);
             // A smart route reports a candidate that had no credential as its own failure.
             const unavailable =
                 attempt?.errorCode === undefined
@@ -1896,6 +1896,21 @@ export class HistoryModule implements AgentModule {
     }
 
     /**
+     * The attempt a failed turn is about. Usually the last one, but an exhausted smart route may
+     * report an earlier account's rejected sign-in; that account's attempt is the failure then, or
+     * none when the account failed before reaching inference.
+     */
+    async #failedAttempt(
+        scope: AgentModuleScope,
+        attempts: readonly ProviderExecutionAttempt[] | undefined,
+    ): Promise<ProviderExecutionAttempt | undefined> {
+        const { id: agentId, provider: routeId, model } = scope.agent;
+        const account = await this.#config?.routeFailedAccount(agentId, routeId, model);
+        if (account === undefined) return attempts?.at(-1);
+        return attempts?.findLast((attempt) => attempt.mode.providerId === account);
+    }
+
+    /**
      * The typed failure for a failed turn. It names what failed, never the alternatives: clients
      * read those live from the same catalog and usage as their model picker. Without
      * configuration there is no provider to describe, so the row keeps only its text.
@@ -1908,7 +1923,7 @@ export class HistoryModule implements AgentModule {
     ): Promise<MessageFailure | undefined> {
         const config = this.#config;
         if (config === undefined) return undefined;
-        const attempt = attempts?.at(-1);
+        const attempt = await this.#failedAttempt(scope, attempts);
         const { id: agentId, provider: routeId, model } = scope.agent;
         const providerId = unavailable?.providerId ?? attempt?.mode.providerId ?? routeId;
         let spentPool: { name: string; resetsAt: number | null } | undefined;

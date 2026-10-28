@@ -168,7 +168,7 @@ it("keeps scripted terminal source and provenance unknown while preserving the t
 }, 30_000);
 
 it("records the actually selected smart-route entry without changing the requested alias", async () => {
-    const modelId = "openai/gpt-5.6-sol";
+    const modelId = "openai/gpt-6.1-sol";
     const gym = await createAgentGym({
         routeConfiguredProviders: true,
         models: ["gym", "router"].map((providerId) => ({

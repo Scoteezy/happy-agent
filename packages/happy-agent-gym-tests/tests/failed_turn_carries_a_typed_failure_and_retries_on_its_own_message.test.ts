@@ -8,7 +8,7 @@ afterEach(async () => {
     vi.restoreAllMocks();
 });
 
-const modelId = "openai/gpt-5.6-sol";
+const modelId = "openai/gpt-6.1-sol";
 const mode = (providerId: string): MessageMode => ({
     providerId,
     modelId,

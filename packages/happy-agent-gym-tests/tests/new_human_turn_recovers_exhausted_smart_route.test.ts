@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 describe("smart route recovery on a new human turn", () => {
     it("tries the account again after a terminal authentication rejection", async () => {
-        const modelId = "openai/gpt-5.6-sol";
+        const modelId = "openai/gpt-6.1-sol";
         const gym = await createAgentGym({
             routeConfiguredProviders: true,
             models: ["gym", "router"].map((providerId) => ({

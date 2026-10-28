@@ -260,6 +260,7 @@ async function setupHookWorld(name: string): Promise<{
             operationId.startsWith("inf-overflow") ? [{ mode, contextOverflow: true }] : undefined,
         unavailableCredentialFailure: () => undefined,
         routeSpent: async () => false,
+        routeFailedAccount: async () => undefined,
         smartRouteAccounts: () => [],
         failureProvider: () => ({ id: "acp", label: "ACP" }),
         isProviderEnabled: () => true,

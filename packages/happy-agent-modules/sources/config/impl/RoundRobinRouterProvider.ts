@@ -30,7 +30,14 @@ interface AgentRouteState {
     current: number;
     readonly failed: Set<number>;
     acceptedMessageId?: string;
-    terminal?: Extract<SessionEvent, { type: "done"; state: "error" }>;
+    /** An excluded account whose sign-in was rejected: what the person can fix right away. */
+    signInFailure?: RoutedFailure;
+    terminal?: RoutedFailure;
+}
+
+interface RoutedFailure {
+    readonly providerId: string;
+    readonly event: Extract<SessionEvent, { type: "done"; state: "error" }>;
 }
 
 interface RoundRobinRouting {
@@ -97,6 +104,7 @@ export class RoundRobinRouterProvider extends BaseProvider {
         if (state.acceptedMessageId === messageId) return;
         state.acceptedMessageId = messageId;
         state.failed.clear();
+        delete state.signInFailure;
         delete state.terminal;
     }
 
@@ -107,8 +115,13 @@ export class RoundRobinRouterProvider extends BaseProvider {
      */
     spent(id: string): boolean {
         const terminal = this.#agents.get(id)?.terminal;
-        if (terminal !== undefined) return terminal.providerError?.type === "out_of_tokens";
+        if (terminal !== undefined) return terminal.event.providerError?.type === "out_of_tokens";
         return this.#candidates.every((candidate) => !this.#isEnabled(candidate.providerId));
+    }
+
+    /** The account whose failure this agent's exhausted pool reports, while it stays exhausted. */
+    failedAccount(id: string): string | undefined {
+        return this.#agents.get(id)?.terminal?.providerId;
     }
 
     #stateFor(id: string): AgentRouteState {
@@ -153,7 +166,7 @@ class RoundRobinRouterSession extends BaseSession {
             return;
         }
         if (this.#state.terminal !== undefined) {
-            yield this.#state.terminal;
+            yield this.#state.terminal.event;
             return;
         }
 
@@ -179,7 +192,7 @@ class RoundRobinRouterSession extends BaseSession {
                     return;
                 }
                 if (!(await this.#fail(index, failure))) {
-                    yield failure;
+                    yield this.#terminalEvent(failure);
                     return;
                 }
                 continue;
@@ -204,6 +217,9 @@ class RoundRobinRouterSession extends BaseSession {
                         if (event.type !== "done") continue;
                         if (isRoutingFailureEvent(event)) {
                             if (await this.#fail(index, event)) continue routeAttempts;
+                            yield* buffered.slice(0, -1);
+                            yield this.#terminalEvent(event);
+                            return;
                         }
                         yield* buffered;
                         return;
@@ -224,7 +240,7 @@ class RoundRobinRouterSession extends BaseSession {
                 const failure = routingFailureFromError(error);
                 if (!visible && failure !== undefined) {
                     if (await this.#fail(index, failure)) continue;
-                    yield failure;
+                    yield this.#terminalEvent(failure);
                     return;
                 }
                 yield failedEvent(errorMessage(error));
@@ -232,13 +248,13 @@ class RoundRobinRouterSession extends BaseSession {
             }
         }
 
-        yield this.#state.terminal ?? failedEvent("No compatible provider account is available.");
+        yield this.#terminalEvent(failedEvent("No compatible provider account is available."));
     }
 
     async compact(ctx: Context, options: SessionCompactionOptions): Promise<SessionCompaction> {
         if (this.#destroyed) return compactionFailure("The routed provider session is closed.");
         if (this.#state.terminal !== undefined) {
-            return compactionFailure(this.#state.terminal.message);
+            return compactionFailure(this.#state.terminal.event.message);
         }
         for (let checked = 0; checked < this.#routing.candidates.length; checked += 1) {
             const index = this.#nextAvailableIndex();
@@ -255,14 +271,19 @@ class RoundRobinRouterSession extends BaseSession {
                 );
                 if (result.status !== "failed") return result;
                 const failure = routingFailureFromError(new Error(result.message));
-                if (failure === undefined || !(await this.#fail(index, failure))) return result;
+                if (failure === undefined) return result;
+                if (!(await this.#fail(index, failure))) {
+                    const terminal = this.#terminalEvent(failure);
+                    return terminal === failure ? result : compactionFailure(terminal.message);
+                }
             } catch (error: unknown) {
                 if (ctx.lifetime?.aborted === true) {
                     return { status: "cancelled", context: options.context };
                 }
                 const failure = routingFailureFromError(error);
-                if (failure === undefined || !(await this.#fail(index, failure))) {
-                    return compactionFailure(errorMessage(error));
+                if (failure === undefined) return compactionFailure(errorMessage(error));
+                if (!(await this.#fail(index, failure))) {
+                    return compactionFailure(this.#terminalEvent(failure).message);
                 }
             }
         }
@@ -308,21 +329,35 @@ class RoundRobinRouterSession extends BaseSession {
         return session;
     }
 
+    /**
+     * Exclude the account that just failed and move to the next one. When none is left, the pool
+     * reports a rejected sign-in if any account had one, rather than whichever account happened to
+     * be tried last: signing in fixes the pool now, while a spent account may need days to reset.
+     */
     async #fail(
         index: number,
         event: Extract<SessionEvent, { type: "done"; state: "error" }>,
     ): Promise<boolean> {
         this.#state.failed.add(index);
+        const failure = { providerId: this.#routing.candidates[index]!.providerId, event };
+        if (isSignInFailure(event)) this.#state.signInFailure = failure;
         const session = this.#sessions.get(index);
         this.#sessions.delete(index);
         await Promise.resolve(session?.destroy()).catch(() => undefined);
         const next = this.#nextIndexAfter(index);
         if (next === undefined) {
-            this.#state.terminal = event;
+            this.#state.terminal = this.#state.signInFailure ?? failure;
             return false;
         }
         this.#state.current = next;
         return true;
+    }
+
+    /** What the exhausted pool reports in place of `failure`, the last account's own failure. */
+    #terminalEvent(
+        failure: Extract<SessionEvent, { type: "done"; state: "error" }>,
+    ): Extract<SessionEvent, { type: "done"; state: "error" }> {
+        return this.#state.terminal?.event ?? failure;
     }
 
     #nextIndexAfter(index: number): number | undefined {
@@ -380,6 +415,11 @@ function isRoutingFailureEvent(
         );
     }
     return event.kind === "billing_error" || routingFailureKind(event.message) !== undefined;
+}
+
+function isSignInFailure(event: Extract<SessionEvent, { type: "done"; state: "error" }>): boolean {
+    if (event.providerError !== undefined) return event.providerError.type === "authentication";
+    return event.kind !== "billing_error" && routingFailureKind(event.message) === "authentication";
 }
 
 function routingFailureFromError(

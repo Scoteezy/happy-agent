@@ -3,7 +3,7 @@ import { createAgentGym } from "@slopus/happy-agent-gym";
 import { expect, it, vi } from "vitest";
 
 it("announces a mid-run fallback configuration before its first streamed output and persists the same order", async () => {
-    const modelId = "openai/gpt-5.6-sol";
+    const modelId = "openai/gpt-6.1-sol";
     const mode: MessageMode = {
         providerId: "router",
         modelId,
@@ -144,7 +144,7 @@ providers = ["gym", "other"]
 }, 30_000);
 
 it("announces the earlier no-output failed account and the successful fallback before the first output", async () => {
-    const modelId = "openai/gpt-5.6-sol";
+    const modelId = "openai/gpt-6.1-sol";
     const mode: MessageMode = {
         providerId: "router",
         modelId,

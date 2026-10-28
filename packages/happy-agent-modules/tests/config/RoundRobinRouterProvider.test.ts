@@ -104,7 +104,7 @@ describe("RoundRobinRouterProvider", () => {
 
     it("caches the terminal failure after every compatible account is exhausted", async () => {
         const accounts = {
-            first: scriptedAccount([authenticationFailure("signed out")]),
+            first: scriptedAccount([outOfTokens("first quota spent")]),
             second: scriptedAccount([outOfTokens("quota spent")]),
         };
         const provider = routedProvider(accounts, 0);
@@ -126,6 +126,53 @@ describe("RoundRobinRouterProvider", () => {
         expect(provider.spent("agent-b")).toBe(false);
         provider.acceptUserMessage("agent-a", "retry");
         expect(provider.spent("agent-a")).toBe(false);
+    });
+
+    it("reports a rejected sign-in over a spent account whichever was tried last", async () => {
+        for (const random of [0, 0.9]) {
+            const accounts = {
+                signedOut: scriptedAccount([
+                    authenticationFailure("sign-in could not be renewed"),
+                    normal("signed in again"),
+                ]),
+                spent: scriptedAccount([outOfTokens("quota spent")]),
+            };
+            const provider = routedProvider(accounts, random);
+            const session = await provider.session("agent-a", sessionOptions());
+            try {
+                const events = await eventsOf(session.run(createRootContext(), request));
+                expect(accounts.signedOut.runs).toBe(1);
+                expect(accounts.spent.runs).toBe(1);
+                expect(events.filter((event) => event.type === "done")).toEqual([
+                    {
+                        type: "done",
+                        state: "error",
+                        kind: "unknown",
+                        message: "sign-in could not be renewed",
+                        providerError: { type: "authentication" },
+                    },
+                ]);
+                expect(provider.failedAccount("agent-a")).toBe("signedOut");
+                expect(provider.spent("agent-a")).toBe(false);
+                // The cached failure says the same until the person acts.
+                expect(await eventsOf(session.run(createRootContext(), request))).toEqual([
+                    events.at(-1),
+                ]);
+                const compaction = await session.compact(createRootContext(), {
+                    context: request.context,
+                });
+                expect(compaction).toMatchObject({ message: "sign-in could not be renewed" });
+
+                // After signing in, the next message reaches the account again.
+                provider.acceptUserMessage("agent-a", "after-sign-in");
+                expect(provider.failedAccount("agent-a")).toBeUndefined();
+                expect(await textOf(session.run(createRootContext(), request))).toBe(
+                    "signed in again",
+                );
+            } finally {
+                await session.destroy();
+            }
+        }
     });
 
     it("does not call a pool that ended on a rejected sign-in spent", async () => {

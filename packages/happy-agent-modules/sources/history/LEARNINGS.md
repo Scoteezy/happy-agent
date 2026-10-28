@@ -258,6 +258,12 @@ version called every failed-over pool spent and hid sign-in problems. Its `reset
 earliest reset among the spent accounts. A retry reopens the smart route the way a sent message
 does, so its accounts are tried again.
 
+The failed attempt is the one the route reports, not always the last one. An exhausted pool
+reports a rejected sign-in ahead of a spent account, so History asks Config which account that is
+and describes its latest attempt; reading the last attempt paired a sign-in message with the
+spent account's out-of-tokens code. When that account failed before inference, there is no
+attempt, and Config's missing-credential failure names it instead.
+
 A spent subscription window must never read as a momentary throttle. Claude answers both with the
 same `rate_limit` error, and a spent weekly limit used to show "rate-limited, try again in a
 minute" when it would not reset for days. Providers now classify Claude's own limiter verdict as

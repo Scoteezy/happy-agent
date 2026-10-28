@@ -1720,6 +1720,25 @@ export class ConfigModule implements AgentModule {
         return provider instanceof RoundRobinRouterProvider && provider.spent(agentId);
     }
 
+    /**
+     * The account whose failure this agent's exhausted smart route reports. It is not always the
+     * last account tried: a rejected sign-in outranks a spent account, because signing in is what
+     * the person can do now. Undefined for any other provider or a route that is not exhausted.
+     */
+    async routeFailedAccount(
+        agentId: string,
+        providerId: string,
+        model: string | undefined,
+    ): Promise<string | undefined> {
+        if (this.configuration.values.providers[providerId]?.type !== "smart") return undefined;
+        if (!this.isProviderEnabled(providerId)) return undefined;
+        // Describing a failure must never fail it again; a route that cannot open says nothing.
+        const provider = await this.providers.resolve(providerId, model).catch(() => null);
+        return provider instanceof RoundRobinRouterProvider
+            ? provider.failedAccount(agentId)
+            : undefined;
+    }
+
     /** The accounts a smart route sends to, or null when the provider is not a smart route. */
     smartRouteAccounts(providerId: string): readonly string[] | null {
         const route = smartProviderRoute(this.configuration, providerId);

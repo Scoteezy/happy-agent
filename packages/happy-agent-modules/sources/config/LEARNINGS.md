@@ -383,6 +383,14 @@ exhaustion, that is the last account attempted. Session recreation, automatic co
 user-role messages, and duplicate delivery of the same accepted message do not reset failures.
 Candidate attempts remain bounded, and routing still cannot replay after visible output.
 
+An exhausted pool used to report whichever account it tried last. With one account signed out and
+the other spent, the same chat said "no account, resets in 5 days" on one turn and "isn't signed
+in" on the next, depending only on rotation order, and the first hid the fix that works now. When
+every account has failed and any of them rejected its sign-in, the route now reports that sign-in
+failure and names its account (`failedAccount`), so History describes that account's attempt. A
+pool ending on a sign-in is not spent; only an all-spent pool waits for a reset. A failure card
+naming each member's state would need an API.md change.
+
 ## Subagent filters do not change ordinary availability
 
 Provider-level `include_subagent_models` and `exclude_subagent_models` use exact model IDs and the
