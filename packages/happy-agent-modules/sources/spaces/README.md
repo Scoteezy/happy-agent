@@ -44,7 +44,8 @@ placement, the folded Distractions section, adding, moving, or removing its own 
 nested under a row; anything else is proposed. An operation that breaks a rule is dropped with a
 note and the rest still applies. Its prompt (revision 4) arranges the sidebar around the
 priorities the person stated: Now, Tell people, one row per neglected priority, Waiting on you,
-In hand, and one folded Later, within ten shown rows. It keeps its own conversation as a session
+In hand, and one folded Later, within ten shown rows, and since revision 5 cleans up aggressively:
+every proposal offers an Archive block, and sessions show only while they wait on the person. It keeps its own conversation as a session
 under Happy and takes out a top-level row of its own. Sessions stay hidden unless one needs the
 person, such as for a review, and a shown session counts toward the budget.
 One applied batch records one factual note in Prioritizing's own conversation.

@@ -34,6 +34,27 @@ rows, or a session under one, is now briefed with the agent's last text before i
 hundred characters each and batched as before. Agents' messages, lifecycle, and status from other
 sessions are still not forwarded.
 
+## Focus cleans up aggressively (revision 5)
+
+Kirill: "10 things on screen - rest is beyond human capacity to understand", subtasks "tend to
+explode and never cleaned out - be more agressive with cleanup in general, usually this stuff can
+be recovered anyway", but "DONT archive automatically". In a live run Focus nested every new
+subtask under Happy: the new-session notice told it to show the session "if the person should see
+it", the prompt showed any session changing code, the model reasoned that folded Happy hid them,
+and Kirill now unfolds Happy to reach Focus. Nothing took them out again, and sessions from a bulk
+Show subtasks counted as the person's, so Focus left them.
+
+The notice now states only that a session started under a row. The prompt shows a session only
+while it waits on the person, never for running code, under Happy too, and takes it out as soon as
+it stops waiting; sessions the person showed, bulk ones included, go out through the proposal,
+which is their consent. Ten shown rows is a real target. Every proposal ends with an Archive block
+of shipped, idle-over-48-hours, greeting-only, and superseded tasks, and Focus never archives by
+itself. Two proposals sat open 12 to 19 hours and grew to 13 and 20 versions, so `list_sidebar`
+now says when the open proposal was opened, and the prompt shrinks one undecided for about 12
+hours instead of adding to it. From research on project-named sections, only "never a section
+named for the project nearly all the work belongs to" and stable section IDs carried over; its
+topic-section rules conflict with the state-first layout.
+
 ## Prioritizing decides from its prompt; the daemon keeps integrity
 
 Evaluation replays kept finding proposals that did something unwanted (folded recent work, put

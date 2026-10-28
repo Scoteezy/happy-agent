@@ -15,6 +15,7 @@ const REVISIONS: readonly { readonly revision: number; readonly sha256: string }
     { revision: 2, sha256: "f40d25bc2aa5cb091a3b4bfe151cdbec77e10941f0b251521853e6fdb4f7d11f" },
     { revision: 3, sha256: "3be0ce92f1a88c95d86102bdf3796d04b74e2f64d95be34fe8aee15ed2f8dee7" },
     { revision: 4, sha256: "1c13954d59d979586cd4d915fe306d901b44514e8c872cf6a0e6dd233a408114" },
+    { revision: 5, sha256: "c87cbae3a88dc77de349217f7b9f8e51d5f1389546dfc46c2909572d0f4476c5" },
 ];
 
 it("arranges by the person's own priorities into the Focus layout within the budget", () => {
@@ -35,7 +36,7 @@ it("arranges by the person's own priorities into the Focus layout within the bud
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(text).toContain("At most 10 rows shown");
-    expect(text).toContain("at most 6 sections");
+    expect(text).toContain("At most 6 sections");
     expect(text).toContain("Over budget is not a resting state");
     expect(text).not.toContain("Doing nothing is usually right");
     // Shipping needs explicit evidence, and real work is never nagged about.
@@ -46,7 +47,26 @@ it("arranges by the person's own priorities into the Focus layout within the bud
     expect(text).toContain("Keep your conversation nested under Happy's row as a session");
     expect(text).not.toContain("immediately after Happy's row");
     // After the update, one bold reorganization through the ordinary proposal.
-    expect(text).toContain("make one bold proposal that rebuilds it into this layout");
+    expect(text).toContain("make one bold proposal that brings the sidebar to this layout");
+});
+
+it("cleans up aggressively, offering archives only through proposals", () => {
+    const text = formatPrioritizingInstructions();
+    expect(text).toContain("is a real target, not a guideline: fold everything else");
+    // Every proposal offers what qualifies, and Focus never archives by itself.
+    expect(text).toContain(
+        'Every proposal carries an <happy-section id="archive" label="Archive"/> block',
+    );
+    for (const reason of ["shipped:", "idle for over 48 hours", "greeting-only", "superseded:"])
+        expect(text).toContain(reason);
+    expect(text).toContain("You never archive anything yourself");
+    // A proposal that sits undecided shrinks rather than grows.
+    expect(text).toContain("revise it down to a smaller one");
+    // Sessions show only while they wait on the person, bulk-shown ones included.
+    expect(text).toContain("only while it waits on the person");
+    expect(text).toContain("Running or changing code alone is never a reason.");
+    expect(text).toContain("including ones a bulk Show subtasks put in");
+    expect(text).not.toContain("one changing code in a repository");
 });
 
 it("raises the instructions revision with every change to their text", () => {

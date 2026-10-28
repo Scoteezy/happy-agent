@@ -65,6 +65,14 @@ projects, while small steps stay inline and hidden subagents handle internal res
 subtask requests are honored within eligibility and depth limits. Second-level subtasks should
 usually be explicitly requested by the user. These are prompt defaults, not new runtime restrictions.
 
+## Coordinators archive done subtasks at once
+
+Kirill: subtasks "tend to explode and never cleaned out". Every coordinator (bot, task, or
+subtask) is now told to archive a subtask with `archive_subtask` in the turn it reports back once
+its work has landed or there was nothing to land, to have it push an unlanded diff to a branch
+first, and not to keep idle subtasks "in case", since history stays readable and branches stay in
+Git. This is prompt guidance only; nothing archives automatically.
+
 ## People arrange sibling subtasks themselves
 
 Users wanted to drag subtasks into their own order in the sidebar, but `subtasks` was fixed newest

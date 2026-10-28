@@ -139,6 +139,11 @@ describe("subtask roots", () => {
         const guidance = await hooks.instructions!(ctx, { agent: { id: "taskagent" } } as never);
         expect(guidance).toContain("Only bots, tasks, and subtasks create them");
         expect(guidance).toContain("at most two levels below a bot or task");
+        // Done subtasks are archived at once rather than kept around.
+        expect(guidance).toContain(
+            "Archive a subtask with archive_subtask in the same turn it reports back",
+        );
+        expect(guidance).toContain("ask it to push that to a branch first, then archive it");
         await expect(
             hooks.instructions!(ctx, { agent: { id: "plainroot" } } as never),
         ).resolves.toBe("");

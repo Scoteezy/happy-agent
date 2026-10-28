@@ -197,6 +197,27 @@ it("wakes Prioritizing with new work's first message, whoever wrote it", async (
     }
 });
 
+it("tells Prioritizing of a new session as a fact, without suggesting it be shown", async () => {
+    const h = await setup();
+    try {
+        type Created = Parameters<NonNullable<AgentModuleHooks["agentCreatedTransact"]>>;
+        await h.hooks.agentCreatedTransact!(
+            h.database.context,
+            {} as Created[1],
+            {
+                id: REVIEW,
+                metadata: { title: "Review patch" },
+            } as unknown as Created[2],
+        );
+        expect(await h.briefs()).toEqual([
+            `New session ${REVIEW} "Review patch" started under row spacestemaaaaaaaaaaaaaaa.`,
+        ]);
+    } finally {
+        await h.spaces.close();
+        h.database.close();
+    }
+});
+
 it("describes a session that stopped with its last reply", () => {
     expect(
         formatConversationBrief({

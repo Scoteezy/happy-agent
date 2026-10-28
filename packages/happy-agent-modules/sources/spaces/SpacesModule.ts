@@ -450,11 +450,12 @@ export class SpacesModule implements AgentModule {
             )
                 return;
             const title = agent.metadata?.["title"];
-            for (const owner of await this.#sessionOwners(ctx, agent.id))
+            // Only the fact: whether the person should see it is Prioritizing's call, from its prompt.
+            for (const row of await this.#sessionRows(ctx, agent.id))
                 await this.#queueSidebarBrief(
                     ctx,
-                    owner,
-                    `New session ${agent.id}${typeof title === "string" ? ` "${title}"` : ""} started under one of the person's rows. Give it an icon with set_space_icon, and show it under its parent with edit_sidebar if the person should see it.`,
+                    row.ownerUserId,
+                    `New session ${agent.id}${typeof title === "string" ? ` "${title}"` : ""} started under row ${row.id}.`,
                     { wake: true },
                 );
         },
@@ -1492,6 +1493,7 @@ export class SpacesModule implements AgentModule {
             artifactId: open.artifactId,
             version: latest.version,
             html: formatSpaceSidebar(latest.document),
+            opened: `${formatConversationAge(Date.now() - open.createdAt)} ago`,
             personSet: Object.entries(open.authorship ?? {})
                 .filter(([, aspects]) => Object.values(aspects).includes("person"))
                 .map(([id]) => id),
